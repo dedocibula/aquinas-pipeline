@@ -85,10 +85,10 @@ class TestCheckBahounek:
     def _write_all(self, dest: Path) -> None:
         dest.mkdir(parents=True)
         pairs = [
-            ("Summa-teologicka-Icast.html", "I"),
-            ("Summa-teologicka-IIcast-1dil.html", "I-II"),
-            ("Summa-teologicka-IIcast-2dil.html", "II-II"),
-            ("Summa-teologicka-IIIcast.html", "III"),
+            ("pars_I.html", "I"),
+            ("pars_I-II.html", "I-II"),
+            ("pars_II-II.html", "II-II"),
+            ("pars_III.html", "III"),
         ]
         for filename, pars in pairs:
             (dest / filename).write_text(_bahounek_html(pars), encoding="utf-8")
@@ -102,14 +102,14 @@ class TestCheckBahounek:
         monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "czech" / "bahounek"
         self._write_all(dest)
-        (dest / "Summa-teologicka-Icast.html").unlink()
+        (dest / "pars_I.html").unlink()
         assert verify_sources.check_bahounek() is False
 
     def test_fails_missing_coord_tags(self, tmp_path, monkeypatch):
         monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "czech" / "bahounek"
         self._write_all(dest)
-        (dest / "Summa-teologicka-Icast.html").write_text(
+        (dest / "pars_I.html").write_text(
             "<html><body><p>No coordinate tags here</p></body></html>",
             encoding="utf-8",
         )

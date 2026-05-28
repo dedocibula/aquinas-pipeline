@@ -91,23 +91,17 @@ def check_bahounek() -> bool:
     import re
 
     dest = ROOT / "sources" / "czech" / "bahounek"
-    expected = [
-        "Summa-teologicka-Icast.html",
-        "Summa-teologicka-IIcast-1dil.html",
-        "Summa-teologicka-IIcast-2dil.html",
-        "Summa-teologicka-IIIcast.html",
+    pars_checks = [
+        ("pars_I.html", "I"),
+        ("pars_I-II.html", "I-II"),
+        ("pars_II-II.html", "II-II"),
+        ("pars_III.html", "III"),
     ]
+    expected = [f for f, _ in pars_checks]
     missing_files = [f for f in expected if not (dest / f).exists()]
     if missing_files:
         _fail("Bahounek Czech", f"missing files: {missing_files}")
         return False
-
-    pars_checks = [
-        ("Summa-teologicka-Icast.html", "I"),
-        ("Summa-teologicka-IIcast-1dil.html", "I-II"),
-        ("Summa-teologicka-IIcast-2dil.html", "II-II"),
-        ("Summa-teologicka-IIIcast.html", "III"),
-    ]
     for filename, pars in pars_checks:
         text = (dest / filename).read_text(encoding="utf-8", errors="replace")
         pattern = re.compile(
