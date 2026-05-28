@@ -1,5 +1,5 @@
 """
-Tests for verify_sources.py check functions.
+Tests for src/verify.py check functions.
 All use temp directories — no live network or real source files required.
 """
 from __future__ import annotations
@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+import verify as verify_sources  # noqa: F401 — tests use verify_sources.* names
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +44,7 @@ def _dominican_html(code: str = "1001") -> str:
 
 class TestCheckLatin:
     def test_passes_with_sufficient_articles(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "latin"
         dest.mkdir(parents=True)
         for i in range(1, 10):
@@ -50,25 +52,22 @@ class TestCheckLatin:
                 _latin_html(f"I q. {i} a. {j}") for j in range(1, 300)
             )
             (dest / f"sth1{i:03d}.html").write_text(html, encoding="utf-8")
-        import verify_sources
         assert verify_sources.check_latin() is True
 
     def test_fails_with_no_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         (tmp_path / "sources" / "latin").mkdir(parents=True)
-        import verify_sources
         assert verify_sources.check_latin() is False
 
     def test_fails_below_article_threshold(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "latin"
         dest.mkdir(parents=True)
         (dest / "sth1001.html").write_text(_latin_html(), encoding="utf-8")
-        import verify_sources
         assert verify_sources.check_latin() is False
 
     def test_fails_missing_element_types(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "latin"
         dest.mkdir(parents=True)
         incomplete = "".join(
@@ -77,7 +76,6 @@ class TestCheckLatin:
         (dest / "sth1001.html").write_text(
             f"<html><body>{incomplete}</body></html>", encoding="utf-8"
         )
-        import verify_sources
         assert verify_sources.check_latin() is False
 
 
@@ -96,28 +94,25 @@ class TestCheckBahounek:
             (dest / filename).write_text(_bahounek_html(pars), encoding="utf-8")
 
     def test_passes_with_all_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         self._write_all(tmp_path / "sources" / "czech" / "bahounek")
-        import verify_sources
         assert verify_sources.check_bahounek() is True
 
     def test_fails_missing_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "czech" / "bahounek"
         self._write_all(dest)
         (dest / "Summa-teologicka-Icast.html").unlink()
-        import verify_sources
         assert verify_sources.check_bahounek() is False
 
     def test_fails_missing_coord_tags(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "czech" / "bahounek"
         self._write_all(dest)
         (dest / "Summa-teologicka-Icast.html").write_text(
             "<html><body><p>No coordinate tags here</p></body></html>",
             encoding="utf-8",
         )
-        import verify_sources
         assert verify_sources.check_bahounek() is False
 
 
@@ -125,9 +120,8 @@ class TestCheckBahounek:
 
 class TestCheckKrystal:
     def test_fails_with_no_docx(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         (tmp_path / "sources" / "czech" / "krystal").mkdir(parents=True)
-        import verify_sources
         assert verify_sources.check_krystal() is False
 
 
@@ -135,28 +129,25 @@ class TestCheckKrystal:
 
 class TestCheckDominican:
     def test_fails_with_no_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         (tmp_path / "sources" / "english" / "dominican").mkdir(parents=True)
-        import verify_sources
         assert verify_sources.check_dominican() is False
 
     def test_fails_below_count(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "english" / "dominican"
         dest.mkdir(parents=True)
         (dest / "1001.htm").write_text(_dominican_html(), encoding="utf-8")
-        import verify_sources
         assert verify_sources.check_dominican() is False
 
     def test_passes_with_sufficient_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "english" / "dominican"
         dest.mkdir(parents=True)
         for i in range(1, 615):
             (dest / f"{1000 + i}.htm").write_text(
                 _dominican_html(str(1000 + i)), encoding="utf-8"
             )
-        import verify_sources
         assert verify_sources.check_dominican() is True
 
 
@@ -170,26 +161,23 @@ class TestCheckFreddoso:
         (dest / "coverage_gaps.json").write_text(json.dumps(gaps), encoding="utf-8")
 
     def test_passes_with_toc_and_gaps(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         self._write_gaps(tmp_path / "sources" / "english" / "freddoso")
-        import verify_sources
         assert verify_sources.check_freddoso() is True
 
     def test_fails_missing_gaps_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "english" / "freddoso"
         dest.mkdir(parents=True)
         (dest / "TOC-I.html").write_text("<html/>", encoding="utf-8")
-        import verify_sources
         assert verify_sources.check_freddoso() is False
 
     def test_fails_missing_toc(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("verify_sources.ROOT", tmp_path)
+        monkeypatch.setattr("verify.ROOT", tmp_path)
         dest = tmp_path / "sources" / "english" / "freddoso"
         dest.mkdir(parents=True)
         gaps = {"available": [], "missing": [], "notes": "none"}
         (dest / "coverage_gaps.json").write_text(json.dumps(gaps), encoding="utf-8")
-        import verify_sources
         assert verify_sources.check_freddoso() is False
 
 
@@ -200,12 +188,10 @@ class TestCheckEnv:
         monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@localhost/x")
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-        import verify_sources
         assert verify_sources.check_env() is True
 
     def test_fails_on_missing_key(self, monkeypatch):
         monkeypatch.delenv("DATABASE_URL", raising=False)
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        import verify_sources
         assert verify_sources.check_env() is False
