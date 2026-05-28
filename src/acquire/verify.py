@@ -15,7 +15,7 @@ from pathlib import Path
 
 from acquire.latin import MIN_ARTICLE_COUNT
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _ok(label: str, detail: str = "") -> None:

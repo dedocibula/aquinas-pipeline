@@ -3,9 +3,7 @@ Tests for src/acquire/bahounek.py.
 All tests use fixture HTML — no live network calls.
 """
 
-import re
 import textwrap
-from pathlib import Path
 
 import pytest
 
@@ -16,7 +14,6 @@ from acquire.bahounek import (
     extract_section_urls,
     verify_coordinate_tags,
 )
-
 
 # ---------------------------------------------------------------------------
 # Coordinate tag detection
@@ -94,16 +91,16 @@ class TestCoordRegex:
 
 
 class TestVerifyCoordinateTags:
-    def test_passes_for_good_pars_I(self):
+    def test_passes_for_good_pars_i(self):
         verify_coordinate_tags(FIXTURE_GOOD_I, "http://example.com", "I")
 
-    def test_passes_for_good_pars_I_II(self):
+    def test_passes_for_good_pars_i_ii(self):
         verify_coordinate_tags(FIXTURE_GOOD_I_II, "http://example.com", "I-II")
 
-    def test_passes_for_good_pars_II_II(self):
+    def test_passes_for_good_pars_ii_ii(self):
         verify_coordinate_tags(FIXTURE_GOOD_II_II, "http://example.com", "II-II")
 
-    def test_passes_for_good_pars_III(self):
+    def test_passes_for_good_pars_iii(self):
         verify_coordinate_tags(FIXTURE_GOOD_III, "http://example.com", "III")
 
     def test_crashes_on_no_coords(self):

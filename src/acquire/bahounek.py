@@ -17,7 +17,6 @@ Segment-part suffixes: arg. N | sc. | co. | ad N | pr.
 
 import random
 import re
-import sys
 import time
 from pathlib import Path
 

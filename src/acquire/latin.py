@@ -24,7 +24,6 @@ basename from the URL (e.g. sth1001.html).
 """
 
 import re
-import sys
 import time
 from pathlib import Path
 

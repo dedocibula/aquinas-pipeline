@@ -6,13 +6,11 @@ No live network calls: all HTML is supplied as fixture strings.
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 
 import pytest
 
 from acquire.freddoso import (
-    BASE_URL,
     SUMMA_QUESTION_COUNTS,
     TOC_PAGES,
     _extract_question_numbers,
@@ -20,7 +18,6 @@ from acquire.freddoso import (
     fetch_toc_pages,
     write_coverage_gaps,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
