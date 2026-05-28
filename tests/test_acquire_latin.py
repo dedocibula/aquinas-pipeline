@@ -7,6 +7,7 @@ All tests use fixtures or inline HTML — no live network calls.
 import pytest
 
 from acquire.latin import (
+    MIN_ARTICLE_COUNT,
     _article_key,
     _classify,
     count_articles_in_html,
@@ -226,6 +227,28 @@ class TestVerifyStructuralElements:
         with pytest.raises(RuntimeError) as exc_info:
             verify_structural_elements(html, "missing_arg.html")
         assert "arg" in str(exc_info.value)
+
+
+class TestMinArticleCount:
+    """Regression: MIN_ARTICLE_COUNT must stay ≤ 2,663 (real count on corpusthomisticum.org).
+
+    The Supplementum is absent from this edition; the commonly-cited 2,669 figure
+    is wrong for this source. Any accidental increase above the real count would
+    make verify_download falsely fail on a correctly-downloaded corpus.
+    """
+
+    def test_threshold_does_not_exceed_real_count(self):
+        assert MIN_ARTICLE_COUNT <= 2_663, (
+            f"MIN_ARTICLE_COUNT={MIN_ARTICLE_COUNT} exceeds the real article count "
+            f"on corpusthomisticum.org (2,663). The Supplementum is absent from this "
+            f"source edition; raising the threshold above 2,663 will break verify_download."
+        )
+
+    def test_threshold_is_not_trivially_low(self):
+        assert MIN_ARTICLE_COUNT >= 2_600, (
+            f"MIN_ARTICLE_COUNT={MIN_ARTICLE_COUNT} is suspiciously low — "
+            f"it would pass a severely incomplete corpus."
+        )
 
     def test_missing_reply_raises(self):
         html = """\

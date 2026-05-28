@@ -132,7 +132,7 @@ def fetch_toc_pages(dest: Path) -> dict[str, list[int]]:
         resp = _get(toc_url)
         time.sleep(SLEEP)
 
-        toc_filename = dest / f"TOC-{part.replace('-', '')}.html"
+        toc_filename = dest / f"TOC-{part}.html"
         toc_filename.write_text(resp.text, encoding="utf-8")
 
         nums = _extract_question_numbers(
@@ -176,10 +176,10 @@ def build_coverage_gaps(
         elif not present:
             part_notes.append(f"{part} absent")
         else:
+            suffix = " ..." if len(absent) > 10 else ""
             part_notes.append(
                 f"{part} partial: {len(present)}/{total} questions "
-                f"(missing: {', '.join(str(q) for q in absent[:10])}"
-                + (" ..." if len(absent) > 10 else ")")
+                f"(missing: {', '.join(str(q) for q in absent[:10])}{suffix})"
             )
 
     notes = "; ".join(part_notes)

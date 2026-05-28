@@ -17,6 +17,7 @@ from acquire.freddoso import (
     TOC_PAGES,
     _extract_question_numbers,
     build_coverage_gaps,
+    fetch_toc_pages,
     write_coverage_gaps,
 )
 
@@ -255,6 +256,49 @@ class TestJsonOutputStructure:
         gaps = build_coverage_gaps({"I": [], "I-II": [], "II-II": [], "III": []})
         out = write_coverage_gaps(tmp_path, gaps)
         assert out.name == "coverage_gaps.json"
+
+    def test_notes_partial_coverage_closed_paren(self):
+        # Regression: "> 10 missing" path previously produced an unclosed "(".
+        gaps = build_coverage_gaps({"I": [], "I-II": list(range(1, 115)), "II-II": list(range(1, 190)), "III": list(range(1, 79))})
+        assert gaps["notes"].count("(") == gaps["notes"].count(")")
+
+
+class TestTocFilenames:
+    """Regression tests for the TOC filename collision bug.
+
+    "I-II".replace('-', '') == "III", so two parts wrote to the same file.
+    The fix uses the part name directly, which must produce 4 distinct filenames.
+    """
+
+    def _make_toc_html_for_part(self, entry: dict, n_questions: int) -> str:
+        links = "".join(
+            f'<a href="{entry["url_prefix"]}{entry["filename_prefix"]}{q:02d}.pdf">Q{q}</a>'
+            for q in range(1, n_questions + 1)
+        )
+        return f"<html><body>{links}</body></html>"
+
+    def test_four_distinct_filenames(self, tmp_path: Path, monkeypatch):
+        from unittest.mock import MagicMock, patch
+
+        def fake_get(url, **kwargs):
+            r = MagicMock()
+            r.status_code = 200
+            for entry in TOC_PAGES:
+                if url == entry["toc_url"]:
+                    r.text = self._make_toc_html_for_part(entry, 5)
+                    return r
+            r.text = "<html/>"
+            return r
+
+        with patch("acquire.freddoso.requests.get", side_effect=fake_get):
+            with patch("acquire.freddoso.time.sleep"):
+                fetch_toc_pages(tmp_path)
+
+        html_files = sorted(tmp_path.glob("TOC-*.html"))
+        names = [f.name for f in html_files]
+        assert len(names) == 4, f"Expected 4 TOC files, got: {names}"
+        assert names == ["TOC-I-II.html", "TOC-I.html", "TOC-II-II.html", "TOC-III.html"]
+        assert len(set(names)) == 4, "TOC filenames must be unique (no collision)"
 
 
 # ---------------------------------------------------------------------------

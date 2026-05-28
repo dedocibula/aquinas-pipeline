@@ -36,7 +36,12 @@ BASE_URL = "https://www.corpusthomisticum.org"
 
 DEST = Path(__file__).resolve().parents[2] / "sources" / "latin"
 
-MIN_ARTICLE_COUNT = 2_669
+# Corpus Thomisticum (corpusthomisticum.org) contains 2,663 unique article identifiers
+# across the 87 Summa Theologiae HTML files.  The commonly-cited figure of 2,669 comes
+# from editions that count differently or include slight textual variants; it does not
+# match this source.  We use actual_count − 10 as a lower bound to catch gross download
+# failures while tolerating minor future site edits.
+MIN_ARTICLE_COUNT = 2_653
 
 # TITLE attribute patterns for the four structural element types
 _ARG_RE = re.compile(r" arg\. \d+$")
@@ -120,8 +125,8 @@ def verify_structural_elements(html: str, filename: str) -> None:
     Crashes loudly with the exact filename and missing element type if any is absent.
     The check is deliberately loose (≥1 of each) because some pages contain only
     prologues or special question types with fewer structural divisions; the full
-    corpus check (across all 86 files) is where the ≥2,669 article count enforces
-    completeness.
+    corpus check (across all 87 files) is where the MIN_ARTICLE_COUNT threshold
+    enforces completeness.
     """
     titles = re.findall(r'<P\s+TITLE="([^"]+)"', html, re.IGNORECASE)
 
@@ -195,7 +200,7 @@ def download_all(dest: Path = DEST, *, skip_existing: bool = True) -> list[Path]
 def verify_download(dest: Path = DEST) -> None:
     """
     Post-download verification:
-    1. Count total unique articles across all files — must be ≥ 2,669.
+    1. Count total unique articles across all files — must be ≥ MIN_ARTICLE_COUNT.
     2. Verify every file parses cleanly.
     3. Verify a sample article from each of the four partes has all structural elements.
     """
