@@ -1,15 +1,1 @@
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '\\bgit commit\\b'; then echo 'Running ruff before commit...'; uv run ruff check src/ tests/ verify_sources.py || { echo 'Ruff check failed — commit blocked. Fix lint errors and retry.'; exit 1; }; fi; exit 0"
-          }
-        ]
-      }
-    ]
-  }
-}
+{}

@@ -86,7 +86,14 @@ uv run pytest              # run tests
 uv run ruff check src/ tests/ verify_sources.py   # lint
 ```
 
-Ruff runs automatically before every `git commit` via a Claude Code pre-commit hook.
+**Install the pre-commit hook** (once, after cloning):
+
+```bash
+bash scripts/install-hooks.sh
+```
+
+This symlinks `scripts/pre-commit` into `.git/hooks/`. On every `git commit`, ruff runs against
+staged `.py` files only — the commit is blocked if any lint errors are found.
 
 ## Milestone Status
 

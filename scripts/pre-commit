@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+
+if [ -z "$staged_py" ]; then
+  exit 0
+fi
+
+echo "ruff: checking staged Python files..."
+git diff --cached --name-only -z --diff-filter=ACM | grep -z '\.py$' | xargs -0 uv run ruff check || {
+  echo ""
+  echo "Ruff check failed — commit blocked. Fix lint errors and retry."
+  exit 1
+}
