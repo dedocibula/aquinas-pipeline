@@ -5,6 +5,34 @@ with its rationale. If you think something looks wrong, check here first.
 
 ---
 
+## Article and question titles stored as segments, not a separate table
+
+**Decision:** `question_title` and `article_title` are `segment` rows with their own
+`locator_path` (`I.q3`, `I.q3.a1`) and `element_type` ('question_title', 'article_title').
+Their text lives in `segment_text` alongside body segments.
+
+**Why:** titles are translatable units — the Slovak translation needs them to produce a
+complete, readable document (HTML preview, Word export). Storing them in a separate table
+would require a parallel schema for what is structurally identical content. The renderer
+reads all segment types uniformly via a single `ORDER BY locator_path` query.
+
+**Rendering:** `locator_path` ltree ordering naturally places `I.q3` before `I.q3.a1`
+before `I.q3.a1.arg1`, giving correct document order without any special-casing.
+
+**Source of titles:** Latin HTML (`<H2>/<H3>`) if available; Dominican English (`<h1>/<h2>`)
+is the reliable fallback since it always has clean heading markup. The renderer uses the
+first non-null language in sk→la→en order.
+
+---
+
+## No CHECK on `segment.element_type`
+
+**Decision:** `element_type` is a free-text label with no CHECK constraint. The comment documents the Summa values ('arg','sed_contra','respondeo','reply') but does not enforce them.
+
+**Why:** a CHECK would bake Summa structure into the schema. Contra Gentiles chapters have no `sed_contra`, no `reply` — different element types entirely. The value is owned by the parser that writes it, exactly like `locator_path`. Validation belongs in the parser (fail-loud), not in the DB constraint.
+
+---
+
 ## Opaque `locator_path` string, not typed columns
 
 **Decision:** `segment.locator_path` is plain TEXT ('I.q3.a1.arg2'), not three
