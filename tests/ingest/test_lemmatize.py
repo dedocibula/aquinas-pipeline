@@ -28,7 +28,7 @@ def _cltk_models_present() -> bool:
 
 def _morphodita_model_present() -> bool:
     models_dir = pathlib.Path(__file__).resolve().parents[2] / "models"
-    return any(models_dir.glob("czech-morfflex*.dict"))
+    return any(models_dir.rglob("czech-morfflex*.dict"))
 
 
 # ── Latin lemmatizer ─────────────────────────────────────────────────────────

@@ -66,7 +66,7 @@ def _czech_morpho():
             "ufal.morphodita not installed. Run: uv add ufal.morphodita"
         ) from exc
 
-    dicts = sorted(_MODELS_DIR.glob(_CZECH_DICT_GLOB))
+    dicts = sorted(_MODELS_DIR.rglob(_CZECH_DICT_GLOB))
     if not dicts:
         raise RuntimeError(
             f"Czech MorphoDiTa model not found in {_MODELS_DIR}. "

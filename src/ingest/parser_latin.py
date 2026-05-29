@@ -104,8 +104,9 @@ def _parse_title_full(title: str) -> tuple[str, str] | None:
     if m2:
         return f"{base}.arg{m2.group(1)}", "arg"
 
-    # s. c.
-    if re.fullmatch(r"s\.\s*c\.", suffix):
+    # s. c.  or  s. c. N  (some articles have multiple numbered sed_contra)
+    # Both map to the same sed_contra locator; parser merges text on collision.
+    if re.fullmatch(r"s\.\s*c\.(?:\s*\d+)?", suffix):
         return f"{base}.sed_contra", "sed_contra"
 
     # co.
@@ -174,15 +175,20 @@ def _extract_text(p_tag) -> str:
 
 
 def parse_html_file(html_path: Path) -> list[ParsedElement]:
-    """Parse all recognisable structural P elements from one CT HTML file."""
+    """Parse all recognisable structural P elements from one CT HTML file.
+
+    Multiple sed_contra paragraphs (s. c. 1, s. c. 2, …) share the same locator;
+    their texts are concatenated into one ParsedElement.
+    """
     content = html_path.read_text(encoding="utf-8", errors="replace")
     soup = BeautifulSoup(content, "lxml")
 
-    elements: list[ParsedElement] = []
+    # Use an ordered dict to merge same-locator entries (e.g. multiple sed_contra)
+    seen: dict[str, ParsedElement] = {}
+
     for p in soup.find_all("p"):
         title_attr = p.get("title", "").strip()
         if not title_attr:
-            # Also check uppercase TITLE (lxml normalises to lowercase)
             title_attr = p.get("TITLE", "").strip()
         if not title_attr:
             continue
@@ -199,9 +205,16 @@ def parse_html_file(html_path: Path) -> list[ParsedElement]:
             m = re.search(r"reply(\d+)$", locator)
             reply_num = int(m.group(1)) if m else None
 
-        elements.append(ParsedElement(locator, etype, text, reply_num))
+        if locator in seen:
+            # Merge: append text (handles numbered s. c. 1, s. c. 2, etc.)
+            existing = seen[locator]
+            seen[locator] = ParsedElement(
+                locator, etype, existing.latin_text + " " + text, reply_num
+            )
+        else:
+            seen[locator] = ParsedElement(locator, etype, text, reply_num)
 
-    return elements
+    return list(seen.values())
 
 
 # ── Article completeness check ────────────────────────────────────────────────
@@ -308,9 +321,13 @@ def _insert_article(
         arg_locator = f"{base}.arg{elem.reply_number}"
         arg_seg_id = locator_to_id.get(arg_locator)
         if arg_seg_id is None:
-            raise RuntimeError(
-                f"FAIL: reply {elem.locator!r} has no matching {arg_locator!r}"
+            # Some articles have extra replies with no matching objection
+            # (Aquinas replies to an implied or extended objection). Leave reply_to NULL.
+            print(
+                f"  NOTE: {elem.locator!r} has no matching {arg_locator!r} — reply_to left NULL",
+                flush=True,
             )
+            continue
         cur.execute(
             "UPDATE segment SET reply_to = %s WHERE segment_id = %s",
             (arg_seg_id, locator_to_id[elem.locator]),
@@ -399,13 +416,20 @@ def run(articles: list[str] | None = None) -> None:
             # Group by article locator
             grouped: dict[str, list] = {}
             for e in file_elems:
-                art = ".".join(e.locator.split(".")[:3])
-                if e.element_type in {"arg", "sed_contra", "respondeo", "reply", "preamble"}:
+                parts = e.locator.split(".")
+                # Only group proper article locators (3 parts: pars.qN.aM)
+                if len(parts) < 3 or not parts[2].startswith("a"):
+                    continue
+                art = ".".join(parts[:3])
+                if e.element_type in {"arg", "sed_contra", "respondeo", "reply"}:
                     grouped.setdefault(art, []).append(e)
             for art_loc, art_elems in grouped.items():
-                body = sum(1 for e in art_elems if e.element_type in {"arg", "sed_contra", "respondeo", "reply"})
-                all_counts[art_loc] = body
-        # Exclude already selected articles
+                body = len(art_elems)
+                # Only count articles with at least one of each required type
+                etypes = {e.element_type for e in art_elems}
+                if {"arg", "sed_contra", "respondeo", "reply"}.issubset(etypes):
+                    all_counts[art_loc] = body
+        # Exclude already selected articles; prefer complete articles with ≥4 segments
         remaining = {k: v for k, v in all_counts.items() if k not in all_elements}
         if remaining:
             short_loc = min(remaining, key=remaining.__getitem__)
