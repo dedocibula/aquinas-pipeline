@@ -11,6 +11,7 @@ Schema live. Latin parser + lemmatizers written and tested. 178 tests pass (7 sk
 |---|---|---|
 | M0 test cleanup | ✓ | Moved to `tests/acquire/`; all 136 pass |
 | Step 1 — Schema DDL | ✓ | `migrations/001_initial.sql` reviewed and applied |
+| Step 1 — Schema fixes | ✓ | `migrations/002_schema_fixes.sql`: gist index, UNIQUE on sense_rendering, lang CHECK, glossary_sense UNIQUE, term_usage indexes |
 | `src/ingest/db.py` | ✓ | DB connection helper |
 | `src/ingest/lemmatize.py` | ✓ | CLTK Latin lemmatizer working; MorphoDiTa waiting on model |
 | `tests/ingest/test_lemmatize.py` | ✓ | 7 Latin pass; 7 Czech skip until model available |
