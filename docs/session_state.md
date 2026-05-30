@@ -1,10 +1,10 @@
 # Session State
 
 ## Current Milestone
-M1 — **IN PROGRESS**
+M1 — **COMPLETE**
 
 ## Status
-Schema live. Latin parser + lemmatizers written and tested. 178 tests pass (7 skipped — MorphoDiTa model downloading).
+All 8 deliverables done. 256 tests pass. DB populated for 10 test articles.
 
 ## Completed This Session
 | Step | Status | Notes |
@@ -12,6 +12,14 @@ Schema live. Latin parser + lemmatizers written and tested. 178 tests pass (7 sk
 | M0 test cleanup | ✓ | Moved to `tests/acquire/`; all 136 pass |
 | Step 1 — Schema DDL | ✓ | `migrations/001_initial.sql` reviewed and applied |
 | Step 1 — Schema fixes | ✓ | `migrations/002_schema_fixes.sql`: gist index, UNIQUE on sense_rendering, lang CHECK, glossary_sense UNIQUE, term_usage indexes |
+| Step 2 — Krystal preseed | ✓ | 134 terms, 143 senses, 286 renderings; `style_profile.yaml` written |
+| Step 3 — Latin parser | ✓ | 10 articles, 130 segments (edge cases: I.q1.a4 short, I_II.q102.a3 long) |
+| Step 4 — Bahounek parser | ✓ | 104 Czech segment_text rows |
+| Step 5 — English ingest | ✓ | 127 English segment_text rows incl. question/article titles |
+| Step 6 — Lemmatizers | ✓ | CLTK Latin + MorphoDiTa Czech; 14 tests pass |
+| Step 7 — Resolver | ✓ | 174 term_usage rows: 95.4% single, 2.3% voted, 2.3% flagged |
+| Step 8 — Provenance report | ✓ | `reports/m1_provenance.txt` with real Slovak terms |
+| Slovak seeding | ✓ | All 143 sk placeholders replaced with verified Slovak (one-off, not retained) |
 | `src/ingest/db.py` | ✓ | DB connection helper |
 | `src/ingest/lemmatize.py` | ✓ | CLTK Latin lemmatizer working; MorphoDiTa waiting on model |
 | `tests/ingest/test_lemmatize.py` | ✓ | 7 Latin pass; 7 Czech skip until model available |
@@ -69,10 +77,8 @@ Schema live. Latin parser + lemmatizers written and tested. 178 tests pass (7 sk
 | Dominican English | `sources/english/dominican/` | 614 files |
 | Freddoso English | `sources/english/freddoso/` | 4 TOC files + `coverage_gaps.json` |
 
-## Exact Next Steps
-1. Wait for MorphoDiTa model download → run Czech lemmatizer tests
-2. Implement `src/ingest/krystal.py` (Krystal DOCX parser — peek at docx structure first)
-3. Implement `src/ingest/parser_bahounek.py`
-4. Implement `src/ingest/ingest_english.py`
-5. Run `parser_latin.py` against live DB to insert test article segments
-6. Run resolver + provenance report
+## Exact Next Step
+Begin **M2**: full corpus ingest (2,663 articles), coverage report.
+- Read `.claude/m2_scale.md` before writing any code
+- Latin parser already handles all pars; just remove TEST_ARTICLES filter
+- Bahounek + English parsers already query DB for articles — will auto-scale
