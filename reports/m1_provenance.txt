@@ -1,0 +1,278 @@
+ARTICLE: I.q1.a4
+  SEGMENT: I.q1.a4.arg1
+    scientia  →  vědění  [krystal_single, auto]
+  SEGMENT: I.q1.a4.arg2
+    scientia  →  vědění  [krystal_single, auto]
+  SEGMENT: I.q1.a4.respondeo
+    ratio     →  rozum   [krystal_single, auto]
+    scientia  →  vědění  [krystal_single, auto]
+  SEGMENT: I.q1.a4.sed_contra
+    scientia  →  vědění  [krystal_single, auto]
+
+ARTICLE: I.q13.a5
+  SEGMENT: I.q13.a5.arg1
+    aequivoce  →  ekvivokálně  [krystal_single, auto]
+    univoce    →  univokálně   [krystal_single, auto]
+  SEGMENT: I.q13.a5.arg2
+    univoce  →  univokálně  [krystal_single, auto]
+  SEGMENT: I.q13.a5.arg3
+    univoce  →  univokálně  [krystal_single, auto]
+  SEGMENT: I.q13.a5.reply1
+    ens      →  jsoucno              [krystal_single, auto]
+    species  →  intencionální obraz  [krystal_single, auto]
+  SEGMENT: I.q13.a5.reply4
+    aequivoce  →  ekvivokálně  [krystal_single, auto]
+    univoce    →  univokálně   [krystal_single, auto]
+  SEGMENT: I.q13.a5.respondeo
+    aequivoce   →  ekvivokálně  [krystal_single, auto]
+    essentia    →  esence       [krystal_single, auto]
+    forma       →  forma        [krystal_single, auto]
+    principium  →  princip      [krystal_single, auto]
+    ratio       →  rozum        [krystal_single, auto]
+    univoce     →  univokálně   [krystal_single, auto]
+    virtus      →  ctnost       [krystal_single, auto]
+  SEGMENT: I.q13.a5.sed_contra
+    aequivoce  →  ekvivokálně  [krystal_single, auto]
+    ratio      →  rozum        [krystal_single, auto]
+    sapientia  →  moudrost     [krystal_single, auto]
+    univoce    →  univokálně   [krystal_single, auto]
+
+ARTICLE: I.q3.a1
+  SEGMENT: I.q3.a1.arg2
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: I.q3.a1.arg3
+    virtus  →  ctnost  [krystal_single, auto]
+  SEGMENT: I.q3.a1.reply1
+    dilectio  →  milování  [krystal_single, auto]
+    essentia  →  esence    [krystal_single, auto]
+    virtus    →  ctnost    [krystal_single, auto]
+  SEGMENT: I.q3.a1.reply2
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: I.q3.a1.reply3
+    ratio   →  rozum   [krystal_single, auto]
+    virtus  →  ctnost  [krystal_single, auto]
+  SEGMENT: I.q3.a1.reply4
+    fortitudo  →  statečnost  [krystal_multi_flagged, needs_review]
+  SEGMENT: I.q3.a1.respondeo
+    anima  →  duše     [krystal_single, auto]
+    ens    →  jsoucno  [krystal_single, auto]
+
+ARTICLE: III.q1.a1
+  SEGMENT: III.q1.a1.arg1
+    essentia  →  esence  [krystal_single, auto]
+  SEGMENT: III.q1.a1.arg3
+    malitia  →  špatnost  [krystal_single, auto]
+  SEGMENT: III.q1.a1.reply1
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: III.q1.a1.reply2
+    natura  →  přirozenost  [krystal_single, auto]
+  SEGMENT: III.q1.a1.reply3
+    ars        →  umění         [krystal_single, auto]
+    iustitia   →  spravedlnost  [krystal_single, auto]
+    natura     →  přirozenost   [krystal_single, auto]
+    sapientia  →  moudrost      [krystal_single, auto]
+  SEGMENT: III.q1.a1.reply4
+    sensus  →  smysl   [krystal_single, auto]
+    virtus  →  ctnost  [krystal_single, auto]
+  SEGMENT: III.q1.a1.respondeo
+    anima   →  duše         [krystal_single, auto]
+    natura  →  přirozenost  [krystal_single, auto]
+    ratio   →  rozum        [krystal_single, auto]
+  SEGMENT: III.q1.a1.sed_contra
+    iustitia    →  spravedlnost  [krystal_single, auto]
+    principium  →  princip       [krystal_single, auto]
+    sapientia   →  moudrost      [krystal_single, auto]
+    virtus      →  ctnost        [krystal_single, auto]
+    vis         →  síla          [krystal_single, auto]
+
+ARTICLE: III.q75.a4
+  SEGMENT: III.q75.a4.arg1
+    ratio       →  rozum      [krystal_single, auto]
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: III.q75.a4.arg2
+    forma       →  forma      [krystal_single, auto]
+    materia     →  materie    [krystal_single, auto]
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: III.q75.a4.arg3
+    forma       →  forma      [krystal_single, auto]
+    materia     →  materie    [krystal_single, auto]
+    principium  →  princip    [krystal_single, auto]
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: III.q75.a4.reply1
+    forma       →  forma      [krystal_single, auto]
+    materia     →  materie    [krystal_single, auto]
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: III.q75.a4.reply2
+    forma       →  forma      [krystal_single, auto]
+    materia     →  materie    [krystal_single, auto]
+    substantia  →  substance  [krystal_single, auto]
+  SEGMENT: III.q75.a4.reply3
+    ens      →  jsoucno      [krystal_single, auto]
+    forma    →  forma        [krystal_single, auto]
+    materia  →  materie      [krystal_single, auto]
+    natura   →  přirozenost  [krystal_single, auto]
+    virtus   →  ctnost       [krystal_single, auto]
+  SEGMENT: III.q75.a4.respondeo
+    forma       →  forma                [krystal_single, auto]
+    habitus     →  habitus              [krystal_single, auto]
+    natura      →  přirozenost          [krystal_single, auto]
+    species     →  intencionální obraz  [krystal_single, auto]
+    substantia  →  substance            [krystal_single, auto]
+    virtus      →  ctnost               [krystal_single, auto]
+  SEGMENT: III.q75.a4.sed_contra
+    substantia  →  substance  [krystal_single, auto]
+
+ARTICLE: II_II.q23.a1
+  SEGMENT: II_II.q23.a1.arg1
+    amicitia  →  přátelství  [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.arg2
+    amicitia  →  přátelství  [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.arg3
+    amicitia    →  přátelství           [krystal_single, auto]
+    caritas     →  láska                [krystal_single, auto]
+    principium  →  princip              [krystal_single, auto]
+    species     →  intencionální obraz  [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.reply1
+    natura  →  přirozenost  [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.reply2
+    amicitia  →  přátelství  [krystal_single, auto]
+    caritas   →  láska       [krystal_single, auto]
+    dilectio  →  milování    [krystal_single, auto]
+    ratio     →  rozum       [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.reply3
+    amicitia  →  přátelství  [krystal_single, auto]
+    caritas   →  láska       [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.respondeo
+    amicitia        →  přátelství   [krystal_single, auto]
+    amor            →  láska        [krystal_single, auto]
+    concupiscentia  →  žádostivost  [krystal_multi_flagged, needs_review]
+    ratio           →  rozum        [krystal_single, auto]
+  SEGMENT: II_II.q23.a1.sed_contra
+    amicitia  →  přátelství  [krystal_single, auto]
+    caritas   →  láska       [krystal_single, auto]
+    ratio     →  rozum       [krystal_single, auto]
+
+ARTICLE: II_II.q64.a7
+  SEGMENT: II_II.q64.a7.arg2
+    providentia  →  prozřetelnost  [krystal_multi_voted, auto]
+      signals: cs=prozřetelnost→sense_106
+  SEGMENT: II_II.q64.a7.respondeo
+    per accidens  →  akcidentálně         [krystal_single, auto]
+    ratio         →  rozum                [krystal_single, auto]
+    species       →  intencionální obraz  [krystal_single, auto]
+    vis           →  síla                 [krystal_single, auto]
+
+ARTICLE: I_II.q102.a3
+  SEGMENT: I_II.q102.a3.arg1
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.arg12
+    oblatio  →  dar  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.arg7
+    oblatio  →  dar  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply10
+    gratia  →  milost  [krystal_multi_flagged, needs_review]
+    ratio   →  rozum   [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply11
+    species  →  intencionální obraz  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply12
+    fides      →  víra         [krystal_multi_voted, auto]
+      signals: cs=víra→sense_46
+    humanitas  →  lidskost     [krystal_single, auto]
+    natura     →  přirozenost  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply13
+    gratia    →  milost  [krystal_multi_voted, auto]
+      signals: cs=milost→sense_58
+    scientia  →  vědění  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply14
+    devotio    →  zbožná oddanost  [krystal_single, auto]
+    sapientia  →  moudrost         [krystal_single, auto]
+    voluptas   →  rozkoš           [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply2
+    castitas    →  čistota    [krystal_single, auto]
+    figura      →  tvar       [krystal_single, auto]
+    innocentia  →  nevinnost  [krystal_single, auto]
+    ratio       →  rozum      [krystal_single, auto]
+    virtus      →  ctnost     [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply7
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.reply8
+    amor        →  láska                [krystal_single, auto]
+    anima       →  duše                 [krystal_single, auto]
+    caritas     →  láska                [krystal_single, auto]
+    fortitudo   →  statečnost           [krystal_multi_voted, auto]
+      signals: cs=statečnost→sense_54
+    gratia      →  milost               [krystal_multi_flagged, needs_review]
+    ratio       →  rozum                [krystal_single, auto]
+    reverentia  →  důstojnost           [krystal_single, auto]
+    sapientia   →  moudrost             [krystal_single, auto]
+    species     →  intencionální obraz  [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.respondeo
+    figura      →  tvar     [krystal_single, auto]
+    oblatio     →  dar      [krystal_single, auto]
+    principium  →  princip  [krystal_single, auto]
+    ratio       →  rozum    [krystal_single, auto]
+  SEGMENT: I_II.q102.a3.sed_contra
+    sapientia  →  moudrost  [krystal_single, auto]
+
+ARTICLE: I_II.q5.a1
+  SEGMENT: I_II.q5.a1.arg1
+    natura  →  přirozenost  [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.arg2
+    anima    →  duše                 [krystal_single, auto]
+    species  →  intencionální obraz  [krystal_single, auto]
+    veritas  →  pravda               [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.arg3
+    natura  →  přirozenost  [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.reply1
+    natura      →  přirozenost  [krystal_single, auto]
+    principium  →  princip      [krystal_single, auto]
+    ratio       →  rozum        [krystal_single, auto]
+    sensus      →  smysl        [krystal_single, auto]
+    veritas     →  pravda       [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.reply2
+    phantasma  →  představa  [krystal_single, auto]
+    veritas    →  pravda     [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.reply3
+    natura  →  přirozenost  [krystal_single, auto]
+  SEGMENT: I_II.q5.a1.respondeo
+    essentia  →  esence   [krystal_single, auto]
+    habitus   →  habitus  [krystal_single, auto]
+
+ARTICLE: I_II.q94.a2
+  SEGMENT: I_II.q94.a2.arg1
+    habitus  →  habitus  [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.arg2
+    concupiscibilis  →  dychtivost   [krystal_single, auto]
+    natura           →  přirozenost  [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.arg3
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.reply1
+    natura  →  přirozenost  [krystal_single, auto]
+    ratio   →  rozum        [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.reply2
+    concupiscibilis  →  dychtivost   [krystal_single, auto]
+    irascibilis      →  vznětlivost  [krystal_single, auto]
+    natura           →  přirozenost  [krystal_single, auto]
+    ratio            →  rozum        [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.reply3
+    ratio  →  rozum  [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.respondeo
+    ens         →  jsoucno      [krystal_single, auto]
+    ignorantia  →  nevědomost   [krystal_single, auto]
+    natura      →  přirozenost  [krystal_single, auto]
+    per se      →  o sobě       [krystal_single, auto]
+    principium  →  princip      [krystal_single, auto]
+    ratio       →  rozum        [krystal_single, auto]
+    substantia  →  substance    [krystal_single, auto]
+    veritas     →  pravda       [krystal_single, auto]
+  SEGMENT: I_II.q94.a2.sed_contra
+    natura  →  přirozenost  [krystal_single, auto]
+
+SUMMARY
+  krystal_single               166  (95.4%)
+  krystal_multi_voted            4  (2.3%)
+  krystal_multi_flagged          4  (2.3%)
+  bahounek_derived               0  (0.0%)
+  english_derived                0  (0.0%)
+  model_proposed                 0  (0.0%)
+  TOTAL                        174

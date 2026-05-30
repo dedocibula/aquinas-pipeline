@@ -135,7 +135,6 @@ One row per distinct Latin term (lemma).
 |---|---|---|
 | `term_id` | serial PK | |
 | `latin_lemma` | text UNIQUE | dictionary form; the join target after lemmatization |
-| `pos` | text | part of speech |
 | `is_multiword` | bool DEFAULT false | true for 'actus essendi', 'per se', etc. |
 | `notes` | text | |
 
@@ -157,14 +156,22 @@ One row per (term, meaning). A term may have several senses.
 | `term_id` | FK→glossary_term | |
 | `context_label` | text NULL | e.g. 'as passion'; NULL = default/only sense |
 | `status` | text | CHECK IN ('proposed','flagged','approved') |
-| `version` | int DEFAULT 1 | increments on any change to approved rendering or status |
+| `version` | int DEFAULT 1 | increments ONLY when sense_rendering(sk).content changes |
 
 Populated by: Krystal preseed — single-sense term → one row (context_label NULL);
 multi-sense term → multiple labelled rows. Gap terms → status='proposed'.
 Read by: resolver (pick the right sense); translator (M4, via term_usage); reviewer (M3).
 
+**`version` is owned by content, not by status.**
+Bump version only when `sense_rendering(sk).content` actually changes — check the diff
+before incrementing. A status transition (proposed→approved) with no Slovak content
+change does NOT bump version and does NOT trigger re-runs. This prevents spurious
+re-runs when a reviewer confirms a correct guess without changing the term.
+
 **`version` is the invalidation engine.** It pairs with `term_usage.sense_version_used`
 to answer "which translations are stale?" with one cheap query. See `term_usage`.
+Any correction to any approved Slovak term — even months into the project — triggers
+a precise, cheap re-run of exactly the affected segments.
 
 A term with multiple senses must NEVER silently flatten to one Slovak term.
 It either evidence-resolves to a confirmed sense or is flagged.
@@ -182,14 +189,16 @@ Per-language realization of a sense. One row per (sense, lang, source).
 | column | type | notes |
 |---|---|---|
 | `sense_id` | FK→glossary_sense | |
-| `lang` | text | 'la','cs','en','sk' |
-| `lemma` | text NULL | lemma form (for matching; esp. cs anchor and la lemma) |
+| `lang` | text | 'cs','en','sk' — no 'la' row; Latin lemma lives in glossary_term |
+| `lemma` | text NULL | lemmatized form; only populated for lang='cs' (the reverse-map key) |
 | `content` | text | the term/cue/approved-translation text |
 | `source_id` | FK→source | |
 | | | INDEX on (lang, lemma) |
 
-Populated by: Krystal preseed writes la-lemma, cs-anchor, en-cue, sk-approved rows
-per sense. Reviewer (M3) writes/overwrites sk row with source=human.
+Populated by: Krystal preseed writes three rows per sense: cs-anchor, en-cue,
+sk-approved. No la row — the Latin lemma already lives in `glossary_term.latin_lemma`
+and is never looked up via sense_rendering. Reviewer (M3) writes/overwrites sk row
+with source=human.
 Read by: resolver (cs + en rows are disambiguation evidence keys);
 translator (M4, sk row is the hard constraint injected into the prompt).
 
@@ -206,13 +215,16 @@ The invalidation backbone. One row per occurrence of a term in a segment.
 |---|---|---|
 | `usage_id` | serial PK | |
 | `segment_id` | FK→segment | where this term was found |
-| `term_id` | FK→glossary_term | which term |
-| `sense_id` | FK→glossary_sense | which sense was chosen |
+| `sense_id` | FK→glossary_sense | which sense was chosen; join to glossary_sense.term_id for the term |
 | `sense_version_used` | int | the sense.version live when this segment was translated |
 | `resolution_method` | text | see values below |
 | `confidence` | text | CHECK IN ('auto','needs_review') |
 | `signals` | jsonb | evidence used, e.g. {"cs":"dychtění→202","en":"desire→202"} |
 | `status` | text | CHECK IN ('guessed','confirmed') |
+
+`term_id` is omitted — derivable via `sense_id → glossary_sense.term_id`.
+If query performance requires it later, add it back as an explicit denormalization
+with a trigger to prevent sense_id/term_id drift.
 
 Populated by: resolver (M1/M2), one row per term per segment.
 Read by: provenance report (M1); coverage report (M2); re-run engine (M4); translator (M4).
@@ -292,7 +304,6 @@ CREATE VIEW v_sense AS
     gs.context_label,
     gs.status,
     gs.version,
-    max(r.content) FILTER (WHERE r.lang='la')                         AS latin_lemma_display,
     max(r.lemma)   FILTER (WHERE r.lang='cs')                         AS czech_lemma,
     max(r.content) FILTER (WHERE r.lang='cs')                         AS czech_term,
     max(r.content) FILTER (WHERE r.lang='en')                         AS english_cue,
