@@ -27,6 +27,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import bs4
 from bs4 import BeautifulSoup
@@ -176,8 +177,14 @@ def insert_bahounek_texts(
     conn,
     elements: list[BahouněkElement],
     src_id: int,
+    gap_log: IO[str] | None = None,
 ) -> int:
-    """Insert segment_text(cs, bahounek) rows. Returns count inserted."""
+    """Insert segment_text(cs, bahounek) rows. Returns count inserted.
+
+    When gap_log is provided, missing segments are logged and skipped rather
+    than raising. When gap_log is None, a missing segment raises RuntimeError
+    (M1 test-mode behaviour — fail loudly).
+    """
     cur = conn.cursor()
     inserted = 0
 
@@ -189,6 +196,9 @@ def insert_bahounek_texts(
         )
         row = cur.fetchone()
         if row is None:
+            if gap_log is not None:
+                gap_log.write(f"[GAP] locator={elem.locator} reason=no_segment_match\n")
+                continue
             raise RuntimeError(
                 f"FAIL: Bahounek coordinate {elem.locator!r} has no matching segment. "
                 "Run parser_latin.py first."
@@ -206,6 +216,59 @@ def insert_bahounek_texts(
 
     cur.close()
     return inserted
+
+
+def write_bahounek_coverage(conn, gap_log: IO[str]) -> None:
+    """Append coverage summary and per-locator missing-Czech map to gap_log.
+
+    Writes:
+      COVERAGE: segments_with_czech=N total_body_segments=M pct=X%
+      MISSING_CZECH: locator=... (one line per body segment without Czech text)
+    """
+    body_types = ("arg", "sed_contra", "respondeo", "reply")
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(DISTINCT st.segment_id) FROM segment_text st "
+            "JOIN segment s ON st.segment_id = s.segment_id "
+            "WHERE st.lang = 'cs' AND s.element_type = ANY(%s)",
+            (list(body_types),),
+        )
+        segments_with_czech = cur.fetchone()[0]
+
+        cur.execute(
+            "SELECT count(*) FROM segment WHERE element_type = ANY(%s)",
+            (list(body_types),),
+        )
+        total_body_segments = cur.fetchone()[0]
+
+        # Per-locator map: body segments without Czech text
+        cur.execute(
+            """
+            SELECT s.locator_path::text
+            FROM segment s
+            WHERE s.element_type = ANY(%s)
+              AND NOT EXISTS (
+                  SELECT 1 FROM segment_text st
+                  WHERE st.segment_id = s.segment_id AND st.lang = 'cs'
+              )
+            ORDER BY s.locator_path
+            """,
+            (list(body_types),),
+        )
+        missing_locators = [row[0] for row in cur.fetchall()]
+
+    if total_body_segments > 0:
+        pct = round(100.0 * segments_with_czech / total_body_segments, 1)
+    else:
+        pct = 0.0
+
+    gap_log.write(
+        f"COVERAGE: segments_with_czech={segments_with_czech} "
+        f"total_body_segments={total_body_segments} "
+        f"pct={pct}%\n"
+    )
+    for loc in missing_locators:
+        gap_log.write(f"MISSING_CZECH: locator={loc}\n")
 
 
 # ── Spot-check ────────────────────────────────────────────────────────────────
@@ -236,7 +299,7 @@ def _articles_from_db() -> list[str]:
             return [row[0] for row in cur.fetchall()]
 
 
-def run(articles: list[str] | None = None) -> None:
+def run(articles: list[str] | None = None, gap_log_path: Path | None = None) -> None:
     target_articles = articles or _articles_from_db() or TEST_ARTICLES
 
     print("Parsing Bahounek HTML for test articles...")
@@ -246,9 +309,16 @@ def run(articles: list[str] | None = None) -> None:
     spot_check(elements)
 
     print("\nInserting into DB...")
-    with get_conn() as conn:
-        src = source_id(conn, "bahounek")
-        count = insert_bahounek_texts(conn, elements, src)
+    if gap_log_path is not None:
+        with gap_log_path.open("a", encoding="utf-8") as gap_log:
+            with get_conn() as conn:
+                src = source_id(conn, "bahounek")
+                count = insert_bahounek_texts(conn, elements, src, gap_log=gap_log)
+                write_bahounek_coverage(conn, gap_log)
+    else:
+        with get_conn() as conn:
+            src = source_id(conn, "bahounek")
+            count = insert_bahounek_texts(conn, elements, src)
 
     print(f"Done. {count} segment_text(cs, bahounek) rows inserted.")
 

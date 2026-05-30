@@ -4,9 +4,13 @@ Tests for src/ingest/resolver.py — pure resolution logic, no DB.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from ingest.resolver import (
+    _call_deepseek,
     _resolve_multi,
     _resolve_single,
+    get_api_stats,
     mask_spans,
     phrase_match,
 )
@@ -177,3 +181,69 @@ class TestResolveMulti:
         r2 = _resolve_multi(term, "dychtění", None, cs_rank=20, en_rank=30)
         assert r1.method == r2.method
         assert r1.sense["sense_id"] == r2.sense["sense_id"]
+
+
+# ── _call_deepseek ────────────────────────────────────────────────────────────
+
+class TestCallDeepseek:
+    def test_returns_proposed_term(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+        fake_response = {
+            "choices": [{"message": {"content": "rozum"}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 5},
+        }
+
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value.status_code = 200
+            mock_post.return_value.raise_for_status = lambda: None
+            mock_post.return_value.json = lambda: fake_response
+
+            result = _call_deepseek("ratio", "context text", "rozum", "reason")
+
+        assert result == "rozum"
+
+    def test_accumulates_api_stats(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+        initial_calls = get_api_stats()["calls"]
+
+        fake_response = {
+            "choices": [{"message": {"content": "duša"}}],
+            "usage": {"prompt_tokens": 80, "completion_tokens": 3},
+        }
+
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status = lambda: None
+            mock_post.return_value.json = lambda: fake_response
+
+            _call_deepseek("anima", "context", "", "soul")
+
+        stats = get_api_stats()
+        assert stats["calls"] == initial_calls + 1
+        assert stats["output_tokens"] >= 3
+
+    def test_returns_stub_on_api_error(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.side_effect = Exception("network error")
+            result = _call_deepseek("corpus", "context", "", "")
+
+        assert result == "[model_proposed: corpus]"
+
+    def test_increments_calls_on_error(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        before = get_api_stats()["calls"]
+
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.side_effect = Exception("timeout")
+            _call_deepseek("spiritus", "context", "", "")
+
+        assert get_api_stats()["calls"] == before + 1
+
+    def test_raises_without_api_key(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        import pytest
+        with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+            _call_deepseek("ratio", "context", "", "")

@@ -1,8 +1,8 @@
 """
-Term resolver — Step 7 of M1.
+Term resolver — M1/M2.
 
-Processes every body segment in the test set and writes term_usage rows
-with full provenance. No model API calls; gap terms get a stub placeholder.
+Processes every body segment and writes term_usage rows with full provenance.
+M2 addition: real DeepSeek V3 API calls for model_proposed gap terms.
 
 Order of operations (strict per spec):
   1. Phrase-match multiword glossary_term entries first.
@@ -15,10 +15,15 @@ Order of operations (strict per spec):
      - Not in Krystal:
          Bahounek cs available  → bahounek_derived,  confidence=needs_review
          English en available   → english_derived,   confidence=needs_review
-         nothing                → model_proposed,    confidence=needs_review
+         nothing                → model_proposed,    confidence=needs_review (DeepSeek V3)
   4. Write term_usage rows.
 
 Determinism: all intermediate collections are sorted; no randomness.
+
+DeepSeek env vars:
+  DEEPSEEK_API_KEY  — required when model_proposed terms exist
+  DEEPSEEK_API_URL  — default: https://api.deepseek.com/v1/chat/completions
+  DEEPSEEK_MODEL    — default: deepseek-chat
 
 Run:
   uv run python -m ingest.resolver
@@ -27,12 +32,14 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg2.extras
+import requests
 
 from ingest.db import get_conn, source_id, work_id
 from ingest.lemmatize import lemmatize_czech, lemmatize_latin
@@ -42,11 +49,81 @@ ROOT = Path(__file__).resolve().parents[2]
 # Authority rank threshold for a "strong" signal (Krystal=10, Bahounek=20)
 _STRONG_RANK_THRESHOLD = 20
 
-# Placeholder for model_proposed gap terms (no LLM in M1)
-_MODEL_STUB = "[model_proposed — stub: M2 will call DeepSeek V3]"
-
 # Element types to run the resolver on (skip title/preamble segments)
 _BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply"}
+
+# ── DeepSeek API ──────────────────────────────────────────────────────────────
+
+_api_stats: dict[str, int] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+_DEEPSEEK_URL = os.environ.get(
+    "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
+)
+_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+
+def _call_deepseek(
+    latin_lemma: str,
+    context_snippet: str,
+    czech_ref: str,
+    english_ref: str,
+) -> str:
+    """Propose a Slovak term for a gap lemma via DeepSeek V3.
+
+    Returns a proposed single Slovak word/term, or a fallback stub on error.
+    """
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY is not set. "
+            "Export it before running the resolver with model_proposed terms."
+        )
+
+    prompt = (
+        f"You are a Slovak theological terminologist. "
+        f"Propose a single Slovak term (one word or short phrase) for the Latin lemma '{latin_lemma}'.\n"
+        f"Context (Latin): {context_snippet[:300]}\n"
+    )
+    if czech_ref:
+        prompt += f"Czech reference: {czech_ref[:200]}\n"
+    if english_ref:
+        prompt += f"English reference: {english_ref[:200]}\n"
+    prompt += (
+        "Respond with ONLY the Slovak term — no explanation, no punctuation, no quotes. "
+        "If unsure, give your best single-word guess."
+    )
+
+    _api_stats["calls"] += 1  # count every attempt, including failures
+    try:
+        resp = requests.post(
+            _DEEPSEEK_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": _DEEPSEEK_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 20,
+                "temperature": 0.0,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        usage = data.get("usage", {})
+        _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
+        _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
+
+        term = data["choices"][0]["message"]["content"].strip()
+        return term or f"[model_proposed: {latin_lemma}]"
+
+    except Exception as exc:
+        print(f"  [WARN] DeepSeek API error for {latin_lemma!r}: {exc}", flush=True)
+        return f"[model_proposed: {latin_lemma}]"
+
+
+def get_api_stats() -> dict[str, int]:
+    """Return accumulated DeepSeek API usage stats."""
+    return dict(_api_stats)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -282,8 +359,11 @@ def _ensure_glossary_term(conn, lemma: str) -> int:
         return cur.fetchone()[0]
 
 
-def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_krystal: int) -> dict:
-    """Create a proposed glossary_sense + sense_rendering for a gap term."""
+def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_model: int) -> dict:
+    """Create a proposed glossary_sense + sense_rendering for a gap term.
+
+    sense_rendering is attributed to src_model (source.code='model'), not Krystal.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -309,13 +389,16 @@ def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_krystal: i
             VALUES (%s, 'sk', %s, %s)
             ON CONFLICT (sense_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
             """,
-            (sense_id, sk_proposal, src_krystal),
+            (sense_id, sk_proposal, src_model),
         )
+
+        cur.execute("SELECT version FROM glossary_sense WHERE sense_id = %s", (sense_id,))
+        version = cur.fetchone()[0]
 
     return {
         "sense_id": sense_id,
         "context_label": None,
-        "version": 1,
+        "version": version,
         "cs_lemma": None,
         "cs_content": None,
         "en_cue": None,
@@ -333,7 +416,7 @@ def resolve_segment(
     conn,
     cs_rank: int,
     en_rank: int,
-    src_krystal: int,
+    src_model: int,
 ) -> list[Resolution]:
     """Resolve all terms in one segment. Returns list of Resolutions."""
     latin = segment["latin"] or ""
@@ -402,18 +485,24 @@ def resolve_segment(
         else:
             method = "model_proposed"
 
-        # M1 stub: Latin lemma as placeholder (reviewable in M3).
-        # M2: call DeepSeek V3 for model_proposed; derive from aligned Czech/English for others.
-        sk_proposal = f"[{method}: {lemma}]"
+        if method == "model_proposed":
+            sk_proposal = _call_deepseek(
+                lemma,
+                segment["latin"][:300] if segment.get("latin") else "",
+                segment.get("czech") or "",
+                segment.get("english") or "",
+            )
+        else:
+            sk_proposal = f"[{method}: {lemma}]"
 
         term_id = _ensure_glossary_term(conn, lemma)
-        sense = _gap_sense(conn, term_id, method, sk_proposal, src_krystal)
+        sense = _gap_sense(conn, term_id, method, sk_proposal, src_model)
 
         gap_term = {"term_id": term_id, "latin_lemma": lemma, "is_multiword": False, "senses": [sense]}
         # Do NOT add to lemma_to_term: that dict is for Krystal terms only.
-        # Subsequent segments will re-call _ensure_glossary_term/_gap_sense,
-        # which are idempotent. Adding here would cause the next segment to
-        # resolve via _resolve_single (krystal_single) instead of the gap method.
+        # Subsequent segments will re-call _ensure_glossary_term/_gap_sense (idempotent).
+        # Adding here would cause the next segment to resolve via krystal_single instead
+        # of the correct gap method.
 
         resolutions.append(Resolution(
             term=gap_term,
@@ -459,7 +548,7 @@ def run() -> None:
     print("Loading glossary and segments...")
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
-        src_k = source_id(conn, "krystal")
+        src_model = source_id(conn, "model")
         cs_rank = _source_rank(conn, "bahounek")
         en_rank = _source_rank(conn, "dominican")
 
@@ -471,15 +560,29 @@ def run() -> None:
         print(f"  Segments: {len(segments)} body segments to resolve")
 
         total_usages = 0
-        for seg in segments:
+        for i, seg in enumerate(segments, 1):
             resolutions = resolve_segment(
                 seg, multiword_terms, lemma_to_term,
-                conn, cs_rank, en_rank, src_k,
+                conn, cs_rank, en_rank, src_model,
             )
             n = _write_term_usage(conn, seg["segment_id"], resolutions)
             total_usages += n
+            if i % 500 == 0 or i == len(segments):
+                print(f"  {i}/{len(segments)} segments resolved", flush=True)
 
         print(f"\nDone. {total_usages} term_usage rows written across {len(segments)} segments.")
+
+    stats = get_api_stats()
+    if stats["calls"] > 0:
+        cost_usd = (stats["input_tokens"] * 0.00014 + stats["output_tokens"] * 0.00028) / 1000
+        print(
+            f"DeepSeek API: {stats['calls']} calls, "
+            f"{stats['input_tokens']} input + {stats['output_tokens']} output tokens, "
+            f"~${cost_usd:.4f}"
+        )
+        stats_path = ROOT / "reports" / "m2_api_stats.json"
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
+        stats_path.write_text(json.dumps({**stats, "cost_usd": round(cost_usd, 6)}, indent=2))
 
 
 if __name__ == "__main__":

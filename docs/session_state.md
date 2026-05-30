@@ -1,74 +1,70 @@
 # Session State
 
 ## Current Milestone
-M1 — **COMPLETE**
+M2 — **IN PROGRESS** — pipeline code complete; full corpus run pending
 
 ## Status
-All 8 deliverables done. 256 tests pass. DB populated for 10 test articles.
+313 tests pass. All M2 code written and tested. Full corpus ingest not yet executed (Step 1 pause point: review anomaly log before proceeding).
 
 ## Completed This Session
 | Step | Status | Notes |
 |---|---|---|
-| M0 test cleanup | ✓ | Moved to `tests/acquire/`; all 136 pass |
-| Step 1 — Schema DDL | ✓ | `migrations/001_initial.sql` reviewed and applied |
-| Step 1 — Schema fixes | ✓ | `migrations/002_schema_fixes.sql`: gist index, UNIQUE on sense_rendering, lang CHECK, glossary_sense UNIQUE, term_usage indexes |
-| Step 2 — Krystal preseed | ✓ | 134 terms, 143 senses, 286 renderings; `style_profile.yaml` written |
-| Step 3 — Latin parser | ✓ | 10 articles, 130 segments (edge cases: I.q1.a4 short, I_II.q102.a3 long) |
-| Step 4 — Bahounek parser | ✓ | 104 Czech segment_text rows |
-| Step 5 — English ingest | ✓ | 127 English segment_text rows incl. question/article titles |
-| Step 6 — Lemmatizers | ✓ | CLTK Latin + MorphoDiTa Czech; 14 tests pass |
-| Step 7 — Resolver | ✓ | 174 term_usage rows: 95.4% single, 2.3% voted, 2.3% flagged |
-| Step 8 — Provenance report | ✓ | `reports/m1_provenance.txt` with real Slovak terms |
-| Slovak seeding | ✓ | All 143 sk placeholders replaced with verified Slovak (one-off, not retained) |
-| `src/ingest/db.py` | ✓ | DB connection helper |
-| `src/ingest/lemmatize.py` | ✓ | CLTK Latin lemmatizer working; MorphoDiTa waiting on model |
-| `tests/ingest/test_lemmatize.py` | ✓ | 7 Latin pass; 7 Czech skip until model available |
-| `src/ingest/parser_latin.py` | ✓ | TITLE-attribute parser; all locator/element logic tested |
-| `tests/ingest/test_parser_latin.py` | ✓ | 35/35 pass |
+| M2 planning | ✓ | DB state verified, idempotency confirmed, plan approved |
+| decisions.md | ✓ | Prefect deferred to M4+ decision recorded |
+| `parser_latin.py` — `run_full()` | ✓ | Scans all sth*.html, logs anomalies, never crashes |
+| `parser_bahounek.py` — gap logging | ✓ | `insert_bahounek_texts` logs gaps instead of raising; `write_bahounek_coverage` added |
+| `ingest_english.py` — missing file skip | ✓ | `[SKIP]` print + continue instead of raise |
+| `resolver.py` — source_id bug fix | ✓ | Gap stubs now use `src_model` (source_id=7), not `src_krystal` |
+| `resolver.py` — DeepSeek V3 | ✓ | `_call_deepseek()` wired for model_proposed terms; `_api_stats` tracks cost |
+| `report_m2.py` | ✓ | Coverage report + dedup roll-up CSV |
+| `pipeline.py` | ✓ | Single CLI: `--step latin/bahounek/english/resolve/report` or `--all` |
 
-## Key Decisions (permanent record)
+## Key Decisions (this session)
+- **Prefect deferred to M4+**: M2 uses plain `pipeline.py` CLI; Prefect adds value only at the translation loop (remote machine, checkpoint/resume). See decisions.md.
+- **Gap stub source_id fixed**: M1 bug — gap `sense_rendering` rows were attributed to `krystal` source. M2 corrects this to `model` source via `ON CONFLICT DO UPDATE` on re-run.
+- **DeepSeek via `requests`**: No new SDK dependency. Uses existing `requests` package.
 
-### Latin
-- Site serves HTML not XML (87 files via `iopera.html` index; TITLE attributes encode structure)
-- Real article count: 2,663 (Supplementum absent from this edition; `MIN_ARTICLE_COUNT = 2_653`)
-- ltree label constraint: `-` not allowed → `I-II` → `I_II`, `II-II` → `II_II`
+## Files Modified / Created (M2)
+| File | Change |
+|---|---|
+| `src/ingest/parser_latin.py` | Added `run_full(anomaly_log, latin_dir)` + `_group_elements_by_article()` |
+| `src/ingest/parser_bahounek.py` | Gap logging; `write_bahounek_coverage()`; `run(gap_log_path)` |
+| `src/ingest/ingest_english.py` | Missing file: skip instead of raise |
+| `src/ingest/resolver.py` | `src_model` fix; `_call_deepseek()`; `_api_stats`; `get_api_stats()` |
+| `src/ingest/report_m2.py` | New: coverage report + dedup roll-up |
+| `src/ingest/pipeline.py` | New: single CLI orchestrator |
+| `tests/ingest/test_parser_latin.py` | Added `TestGroupElementsByArticle`, `TestRunFull` |
+| `tests/ingest/test_parser_bahounek.py` | Added gap logging + coverage tests |
+| `tests/ingest/test_parser_english.py` | New: missing file skip tests |
+| `tests/ingest/test_resolver.py` | Added `TestCallDeepseek` |
+| `tests/ingest/test_report_m2.py` | New: coverage report + rollup tests |
+| `tests/ingest/test_pipeline.py` | New: step dispatch + --all tests |
+| `.claude/decisions.md` | Prefect deferred to M4+ entry |
+| `docs/session_state.md` | This file |
 
-### Bahounek
-- 4 monolithic HTML files saved as `pars_{part}.html`; no Supplementum
-- `k N` reply format exists alongside `ad N` — M1 parser must handle both
+## Exact Next Step
+**Run the full corpus:**
+```bash
+# Step 1 — Latin ingest (PAUSE and review anomaly log after)
+uv run python -m ingest.pipeline --step latin
 
-### Freddoso
-- Articles are PDFs; coverage map in `coverage_gaps.json`
-- Coverage: I (119/119), I-II (114/114), II-II (189/189), III (78/90 — q79–q90 missing)
+# Review reports/m2_parser_anomalies.txt
+# Categorise anomalies by type, fix by category, then:
 
-### Dominican Province
-- 614 pages; code scheme: pars-digit + zero-padded question number
-- Has clean `<h1>` / `<h2>` heading markup for question_title and article_title
+# Steps 2+3 — Bahounek + English (can run in parallel)
+uv run python -m ingest.pipeline --step bahounek
+uv run python -m ingest.pipeline --step english
 
-### Schema
-- `element_type` has no CHECK constraint — open text field, parser-owned
-- `glossary_term` has no `pos` column
-- `sense_rendering` has no `la` row (Latin lemma in `glossary_term.latin_lemma`)
-- `term_usage` has no `term_id` (derivable via sense_id)
-- `glossary_sense.version` bumps ONLY on `sense_rendering(sk).content` changes
-- Title segments (`question_title`, `article_title`) stored as segment rows at `I.q3`, `I.q3.a1`
+# Step 4 — Resolve (requires DEEPSEEK_API_KEY)
+export DEEPSEEK_API_KEY=...
+uv run python -m ingest.pipeline --step resolve
 
-### MorphoDiTa
-- Czech model: `czech-morfflex-pdt-161115.dict` — downloading from LINDAT (61MB zip)
-- Model path: `models/czech-morfflex-pdt-161115/` (extracted from zip)
+# Steps 5+6 — Report
+uv run python -m ingest.pipeline --step report
+cat reports/m2_coverage.txt
+```
 
-## HTML File Map (test articles)
-| Article | HTML File | Pars Raw |
-|---|---|---|
-| I.q3.a1, I.q13.a5 | sth1003.html | I |
-| I_II.q5.a1 | sth2001.html | I-II |
-| I_II.q94.a2 | sth2094.html | I-II |
-| II_II.q23.a1 | sth3023.html | II-II |
-| II_II.q64.a7 | sth3061.html | II-II |
-| III.q1.a1 | sth4001.html | III |
-| III.q75.a4 | sth4074.html | III |
-
-## Sources on Disk
+## Sources on Disk (unchanged)
 | Source | Location | Status |
 |---|---|---|
 | Latin (Corpus Thomisticum) | `sources/latin/` | 87 files, 2,663 articles |
@@ -76,9 +72,3 @@ All 8 deliverables done. 256 tests pass. DB populated for 10 test articles.
 | Krystal docx | `sources/czech/krystal/` | 258 paragraphs |
 | Dominican English | `sources/english/dominican/` | 614 files |
 | Freddoso English | `sources/english/freddoso/` | 4 TOC files + `coverage_gaps.json` |
-
-## Exact Next Step
-Begin **M2**: full corpus ingest (2,663 articles), coverage report.
-- Read `.claude/m2_scale.md` before writing any code
-- Latin parser already handles all pars; just remove TEST_ARTICLES filter
-- Bahounek + English parsers already query DB for articles — will auto-scale

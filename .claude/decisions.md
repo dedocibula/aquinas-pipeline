@@ -163,6 +163,14 @@ a viable alternative to LangGraph; the decision is deferred.
 
 ---
 
+## Prefect deferred to M4+
+
+**Decision:** No Prefect in M0–M2. Pipeline orchestration uses a plain `src/ingest/pipeline.py` CLI with `--step` flags.
+
+**Why:** M0–M2 are linear batch pipelines — parse → resolve → report. No cycles, no remote execution, no retry-on-API-rate-limit. Prefect's value realises at M4 (translation loop): deploying the translator on a separate GPU machine, checkpointing between articles, recovering from API failures mid-corpus. Introducing it before the loop shape is designed adds ceremony with zero benefit. Add at M4 when the translation flow is defined and remote deployment is needed.
+
+---
+
 ## No vectors in M0–M2 (vector discovery deferred)
 
 **Decision:** no embeddings or vector search in M0–M2. Deferred in favour of a

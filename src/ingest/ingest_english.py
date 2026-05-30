@@ -33,7 +33,8 @@ from ingest.parser_latin import TEST_ARTICLES
 
 ROOT = Path(__file__).resolve().parents[2]
 DOMINICAN_DIR = ROOT / "sources" / "english" / "dominican"
-FREDDOSO_GAPS = ROOT / "sources" / "english" / "freddoso" / "coverage_gaps.json"
+FREDDOSO_DIR = ROOT / "sources" / "english" / "freddoso"
+FREDDOSO_GAPS = FREDDOSO_DIR / "coverage_gaps.json"
 
 _PARS_DIGIT: dict[str, int] = {
     "I": 1,
@@ -41,6 +42,27 @@ _PARS_DIGIT: dict[str, int] = {
     "II_II": 3,
     "III": 4,
 }
+
+# Questions for which Freddoso article HTML files are available (loaded lazily)
+_FREDDOSO_AVAILABLE: set[str] | None = None
+
+
+def _load_freddoso_available() -> set[str]:
+    global _FREDDOSO_AVAILABLE
+    if _FREDDOSO_AVAILABLE is None:
+        if FREDDOSO_GAPS.exists():
+            import json
+            data = json.loads(FREDDOSO_GAPS.read_text(encoding="utf-8"))
+            _FREDDOSO_AVAILABLE = set(data.get("available", []))
+        else:
+            _FREDDOSO_AVAILABLE = set()
+    return _FREDDOSO_AVAILABLE
+
+
+def _freddoso_file(pars_ltree: str, q_num: int) -> Path:
+    """Return expected Freddoso per-question HTML path (may not exist)."""
+    digit = _PARS_DIGIT[pars_ltree]
+    return FREDDOSO_DIR / f"{digit}{q_num:03d}.html"
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
@@ -154,10 +176,18 @@ def _parse_article(
     return elements
 
 
-def parse_english_for_articles(article_locators: list[str]) -> list[EnglishElement]:
-    """Parse Dominican HTML for the given article locators."""
-    # Group by (pars_ltree, q_num) to load each file once
+def parse_english_for_articles(
+    article_locators: list[str],
+    coverage_gap_log: list[str] | None = None,
+) -> list[EnglishElement]:
+    """Parse English HTML for the given article locators.
+
+    Uses Freddoso where a per-question HTML file is available, Dominican Province
+    otherwise. Appends coverage gap notes to coverage_gap_log if provided.
+    """
     from collections import defaultdict
+
+    freddoso_available = _load_freddoso_available()
 
     by_file: dict[tuple[str, int], list[int]] = defaultdict(list)
     for loc in article_locators:
@@ -171,20 +201,35 @@ def parse_english_for_articles(article_locators: list[str]) -> list[EnglishEleme
     seen_question_titles: set[str] = set()
 
     for (pars_ltree, q_num), article_nums in sorted(by_file.items()):
-        html_path = _question_file(pars_ltree, q_num)
+        q_loc = f"{pars_ltree}.q{q_num}"
+        q_key = q_loc.replace("_", "-")  # coverage_gaps.json uses "I-II.q1" style
+
+        # Prefer Freddoso if article file exists; fall back to Dominican
+        freddoso_path = _freddoso_file(pars_ltree, q_num)
+        if freddoso_path.exists():
+            html_path = freddoso_path
+            src_label = "freddoso"
+        else:
+            html_path = _question_file(pars_ltree, q_num)
+            src_label = "dominican"
+            # Log coverage gap if Freddoso was listed as available but file isn't present
+            if coverage_gap_log is not None and q_key in freddoso_available:
+                coverage_gap_log.append(
+                    f"[FREDDOSO_MISSING] {q_loc} listed in coverage_gaps.json but "
+                    f"file not found; fell back to Dominican"
+                )
+
         if not html_path.exists():
-            raise RuntimeError(
-                f"FAIL: Dominican file not found: {html_path}. "
-                "Was M0 download complete?"
-            )
+            print(f"  [SKIP] missing {src_label} file: {html_path.name}", flush=True)
+            if coverage_gap_log is not None:
+                coverage_gap_log.append(f"[NO_ENGLISH] {q_loc} no {src_label} file available")
+            continue
         content = html_path.read_text(encoding="utf-8", errors="replace")
         soup = BeautifulSoup(content, "lxml")
 
-        q_loc = f"{pars_ltree}.q{q_num}"
         for a_num in sorted(article_nums):
             elems = _parse_article(soup, pars_ltree, q_num, a_num)
             for elem in elems:
-                # Deduplicate question_title across articles in same question
                 if elem.locator == q_loc:
                     if q_loc in seen_question_titles:
                         continue
@@ -242,9 +287,16 @@ def _articles_from_db() -> list[str]:
 def run(articles: list[str] | None = None) -> None:
     target_articles = articles or _articles_from_db() or TEST_ARTICLES
 
-    print("Parsing Dominican Province English for test articles...")
-    elements = parse_english_for_articles(target_articles)
+    print("Parsing English (Freddoso-first, Dominican fallback) for articles...")
+    coverage_gaps: list[str] = []
+    elements = parse_english_for_articles(target_articles, coverage_gap_log=coverage_gaps)
     print(f"  Found {len(elements)} English text elements")
+
+    if coverage_gaps:
+        gap_log_path = ROOT / "reports" / "m2_english_gaps.txt"
+        gap_log_path.parent.mkdir(parents=True, exist_ok=True)
+        gap_log_path.write_text("\n".join(coverage_gaps) + "\n", encoding="utf-8")
+        print(f"  {len(coverage_gaps)} coverage gaps → {gap_log_path}")
 
     # Spot-check titles
     print("\nTitle spot-check:")

@@ -5,14 +5,18 @@ No DB, no live files.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ingest.parser_latin import (
     ParsedElement,
     _article_locator,
     _check_article,
+    _group_elements_by_article,
     _parse_title_full,
     _question_locator,
+    run_full,
 )
 
 # ── _parse_title_full ─────────────────────────────────────────────────────────
@@ -190,3 +194,200 @@ class TestCheckArticle:
             _elem("reply"),
         ]
         _check_article("I.q3.a1", elements)  # no exception
+
+
+# ── _group_elements_by_article ────────────────────────────────────────────────
+
+def _pelm(locator: str, etype: str = "arg") -> ParsedElement:
+    return ParsedElement(locator, etype, "text", None)
+
+
+class TestGroupElementsByArticle:
+    def test_groups_by_article(self):
+        elems = [
+            _pelm("I.q3.a1.arg1", "arg"),
+            _pelm("I.q3.a1.respondeo", "respondeo"),
+            _pelm("I.q3.a2.arg1", "arg"),
+        ]
+        grouped = _group_elements_by_article(elems)
+        assert set(grouped.keys()) == {"I.q3.a1", "I.q3.a2"}
+        assert len(grouped["I.q3.a1"]) == 2
+        assert len(grouped["I.q3.a2"]) == 1
+
+    def test_skips_non_article_locators(self):
+        # preamble is at question level (pars.qN.preamble), not article level
+        elems = [
+            _pelm("I.q3.preamble", "preamble"),
+            _pelm("I.q3.a1.arg1", "arg"),
+        ]
+        grouped = _group_elements_by_article(elems)
+        assert "I.q3.a1" in grouped
+        assert "I.q3" not in grouped
+
+    def test_skips_question_level_locators(self):
+        # question_title is at pars.qN level (2 parts only)
+        elems = [
+            _pelm("I.q3", "question_title"),
+            _pelm("I.q3.a1.respondeo", "respondeo"),
+        ]
+        grouped = _group_elements_by_article(elems)
+        assert list(grouped.keys()) == ["I.q3.a1"]
+
+    def test_empty_input(self):
+        assert _group_elements_by_article([]) == {}
+
+    def test_multiple_pars(self):
+        elems = [
+            _pelm("I.q1.a1.arg1", "arg"),
+            _pelm("I_II.q5.a1.respondeo", "respondeo"),
+            _pelm("III.q75.a4.reply1", "reply"),
+        ]
+        grouped = _group_elements_by_article(elems)
+        assert set(grouped.keys()) == {"I.q1.a1", "I_II.q5.a1", "III.q75.a4"}
+
+
+# ── run_full (anomaly logging) ────────────────────────────────────────────────
+
+def _make_latin_html(tmp_path: Path, filename: str, titles: list[str]) -> Path:
+    """Create a minimal CT HTML file with the given TITLE attributes."""
+    paragraphs = "\n".join(f'<p title="{t}">Text for {t}.</p>' for t in titles)
+    html = f"<html><body>{paragraphs}</body></html>"
+    p = tmp_path / filename
+    p.write_text(html, encoding="utf-8")
+    return p
+
+
+class TestRunFull:
+    def test_logs_anomaly_and_continues(self, tmp_path, monkeypatch):
+        """run_full catches per-article structural errors, logs them, continues."""
+        import ingest.parser_latin as pl
+
+        # sth0001: complete article (I.q1.a1)
+        _make_latin_html(tmp_path, "sth0001.html", [
+            "I q. 1 a. 1 arg. 1",
+            "I q. 1 a. 1 s. c.",
+            "I q. 1 a. 1 co.",
+            "I q. 1 a. 1 ad 1",
+        ])
+        # sth0002: incomplete article (I.q2.a1 — missing sed_contra/respondeo/reply)
+        _make_latin_html(tmp_path, "sth0002.html", [
+            "I q. 2 a. 1 arg. 1",
+        ])
+
+        inserted = []
+
+        def fake_insert(conn, locator, elems, wid, src):
+            inserted.append(locator)
+
+        class FakeConn:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_get_conn():
+            yield FakeConn()
+
+        monkeypatch.setattr(pl, "_insert_article", fake_insert)
+        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
+        monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
+
+        log_path = tmp_path / "anomalies.txt"
+        result = run_full(log_path, latin_dir=tmp_path)
+
+        assert result["total"] == 2
+        assert result["ingested"] == 1
+        assert result["anomalies"] == 1
+        assert inserted == ["I.q1.a1"]
+
+        log_content = log_path.read_text()
+        assert "[ANOMALY]" in log_content
+        assert "I.q2.a1" in log_content
+        assert "sth0002.html" in log_content
+
+    def test_skips_index_file(self, tmp_path, monkeypatch):
+        """sth0000.html is never parsed."""
+        import ingest.parser_latin as pl
+
+        # sth0000 has content — must be ignored
+        (tmp_path / "sth0000.html").write_text("<html><body></body></html>")
+        # sth0001: complete article
+        _make_latin_html(tmp_path, "sth0001.html", [
+            "I q. 1 a. 1 arg. 1",
+            "I q. 1 a. 1 s. c.",
+            "I q. 1 a. 1 co.",
+            "I q. 1 a. 1 ad 1",
+        ])
+
+        inserted = []
+
+        def fake_insert(conn, locator, elems, wid, src):
+            inserted.append(locator)
+
+        class FakeConn:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_get_conn():
+            yield FakeConn()
+
+        monkeypatch.setattr(pl, "_insert_article", fake_insert)
+        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
+        monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
+
+        log_path = tmp_path / "anomalies.txt"
+        run_full(log_path, latin_dir=tmp_path)
+
+        assert inserted == ["I.q1.a1"]
+
+    def test_creates_log_directory(self, tmp_path, monkeypatch):
+        """Log parent directories are created if they don't exist."""
+        import ingest.parser_latin as pl
+
+        class FakeConn:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_get_conn():
+            yield FakeConn()
+
+        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
+        monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
+
+        empty_dir = tmp_path / "empty_latin"
+        empty_dir.mkdir()
+        nested_log = tmp_path / "reports" / "nested" / "anomalies.txt"
+        run_full(nested_log, latin_dir=empty_dir)
+        assert nested_log.exists()
+
+    def test_returns_zero_counts_for_empty_corpus(self, tmp_path, monkeypatch):
+        import ingest.parser_latin as pl
+
+        class FakeConn:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_get_conn():
+            yield FakeConn()
+
+        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
+        monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
+
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        result = run_full(tmp_path / "log.txt", latin_dir=empty_dir)
+        assert result == {"total": 0, "ingested": 0, "anomalies": 0}

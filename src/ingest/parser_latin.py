@@ -1,7 +1,7 @@
 """
 Latin parser for Corpus Thomisticum HTML files.
 
-Parses the 10 test articles, writes:
+Parses articles from CT HTML files, writes:
   - segment rows (body + placeholder title rows)
   - segment_text(la, corpus_thomisticum) rows for body elements
 
@@ -13,8 +13,8 @@ HTML format: <P TITLE="I q. 3 a. 1 arg. 1"> — TITLE attribute encodes coordina
 ltree label rules: only [A-Za-z0-9_] allowed.
   Pars mapping:   I → I,  I-II → I_II,  II-II → II_II,  III → III
 
-Run:
-  uv run python -m ingest.parser_latin
+Run (test set):    uv run python -m ingest.parser_latin
+Run (full corpus): uv run python -m ingest.parser_latin --full
 """
 
 from __future__ import annotations
@@ -453,12 +453,103 @@ def run(articles: list[str] | None = None) -> None:
     print(f"\nDone. {len(all_elements)} articles inserted.")
 
 
+def _group_elements_by_article(
+    elements: list[ParsedElement],
+) -> dict[str, list[ParsedElement]]:
+    """Group ParsedElements by article locator (pars.qN.aM).
+
+    Filters out non-article elements (preambles, question-level locators).
+    """
+    grouped: dict[str, list[ParsedElement]] = {}
+    for e in elements:
+        parts = e.locator.split(".")
+        if len(parts) < 3 or not parts[2].startswith("a"):
+            continue
+        art = ".".join(parts[:3])
+        grouped.setdefault(art, []).append(e)
+    return grouped
+
+
+def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
+    """Scan all sth*.html files and ingest every article.
+
+    Structural anomalies are logged to anomaly_log and skipped — the run never
+    crashes on a bad article. Only genuine I/O or DB errors propagate.
+
+    latin_dir overrides LATIN_DIR (used in tests).
+    Returns {"total": N, "ingested": N, "anomalies": N}.
+    """
+    anomaly_log.parent.mkdir(parents=True, exist_ok=True)
+    source_dir = latin_dir or LATIN_DIR
+
+    # Collect all articles grouped by locator across all HTML files.
+    # Use a dict so later files can overwrite duplicates (deterministic: last wins).
+    all_articles: dict[str, tuple[list[ParsedElement], str]] = {}  # locator → (elems, filename)
+
+    html_files = sorted(source_dir.glob("sth*.html"))
+    for html_file in html_files:
+        if html_file.stem == "sth0000":
+            continue
+        file_elems = parse_html_file(html_file)
+        for art_loc, art_elems in _group_elements_by_article(file_elems).items():
+            all_articles[art_loc] = (art_elems, html_file.name)
+
+    total = len(all_articles)
+    ingested = 0
+    anomalies = 0
+
+    with anomaly_log.open("w", encoding="utf-8") as log_f, get_conn() as conn:
+        wid = work_id(conn, "summa_articulus")
+        src = source_id(conn, "corpus_thomisticum")
+
+        for i, (locator, (elems, filename)) in enumerate(sorted(all_articles.items()), 1):
+            try:
+                _check_article(locator, elems)
+                _insert_article(conn, locator, elems, wid, src)
+                ingested += 1
+            except Exception as exc:
+                exc_type = type(exc).__name__
+                excerpt = str(exc)[:120].replace("\n", " ")
+                log_f.write(
+                    f"[ANOMALY] locator={locator} file={filename} "
+                    f"type={exc_type} excerpt={excerpt!r}\n"
+                )
+                anomalies += 1
+
+            if i % 100 == 0 or i == total:
+                print(
+                    f"  {i}/{total} articles processed  "
+                    f"({ingested} ingested, {anomalies} anomalies)",
+                    flush=True,
+                )
+
+    return {"total": total, "ingested": ingested, "anomalies": anomalies}
+
+
 if __name__ == "__main__":
-    print("Parsing Corpus Thomisticum HTML for test articles...")
-    print()
-    print("Article segment counts:")
-    try:
-        run()
-    except RuntimeError as exc:
-        print(f"\n{exc}", file=sys.stderr)
-        sys.exit(1)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Latin corpus parser")
+    parser.add_argument("--full", action="store_true", help="Ingest full corpus (all sth*.html)")
+    args = parser.parse_args()
+
+    if args.full:
+        print("Parsing full Corpus Thomisticum (all articles)...")
+        ROOT_PATH = Path(__file__).resolve().parents[2]
+        log_path = ROOT_PATH / "reports" / "m2_parser_anomalies.txt"
+        result = run_full(log_path)
+        print(
+            f"\nDone. {result['ingested']}/{result['total']} articles ingested. "
+            f"{result['anomalies']} anomalies → {log_path}"
+        )
+        if result["anomalies"]:
+            print("Review anomaly log before proceeding to Bahounek/English ingest.")
+    else:
+        print("Parsing Corpus Thomisticum HTML for test articles...")
+        print()
+        print("Article segment counts:")
+        try:
+            run()
+        except RuntimeError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            sys.exit(1)
