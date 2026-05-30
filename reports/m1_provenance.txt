@@ -268,11 +268,13 @@ ARTICLE: I_II.q94.a2
   SEGMENT: I_II.q94.a2.sed_contra
     natura  →  prirodzenosť  [krystal_single, auto]
 
-SUMMARY
+SUMMARY — Krystal resolutions
   krystal_single               166  (95.4%)
   krystal_multi_voted            4  (2.3%)
   krystal_multi_flagged          4  (2.3%)
-  bahounek_derived               0  (0.0%)
-  english_derived                0  (0.0%)
-  model_proposed                 0  (0.0%)
   TOTAL                        174
+
+GAP TERMS recorded in term_usage (proposed — pending M3 review):
+  bahounek_derived             926 unique lemmas
+  english_derived               63 unique lemmas
+  model_proposed                 2 unique lemmas

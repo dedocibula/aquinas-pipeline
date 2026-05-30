@@ -57,13 +57,25 @@ def _extract_article(locator: str) -> str:
     return ".".join(parts[:3]) if len(parts) >= 3 else locator
 
 
+_GAP_METHODS = {"bahounek_derived", "english_derived", "model_proposed"}
+
+
 def generate_report(usages: list[dict]) -> str:
-    """Build the full provenance report text."""
+    """Build the full provenance report text.
+
+    Per-segment detail shows only Krystal-sourced resolutions (readable by
+    a non-engineer). Gap terms (bahounek/english/model derived) are collected
+    into a separate section at the end — they are stubs pending M3 review.
+    """
     lines: list[str] = []
 
-    # Group by article then segment
+    # Partition by gap vs Krystal
+    krystal_usages = [r for r in usages if r["resolution_method"] not in _GAP_METHODS]
+    gap_usages = [r for r in usages if r["resolution_method"] in _GAP_METHODS]
+
+    # Group Krystal usages by article then segment
     articles: dict[str, dict[str, list[dict]]] = {}
-    for row in usages:
+    for row in krystal_usages:
         art = _extract_article(row["locator"])
         seg = row["locator"]
         articles.setdefault(art, {}).setdefault(seg, []).append(row)
@@ -98,21 +110,30 @@ def generate_report(usages: list[dict]) -> str:
 
         lines.append("")
 
-    # Summary
-    total = sum(method_counts.values())
-    lines.append("SUMMARY")
+    # Gap terms — count unique lemmas per method; omit from per-segment detail
+    # to keep the report readable. Full list is in term_usage table.
+    gap_counts: dict[str, set[str]] = {}
+    for row in gap_usages:
+        gap_counts.setdefault(row["resolution_method"], set()).add(row["latin_lemma"])
+
+    # Krystal-only summary (totals to 100% of Krystal-resolved terms)
+    krystal_total = sum(method_counts.values())
+    lines.append("SUMMARY — Krystal resolutions")
     for method in [
         "krystal_single",
         "krystal_multi_voted",
         "krystal_multi_flagged",
-        "bahounek_derived",
-        "english_derived",
-        "model_proposed",
     ]:
         count = method_counts.get(method, 0)
-        pct = f"{100 * count / total:.1f}%" if total else "0.0%"
+        pct = f"{100 * count / krystal_total:.1f}%" if krystal_total else "0.0%"
         lines.append(f"  {method:<26}  {count:>4}  ({pct})")
-    lines.append(f"  {'TOTAL':<26}  {total:>4}")
+    lines.append(f"  {'TOTAL':<26}  {krystal_total:>4}")
+    lines.append("")
+    lines.append("GAP TERMS recorded in term_usage (proposed — pending M3 review):")
+    for method in sorted(gap_counts):
+        lines.append(f"  {method:<26}  {len(gap_counts[method]):>4} unique lemmas")
+    if not gap_counts:
+        lines.append("  (none)")
 
     return "\n".join(lines)
 

@@ -59,6 +59,10 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
     Each sense dict: {sense_id, context_label, cs_lemma, en_cue, sk_content, version}
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # Only load 'approved' senses into the Krystal lookup.
+        # 'proposed' senses belong to gap terms and must continue to be resolved
+        # via gap methods (bahounek_derived etc.) on every run, not promoted to
+        # krystal_single just because they were created in a previous run.
         cur.execute("""
             SELECT gt.term_id, gt.latin_lemma, gt.is_multiword,
                    gs.sense_id, gs.context_label, gs.version,
@@ -71,6 +75,7 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
             LEFT JOIN sense_rendering sr_cs ON sr_cs.sense_id = gs.sense_id AND sr_cs.lang = 'cs'
             LEFT JOIN sense_rendering sr_en ON sr_en.sense_id = gs.sense_id AND sr_en.lang = 'en'
             LEFT JOIN sense_rendering sr_sk ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
+            WHERE gs.status = 'approved'
             GROUP BY gt.term_id, gt.latin_lemma, gt.is_multiword,
                      gs.sense_id, gs.context_label, gs.version
             ORDER BY gt.latin_lemma, gs.sense_id
@@ -151,8 +156,9 @@ def phrase_match(latin_text: str, multiword_terms: list[dict]) -> list[tuple[dic
         for m in pattern.finditer(normalized):
             matches.append((m.start(), m.end(), term, m.group()))
 
-    # Sort by start position for document order, deduplicate overlapping
-    matches.sort(key=lambda x: x[0])
+    # Sort by start position; for same start prefer longer match (greedy / leftmost-longest).
+    # This ensures "actus essendi" is consumed before "actus" can claim the same position.
+    matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
     result: list[tuple[dict, str]] = []
     last_end = 0
     for start, end, term, span in matches:
@@ -261,7 +267,22 @@ def _resolve_multi(term: dict, czech_text: str | None, english_text: str | None,
     )
 
 
-def _gap_sense(conn, term: dict, method: str, sk_proposal: str, src_krystal: int) -> dict:
+def _ensure_glossary_term(conn, lemma: str) -> int:
+    """Insert glossary_term if not present; return term_id."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO glossary_term (latin_lemma, is_multiword)
+            VALUES (%s, false)
+            ON CONFLICT (latin_lemma) DO UPDATE SET latin_lemma = EXCLUDED.latin_lemma
+            RETURNING term_id
+            """,
+            (lemma,),
+        )
+        return cur.fetchone()[0]
+
+
+def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_krystal: int) -> dict:
     """Create a proposed glossary_sense + sense_rendering for a gap term."""
     with conn.cursor() as cur:
         cur.execute(
@@ -271,14 +292,13 @@ def _gap_sense(conn, term: dict, method: str, sk_proposal: str, src_krystal: int
             ON CONFLICT DO NOTHING
             RETURNING sense_id
             """,
-            (term["term_id"],),
+            (term_id,),
         )
         row = cur.fetchone()
         if row is None:
-            # Already exists — fetch it
             cur.execute(
                 "SELECT sense_id FROM glossary_sense WHERE term_id = %s AND context_label IS NULL",
-                (term["term_id"],),
+                (term_id,),
             )
             row = cur.fetchone()
         sense_id = row[0]
@@ -340,6 +360,8 @@ def resolve_segment(
     tokens = sorted(set(re.findall(r"[a-zA-Z]+", masked)))  # sorted for determinism
 
     seen_lemmas: set[str] = set()
+    gap_candidates: set[str] = set()  # lemmas not in Krystal, collected during token pass
+
     for token in tokens:
         for lemma in lemmatize_latin(token):
             if lemma in seen_lemmas:
@@ -348,6 +370,12 @@ def resolve_segment(
 
             term = lemma_to_term.get(lemma)
             if term is None:
+                # Not in Krystal — candidate for gap handling.
+                # Threshold > 5 chars filters most Latin function words
+                # (enim, ergo, quod, sicut, esse, idem) while keeping
+                # theological/philosophical terms (corpus, anima, potentia, actus...).
+                if len(lemma) > 5:
+                    gap_candidates.add(lemma)
                 continue
             if term["term_id"] in seen_term_ids:
                 continue
@@ -360,16 +388,39 @@ def resolve_segment(
             else:
                 resolutions.append(_resolve_multi(term, czech, english, cs_rank, en_rank))
 
-    # 4. Gap terms: not in Krystal
-    # Collect lemmas found in the segment that have NO glossary entry
-    gap_tokens = sorted({
-        lemma for token in re.findall(r"[a-zA-Z]+", masked)
-        for lemma in lemmatize_latin(token)
-        if lemma not in lemma_to_term and len(lemma) > 3
-    })
+    # 4. Gap terms: Latin lemmas found in the segment that have no Krystal entry.
+    # Method: bahounek_derived if Czech text present, english_derived if English
+    # present, model_proposed otherwise.  For M1 the sk proposal is a stub;
+    # M2 will replace model_proposed with a real DeepSeek call.
+    gap_lemmas = sorted(gap_candidates)
 
-    for lemma in gap_tokens[:0]:  # disabled for M1 — gap term handling is expensive
-        pass  # TODO(M2): enable gap-term creation
+    for lemma in gap_lemmas:
+        if czech:
+            method = "bahounek_derived"
+        elif english:
+            method = "english_derived"
+        else:
+            method = "model_proposed"
+
+        # M1 stub: Latin lemma as placeholder (reviewable in M3).
+        # M2: call DeepSeek V3 for model_proposed; derive from aligned Czech/English for others.
+        sk_proposal = f"[{method}: {lemma}]"
+
+        term_id = _ensure_glossary_term(conn, lemma)
+        sense = _gap_sense(conn, term_id, method, sk_proposal, src_krystal)
+
+        gap_term = {"term_id": term_id, "latin_lemma": lemma, "is_multiword": False, "senses": [sense]}
+        # Do NOT add to lemma_to_term: that dict is for Krystal terms only.
+        # Subsequent segments will re-call _ensure_glossary_term/_gap_sense,
+        # which are idempotent. Adding here would cause the next segment to
+        # resolve via _resolve_single (krystal_single) instead of the gap method.
+
+        resolutions.append(Resolution(
+            term=gap_term,
+            sense=sense,
+            method=method,
+            confidence="needs_review",
+        ))
 
     return resolutions
 

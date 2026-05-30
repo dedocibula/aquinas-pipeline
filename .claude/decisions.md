@@ -27,9 +27,11 @@ first non-null language in sk→la→en order.
 
 ## No CHECK on `segment.element_type`
 
-**Decision:** `element_type` is a free-text label with no CHECK constraint. The comment documents the Summa values ('arg','sed_contra','respondeo','reply') but does not enforce them.
+**Decision:** `element_type` is a free-text label with no CHECK constraint. The comment documents the Summa values but does not enforce them.
 
-**Why:** a CHECK would bake Summa structure into the schema. Contra Gentiles chapters have no `sed_contra`, no `reply` — different element types entirely. The value is owned by the parser that writes it, exactly like `locator_path`. Validation belongs in the parser (fail-loud), not in the DB constraint.
+**Why:** a CHECK would bake Summa structure into the schema. Contra Gentiles chapters have no `sed_contra`, no `reply` — different element types entirely. Validation belongs in the parser (fail-loud), not in the DB constraint.
+
+**Known values in use (Summa):** `arg`, `sed_contra`, `respondeo`, `reply`, `preamble`, `question_title`, `article_title`. The last three were added at M1 to support document reconstitution (title segments needed by the renderer). Any code that assumes only the first four values must be updated; use `element_type = ANY(...)` with an explicit list rather than assuming completeness.
 
 ---
 
