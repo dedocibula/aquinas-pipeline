@@ -1,1 +1,38 @@
-# Populated at M1 from Krystal docx (heading templates, citation rules, name forms, orthography)
+heading_templates:
+  sed_contra: Na druhé straně
+  respondeo: Odpověď.
+  replies_section: K námitkám
+  drop_formulas:
+  - praeterea
+  - ad primum dicendum
+  number_objections: true
+citation_rules:
+  aristotle: Bekker numbers in footnotes
+  church_fathers: PL/PG references
+  bible_abbreviations: JB (liturgický překlad)
+  bible_text_source: ČEP (u NZ může být vhodnější liturgický překlad)
+  translate_thomas_bible_from_latin: true
+  note: Nepřekládáme Bibli, ale TA. Pokud Tomáš cituje Bibli, překládáme z jeho latiny.
+name_forms:
+  Augustinus: Augustin
+  Gregorius: Řehoř
+  Dionysius: Dionýsios
+  Athanasius: Athanasios
+  Boethius: Boethius
+  note: 'Nepoužívat: Diviš (místo Dionýsios), Atanáš (místo Athanasios).'
+  author_names_in_text: KAPITÁLKY (nikoli majuskule)
+  work_titles: kurzíva
+orthography:
+  prefer:
+  - filosofie
+  - teologie
+  - -ismus
+  avoid:
+  - filozofie
+  - theologie
+  - -izmus
+negative_constraints:
+- Nezvedat literární kvalitu nad originál.
+- Zachovávat opakování (nesnažit se o variaci).
+- Zachovávat scholastické spojky a výrazy.
+- Zachovávat hranice vět.
