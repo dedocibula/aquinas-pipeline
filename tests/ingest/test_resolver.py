@@ -8,8 +8,11 @@ from unittest.mock import patch
 
 from ingest.resolver import (
     _call_deepseek,
+    _call_deepseek_batch,
+    _propose_gap_terms,
     _resolve_multi,
     _resolve_single,
+    _scan_gap_lemmas,
     get_api_stats,
     mask_spans,
     phrase_match,
@@ -247,3 +250,158 @@ class TestCallDeepseek:
         import pytest
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             _call_deepseek("ratio", "context", "", "")
+
+
+# ── _call_deepseek_batch ──────────────────────────────────────────────────────
+
+class TestCallDeepseekBatch:
+    def _fake_response(self, content: str):
+        from unittest.mock import MagicMock
+        mock = MagicMock()
+        mock.raise_for_status = lambda: None
+        mock.json.return_value = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+        }
+        return mock
+
+    def test_parses_json_response(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        batch = [
+            {"lemma": "ratio", "best_latin": "ratio est", "best_czech": "", "best_english": "reason"},
+            {"lemma": "anima", "best_latin": "anima vivit", "best_czech": "duše", "best_english": "soul"},
+        ]
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value = self._fake_response('{"ratio": "rozum", "anima": "duša"}')
+            result = _call_deepseek_batch(batch)
+        assert result == {"ratio": "rozum", "anima": "duša"}
+
+    def test_strips_markdown_fences(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        batch = [{"lemma": "corpus", "best_latin": "", "best_czech": "", "best_english": ""}]
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value = self._fake_response('```json\n{"corpus": "telo"}\n```')
+            result = _call_deepseek_batch(batch)
+        assert result == {"corpus": "telo"}
+
+    def test_returns_empty_on_api_error(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        batch = [{"lemma": "virtus", "best_latin": "", "best_czech": "", "best_english": ""}]
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.side_effect = Exception("timeout")
+            result = _call_deepseek_batch(batch)
+        assert result == {}
+
+    def test_raises_without_api_key(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        import pytest
+        with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+            _call_deepseek_batch([])
+
+    def test_increments_call_count(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        before = get_api_stats()["calls"]
+        batch = [{"lemma": "pax", "best_latin": "", "best_czech": "", "best_english": ""}]
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value = self._fake_response('{"pax": "pokoj"}')
+            _call_deepseek_batch(batch)
+        assert get_api_stats()["calls"] == before + 1
+
+
+# ── _scan_gap_lemmas ──────────────────────────────────────────────────────────
+
+class TestScanGapLemmas:
+    def _seg(self, latin="", czech="", english="", seg_id=1):
+        return {"segment_id": seg_id, "latin": latin, "czech": czech,
+                "english": english, "element_type": "arg", "locator_path": "I.q1.a1.arg1"}
+
+    def test_respects_freq_floor(self):
+        # 'virtus' appears in 2 segments, floor=3 → excluded
+        segs = [
+            self._seg("virtus bona est", seg_id=1),
+            self._seg("virtus magna est", seg_id=2),
+        ]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        assert "virtus" not in result
+
+    def test_includes_above_floor(self):
+        segs = [self._seg(f"virtus in segmento {i}", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        # virtus should appear (freq=5 >= 3)
+        assert "virtus" in result
+
+    def test_excludes_krystal_lemmas(self):
+        segs = [self._seg("essentia divina est", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1, pos_filter=None)
+        assert "essentia" not in result
+
+    def test_skips_short_tokens(self):
+        # 'deus' (4 chars) should be filtered by the >5 char rule
+        segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1, pos_filter=None)
+        assert "deus" not in result
+
+    def test_pos_filter_excludes_verbs(self):
+        # 'dico' lemmatizes and typically tags as verb (V) — should be excluded
+        segs = [self._seg("dico tibi verum", seg_id=i) for i in range(15)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10,
+                                   pos_filter=frozenset({"N", "A"}))
+        # Verbs should not appear (dico = V)
+        for lemma in result:
+            assert lemma != "dico2"
+
+    def test_no_pos_filter_includes_verbs(self):
+        # With pos_filter=None, freq-qualified lemmas of any POS are included.
+        # Use tokens >5 chars that the lemmatizer/POS tagger will recognise.
+        segs = [self._seg("virtutes animae dicuntur bonae", seg_id=i) for i in range(15)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10, pos_filter=None)
+        assert len(result) > 0
+
+    def test_collects_context(self):
+        segs = [self._seg("virtus magna", czech="ctnost", english="virtue", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        if "virtus" in result:
+            assert result["virtus"]["best_czech"] == "ctnost"
+            assert result["virtus"]["best_english"] == "virtue"
+
+
+# ── _propose_gap_terms ────────────────────────────────────────────────────────
+
+class TestProposeGapTerms:
+    def test_uses_batch_call_and_merges(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = {
+            "virtus": {"freq": 20, "best_latin": "virtus", "best_czech": "", "best_english": "virtue"},
+            "anima": {"freq": 15, "best_latin": "anima", "best_czech": "duše", "best_english": "soul"},
+        }
+        with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
+            mock_batch.return_value = {"virtus": "cnosť", "anima": "duša"}
+            result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
+        assert result["virtus"] == "cnosť"
+        assert result["anima"] == "duša"
+
+    def test_fills_missing_with_stubs(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = {"ratio": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}}
+        with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
+            mock_batch.return_value = {}  # batch call returns nothing
+            result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
+        assert result["ratio"] == "[model_proposed: ratio]"
+
+    def test_batches_correctly(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = {
+            f"lemma{i}": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}
+            for i in range(10)
+        }
+        calls = []
+        def fake_batch(batch):
+            calls.append(len(batch))
+            return {item["lemma"]: f"sk_{item['lemma']}" for item in batch}
+
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            result = _propose_gap_terms(gap_data, batch_size=3, max_workers=1)
+
+        assert len(result) == 10
+        # 10 lemmas at batch_size=3 → 4 batches (3+3+3+1)
+        assert len(calls) == 4

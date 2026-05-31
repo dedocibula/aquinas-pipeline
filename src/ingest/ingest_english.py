@@ -13,7 +13,8 @@ Structural markers (strong tags in paragraph text):
   "I answer that,"        → respondeo
   "Reply to Objection N." → reply N
 
-FAIL LOUDLY: if a locator can't be matched to an existing segment row.
+NO_SEGMENT skips: if English has more args/replies than Latin for an article,
+the extra locators are logged to m2_english_gaps.txt and skipped.
 
 Run:
   uv run python -m ingest.ingest_english
@@ -241,8 +242,17 @@ def parse_english_for_articles(
 
 # ── DB insertion ──────────────────────────────────────────────────────────────
 
-def insert_english_texts(conn, elements: list[EnglishElement], src_id: int) -> int:
-    """Insert segment_text(en, dominican) rows. Returns count inserted."""
+def insert_english_texts(
+    conn,
+    elements: list[EnglishElement],
+    src_id: int,
+    gap_log: list[str] | None = None,
+) -> int:
+    """Insert segment_text(en, dominican) rows. Returns count inserted.
+
+    Elements whose locator has no matching segment row (English has more args than
+    Latin for some articles) are logged to gap_log and skipped.
+    """
     cur = conn.cursor()
     inserted = 0
 
@@ -253,10 +263,9 @@ def insert_english_texts(conn, elements: list[EnglishElement], src_id: int) -> i
         )
         row = cur.fetchone()
         if row is None:
-            raise RuntimeError(
-                f"FAIL: Dominican locator {elem.locator!r} has no matching segment. "
-                "Run parser_latin.py first."
-            )
+            if gap_log is not None:
+                gap_log.append(f"[NO_SEGMENT] locator={elem.locator}")
+            continue
         seg_id = row[0]
         cur.execute(
             """
@@ -305,9 +314,18 @@ def run(articles: list[str] | None = None) -> None:
             print(f"  {elem.locator}: {elem.english_text[:70]!r}")
 
     print("\nInserting into DB...")
+    insert_gaps: list[str] = []
     with get_conn() as conn:
         src = source_id(conn, "dominican")
-        count = insert_english_texts(conn, elements, src)
+        count = insert_english_texts(conn, elements, src, gap_log=insert_gaps)
+
+    if insert_gaps:
+        gap_log_path = ROOT / "reports" / "m2_english_gaps.txt"
+        gap_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with gap_log_path.open("a", encoding="utf-8") as f:
+            for line in insert_gaps:
+                f.write(line + "\n")
+        print(f"  {len(insert_gaps)} no-segment skips appended → {gap_log_path}")
 
     print(f"Done. {count} segment_text(en, dominican) rows inserted.")
 

@@ -71,9 +71,17 @@ def _step_english() -> None:
 
 
 def _step_resolve() -> None:
+    import os
+
     from ingest.resolver import run
-    print("[resolve] Running term resolver (DeepSeek V3 for model_proposed terms)...")
-    run()
+
+    freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
+    pos_env = os.environ.get("GAP_POS_FILTER", "N,A")
+    pos_filter = frozenset(p.strip() for p in pos_env.split(",") if p.strip()) if pos_env.strip() else None
+
+    print(f"[resolve] Running term resolver "
+          f"(freq_floor={freq_floor}, pos_filter={sorted(pos_filter) if pos_filter else 'all'})...")
+    run(freq_floor=freq_floor, pos_filter=pos_filter)
     print("[resolve] Done.")
 
 

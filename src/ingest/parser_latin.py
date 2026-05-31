@@ -258,7 +258,18 @@ def _insert_article(
     """Insert segment + segment_text rows for one article. Idempotent."""
     cur = conn.cursor()
 
-    # Wipe existing rows for this article (idempotency)
+    # Wipe existing rows for this article (idempotency).
+    # Delete in FK dependency order: term_usage → segment_text → segment.
+    cur.execute(
+        """
+        DELETE FROM term_usage
+        WHERE segment_id IN (
+            SELECT segment_id FROM segment
+            WHERE locator_path <@ %s::ltree AND work_id = %s
+        )
+        """,
+        (article_locator, work_id_val),
+    )
     cur.execute(
         """
         DELETE FROM segment_text
@@ -506,8 +517,10 @@ def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
             try:
                 _check_article(locator, elems)
                 _insert_article(conn, locator, elems, wid, src)
+                conn.commit()  # commit per article so rollback only affects current article
                 ingested += 1
             except Exception as exc:
+                conn.rollback()  # reset aborted transaction so next article can proceed
                 exc_type = type(exc).__name__
                 excerpt = str(exc)[:120].replace("\n", " ")
                 log_f.write(

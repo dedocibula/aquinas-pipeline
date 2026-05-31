@@ -256,7 +256,7 @@ def generate_coverage_report(conn) -> str:
         f"  Segments without Czech reference: {czech_without}  ({100.0 - czech_pct:.1f}%)",
         "",
         "GAP TERM PROPOSALS (DeepSeek V3)",
-        f"  Terms proposed by model: {breakdown.get('model_proposed', 0)}",
+        f"  Terms proposed by model: {api_stats.get('lemmas_proposed', breakdown.get('model_proposed', 0))}",
         f"  API calls made:          {api_stats.get('calls', 0)}",
         f"  API cost incurred:       ~${api_cost:.4f}",
     ]

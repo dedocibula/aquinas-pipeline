@@ -2,7 +2,8 @@
 Term resolver — M1/M2.
 
 Processes every body segment and writes term_usage rows with full provenance.
-M2 addition: real DeepSeek V3 API calls for model_proposed gap terms.
+M2: DeepSeek V3 proposes Slovak terms for ALL gap lemmas (not in Krystal) in a
+pre-scan batch pass before the main resolution loop.
 
 Order of operations (strict per spec):
   1. Phrase-match multiword glossary_term entries first.
@@ -12,16 +13,23 @@ Order of operations (strict per spec):
      - Multi-sense   → evidence vote from cs/en signals:
          consistent + ≥1 rank≤20 signal → krystal_multi_voted,    confidence=auto
          otherwise                       → krystal_multi_flagged,  confidence=needs_review
-     - Not in Krystal:
+     - Not in Krystal (gap term):
          Bahounek cs available  → bahounek_derived,  confidence=needs_review
          English en available   → english_derived,   confidence=needs_review
-         nothing                → model_proposed,    confidence=needs_review (DeepSeek V3)
+         nothing                → model_proposed,    confidence=needs_review
+         All three methods receive a DeepSeek-proposed Slovak term.
+         The method label indicates what context was available for the proposal.
   4. Write term_usage rows.
+
+Gap term proposal configuration (knobs):
+  GAP_FREQ_FLOOR  — min segments a lemma must appear in (default 10)
+  GAP_POS_FILTER  — CLTK POS codes to keep, comma-separated (default "N,A")
+                    N=noun, A=adjective; set to "" to disable POS filter
 
 Determinism: all intermediate collections are sorted; no randomness.
 
 DeepSeek env vars:
-  DEEPSEEK_API_KEY  — required when model_proposed terms exist
+  DEEPSEEK_API_KEY  — required when gap terms exist
   DEEPSEEK_API_URL  — default: https://api.deepseek.com/v1/chat/completions
   DEEPSEEK_MODEL    — default: deepseek-chat
 
@@ -35,6 +43,8 @@ import json
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,7 +52,7 @@ import psycopg2.extras
 import requests
 
 from ingest.db import get_conn, source_id, work_id
-from ingest.lemmatize import lemmatize_czech, lemmatize_latin
+from ingest.lemmatize import lemmatize_czech, lemmatize_latin, pos_tag_latin
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,9 +62,20 @@ _STRONG_RANK_THRESHOLD = 20
 # Element types to run the resolver on (skip title/preamble segments)
 _BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply"}
 
+# ── Gap term proposal knobs ───────────────────────────────────────────────────
+# Override via run() parameters or GAP_* env vars read in pipeline.py.
+
+_GAP_FREQ_FLOOR: int = 10
+# CLTK first-char POS codes: N=noun, A=adjective, V=verb, R=preposition, etc.
+# None = no POS filter (propose for all gap lemmas above freq floor)
+_GAP_POS_FILTER: frozenset[str] = frozenset({"N", "A"})
+_GAP_BATCH_SIZE: int = 25   # lemmas per DeepSeek batch call
+_GAP_MAX_WORKERS: int = 10  # concurrent batch requests
+
 # ── DeepSeek API ──────────────────────────────────────────────────────────────
 
 _api_stats: dict[str, int] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+_api_stats_lock = threading.Lock()
 
 _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
@@ -93,7 +114,8 @@ def _call_deepseek(
         "If unsure, give your best single-word guess."
     )
 
-    _api_stats["calls"] += 1  # count every attempt, including failures
+    with _api_stats_lock:
+        _api_stats["calls"] += 1  # count every attempt, including failures
     try:
         resp = requests.post(
             _DEEPSEEK_URL,
@@ -110,8 +132,9 @@ def _call_deepseek(
         data = resp.json()
 
         usage = data.get("usage", {})
-        _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
-        _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
+        with _api_stats_lock:
+            _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
+            _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
 
         term = data["choices"][0]["message"]["content"].strip()
         return term or f"[model_proposed: {latin_lemma}]"
@@ -119,6 +142,72 @@ def _call_deepseek(
     except Exception as exc:
         print(f"  [WARN] DeepSeek API error for {latin_lemma!r}: {exc}", flush=True)
         return f"[model_proposed: {latin_lemma}]"
+
+
+def _call_deepseek_batch(batch: list[dict]) -> dict[str, str]:
+    """Propose Slovak terms for a batch of Latin gap lemmas in one API call.
+
+    Each item: {"lemma": str, "best_latin": str, "best_czech": str, "best_english": str}
+    Returns {lemma: sk_proposal}. Missing/malformed entries fall back to stubs in the caller.
+    """
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY is not set. "
+            "Export it before running the resolver."
+        )
+
+    lines = []
+    for item in batch:
+        parts = [f"- {item['lemma']}"]
+        if item.get("best_latin"):
+            parts.append(f"Latin: {item['best_latin'][:150]}")
+        if item.get("best_czech"):
+            parts.append(f"Czech: {item['best_czech'][:80]}")
+        if item.get("best_english"):
+            parts.append(f"English: {item['best_english'][:80]}")
+        lines.append(" | ".join(parts))
+
+    prompt = (
+        "You are a Slovak theological terminologist translating Thomas Aquinas's Summa Theologiae.\n"
+        "For each Latin term below, propose the single best Slovak translation.\n"
+        "Czech (Bahounek) and English (Dominican) excerpts are provided as context.\n"
+        'Respond ONLY with a JSON object: {"latin_lemma": "slovak_term", ...}\n'
+        "No explanations, no markdown fences, no extra text.\n\n"
+        "Terms:\n" + "\n".join(lines)
+    )
+
+    with _api_stats_lock:
+        _api_stats["calls"] += 1
+    try:
+        resp = requests.post(
+            _DEEPSEEK_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": _DEEPSEEK_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": len(batch) * 15,
+                "temperature": 0.0,
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        usage = data.get("usage", {})
+        with _api_stats_lock:
+            _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
+            _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
+
+        content = data["choices"][0]["message"]["content"].strip()
+        # Strip markdown code fences if the model wraps the JSON
+        content = re.sub(r"```(?:json)?\s*", "", content).replace("```", "").strip()
+        result = json.loads(content)
+        return {str(k): str(v).strip() for k, v in result.items() if v}
+
+    except Exception as exc:
+        print(f"  [WARN] DeepSeek batch error ({len(batch)} lemmas): {exc}", flush=True)
+        return {}
 
 
 def get_api_stats() -> dict[str, int]:
@@ -383,11 +472,13 @@ def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_model: int
             row = cur.fetchone()
         sense_id = row[0]
 
+        # DO NOTHING: preserves proposals already written by the pre-scan batch pass.
+        # Stubs generated in the main loop must not overwrite a good DeepSeek proposal.
         cur.execute(
             """
             INSERT INTO sense_rendering (sense_id, lang, content, source_id)
             VALUES (%s, 'sk', %s, %s)
-            ON CONFLICT (sense_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
+            ON CONFLICT (sense_id, lang, source_id) DO NOTHING
             """,
             (sense_id, sk_proposal, src_model),
         )
@@ -406,6 +497,180 @@ def _gap_sense(conn, term_id: int, method: str, sk_proposal: str, src_model: int
     }
 
 
+# ── Gap term pre-scan and batch proposal ─────────────────────────────────────
+
+
+def _scan_gap_lemmas(
+    segments: list[dict],
+    krystal_lemmas: set[str],
+    freq_floor: int,
+    pos_filter: frozenset[str] | None,
+) -> dict[str, dict]:
+    """One read-only pass over all segments to collect gap lemma data.
+
+    Returns {lemma: {freq, best_latin, best_czech, best_english}} for lemmas
+    that pass freq_floor and pos_filter.
+
+    POS filter logic:
+    - If pos_filter is set: keep lemmas whose dominant non-'?' POS is in pos_filter.
+    - Lemmas with only '?' tags (tagger didn't recognise them — often medieval
+      theological vocabulary) are kept: benefit of the doubt.
+    - Lemmas positively identified as excluded POS (e.g. V=verb) are dropped.
+    """
+    from collections import Counter
+
+    lemma_data: dict[str, dict] = {}
+
+    for seg in segments:
+        latin = seg["latin"] or ""
+        if not latin:
+            continue
+        czech = seg["czech"] or ""
+        english = seg["english"] or ""
+
+        tagged = pos_tag_latin(latin)  # [(surface, pos_char), ...]
+        seen_in_seg: set[str] = set()
+
+        for surface, pos_char in tagged:
+            if len(surface) <= 5:
+                continue
+            for lemma in lemmatize_latin(surface):
+                if lemma in krystal_lemmas or lemma in seen_in_seg:
+                    break
+                seen_in_seg.add(lemma)
+
+                if lemma not in lemma_data:
+                    lemma_data[lemma] = {
+                        "freq": 0,
+                        "pos_votes": Counter(),
+                        "best_latin": latin[:300],
+                        "best_czech": czech[:300],
+                        "best_english": english[:300],
+                    }
+                lemma_data[lemma]["freq"] += 1
+                if pos_char != "?":
+                    lemma_data[lemma]["pos_votes"][pos_char] += 1
+                # Upgrade context if current best lacks Czech or English
+                d = lemma_data[lemma]
+                if czech and not d["best_czech"]:
+                    d["best_czech"] = czech[:300]
+                if english and not d["best_english"]:
+                    d["best_english"] = english[:300]
+                break  # one lemma candidate per surface token
+
+    filtered: dict[str, dict] = {}
+    for lemma, d in lemma_data.items():
+        if d["freq"] < freq_floor:
+            continue
+        if pos_filter is not None:
+            votes = d["pos_votes"]
+            known_votes = {p: n for p, n in votes.items() if p != "?"}
+            if known_votes:
+                dominant = max(known_votes, key=known_votes.__getitem__)
+                if dominant not in pos_filter:
+                    continue
+            # All tags were '?' (unknown to tagger) → keep
+        filtered[lemma] = {
+            "freq": d["freq"],
+            "best_latin": d["best_latin"],
+            "best_czech": d["best_czech"],
+            "best_english": d["best_english"],
+        }
+
+    return filtered
+
+
+def _propose_gap_terms(
+    gap_data: dict[str, dict],
+    batch_size: int = _GAP_BATCH_SIZE,
+    max_workers: int = _GAP_MAX_WORKERS,
+) -> dict[str, str]:
+    """Batch-call DeepSeek in parallel for all filtered gap lemmas.
+
+    Returns {lemma: sk_proposal}. Lemmas whose batch call fails fall back to stubs.
+    """
+    items = [
+        {
+            "lemma": lemma,
+            "best_latin": d["best_latin"],
+            "best_czech": d["best_czech"],
+            "best_english": d["best_english"],
+        }
+        for lemma, d in sorted(gap_data.items())
+    ]
+    batches = [items[i : i + batch_size] for i in range(0, len(items), batch_size)]
+
+    print(
+        f"  Calling DeepSeek for {len(items)} gap lemmas "
+        f"in {len(batches)} batches ({max_workers} concurrent)...",
+        flush=True,
+    )
+
+    proposals: dict[str, str] = {}
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_batch = {pool.submit(_call_deepseek_batch, b): b for b in batches}
+        for future in as_completed(future_to_batch):
+            try:
+                proposals.update(future.result())
+            except Exception as exc:
+                print(f"  [WARN] batch failed, stubs will be used: {exc}", flush=True)
+            completed += 1
+            if completed % 20 == 0 or completed == len(batches):
+                print(f"  {completed}/{len(batches)} batches complete", flush=True)
+
+    # Fill any missing entries with stubs
+    for item in items:
+        lemma = item["lemma"]
+        if lemma not in proposals:
+            proposals[lemma] = f"[model_proposed: {lemma}]"
+
+    return proposals
+
+
+def _write_gap_proposals(conn, proposals: dict[str, str], src_model: int) -> int:
+    """Pre-write glossary_term + glossary_sense + sense_rendering for each proposal.
+
+    Uses DO UPDATE for sense_rendering so re-runs refresh proposals.
+    Returns count of senses written.
+    """
+    written = 0
+    for lemma, sk_proposal in sorted(proposals.items()):
+        term_id = _ensure_glossary_term(conn, lemma)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO glossary_sense (term_id, context_label, status)
+                VALUES (%s, NULL, 'proposed')
+                ON CONFLICT DO NOTHING
+                RETURNING sense_id
+                """,
+                (term_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "SELECT sense_id FROM glossary_sense "
+                    "WHERE term_id = %s AND context_label IS NULL",
+                    (term_id,),
+                )
+                row = cur.fetchone()
+            sense_id = row[0]
+            # Overwrite on re-run to refresh the proposal
+            cur.execute(
+                """
+                INSERT INTO sense_rendering (sense_id, lang, content, source_id)
+                VALUES (%s, 'sk', %s, %s)
+                ON CONFLICT (sense_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
+                """,
+                (sense_id, sk_proposal, src_model),
+            )
+        written += 1
+    conn.commit()
+    return written
+
+
 # ── Main resolution loop ──────────────────────────────────────────────────────
 
 
@@ -417,6 +682,7 @@ def resolve_segment(
     cs_rank: int,
     en_rank: int,
     src_model: int,
+    gap_proposals: dict[str, str] | None = None,
 ) -> list[Resolution]:
     """Resolve all terms in one segment. Returns list of Resolutions."""
     latin = segment["latin"] or ""
@@ -485,13 +751,10 @@ def resolve_segment(
         else:
             method = "model_proposed"
 
-        if method == "model_proposed":
-            sk_proposal = _call_deepseek(
-                lemma,
-                segment["latin"][:300] if segment.get("latin") else "",
-                segment.get("czech") or "",
-                segment.get("english") or "",
-            )
+        # Use pre-computed proposal from batch pre-scan; fall back to stub for
+        # lemmas below the freq floor or filtered out by POS.
+        if gap_proposals is not None and lemma in gap_proposals:
+            sk_proposal = gap_proposals[lemma]
         else:
             sk_proposal = f"[{method}: {lemma}]"
 
@@ -544,45 +807,96 @@ def _write_term_usage(conn, segment_id: int, resolutions: list[Resolution]) -> i
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
-def run() -> None:
-    print("Loading glossary and segments...")
+def run(
+    freq_floor: int = _GAP_FREQ_FLOOR,
+    pos_filter: frozenset[str] | None = _GAP_POS_FILTER,
+    batch_size: int = _GAP_BATCH_SIZE,
+    max_workers: int = _GAP_MAX_WORKERS,
+) -> None:
+    """Two-phase resolver.
+
+    Phase 1: scan all segments for gap lemmas, filter by freq_floor / pos_filter,
+             batch-propose Slovak terms via DeepSeek, pre-write to DB.
+    Phase 2: main resolution loop — Krystal terms + gap terms (proposals already in DB).
+
+    Knobs:
+      freq_floor  — min segment frequency for a gap lemma (default 10)
+      pos_filter  — CLTK POS codes to keep; None = no filter (default {'N','A'})
+      batch_size  — lemmas per DeepSeek batch call (default 25)
+      max_workers — concurrent batch requests (default 10)
+    """
+    pos_label = sorted(pos_filter) if pos_filter else "all"
+    print(f"Loading glossary and segments (freq_floor={freq_floor}, pos_filter={pos_label})...")
+
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
         src_model = source_id(conn, "model")
         cs_rank = _source_rank(conn, "bahounek")
         en_rank = _source_rank(conn, "dominican")
+        multiword_terms, singleword_terms = _load_glossary(conn)
+        segments = _load_segments(conn, wid)
 
+    lemma_to_term = {t["latin_lemma"]: t for t in singleword_terms}
+    krystal_lemmas = set(lemma_to_term.keys()) | {t["latin_lemma"] for t in multiword_terms}
+    print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword Krystal terms")
+    print(f"  Segments: {len(segments)} body segments to resolve")
+
+    # ── Phase 1: scan, filter, batch-propose ─────────────────────────────────
+    print("\n[Phase 1] Scanning gap lemmas...")
+    gap_data = _scan_gap_lemmas(segments, krystal_lemmas, freq_floor, pos_filter)
+    print(f"  {len(gap_data)} gap lemmas qualify (freq≥{freq_floor}, pos={pos_label})")
+
+    gap_proposals: dict[str, str] = {}
+    if gap_data:
+        gap_proposals = _propose_gap_terms(gap_data, batch_size=batch_size, max_workers=max_workers)
+        with get_conn() as conn:
+            src_model_conn = source_id(conn, "model")
+            n_written = _write_gap_proposals(conn, gap_proposals, src_model_conn)
+        print(f"  {n_written} gap senses pre-written to DB")
+
+    # ── Phase 2: main resolution loop ────────────────────────────────────────
+    print(f"\n[Phase 2] Resolving {len(segments)} segments...")
+    total_usages = 0
+
+    with get_conn() as conn:
+        src_model = source_id(conn, "model")
+        cs_rank = _source_rank(conn, "bahounek")
+        en_rank = _source_rank(conn, "dominican")
         multiword_terms, singleword_terms = _load_glossary(conn)
         lemma_to_term = {t["latin_lemma"]: t for t in singleword_terms}
-
         segments = _load_segments(conn, wid)
-        print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword terms")
-        print(f"  Segments: {len(segments)} body segments to resolve")
 
-        total_usages = 0
         for i, seg in enumerate(segments, 1):
             resolutions = resolve_segment(
                 seg, multiword_terms, lemma_to_term,
-                conn, cs_rank, en_rank, src_model,
+                conn, cs_rank, en_rank, src_model, gap_proposals,
             )
             n = _write_term_usage(conn, seg["segment_id"], resolutions)
             total_usages += n
             if i % 500 == 0 or i == len(segments):
+                conn.commit()  # checkpoint: crash can only lose the current 500-seg batch
                 print(f"  {i}/{len(segments)} segments resolved", flush=True)
 
-        print(f"\nDone. {total_usages} term_usage rows written across {len(segments)} segments.")
+    print(f"\nDone. {total_usages} term_usage rows written across {len(segments)} segments.")
 
+    # Always write stats file so coverage report always has accurate numbers,
+    # even when gap_data was empty (all lemmas below freq floor) → calls==0.
     stats = get_api_stats()
+    cost_usd = (stats["input_tokens"] * 0.00014 + stats["output_tokens"] * 0.00028) / 1000
     if stats["calls"] > 0:
-        cost_usd = (stats["input_tokens"] * 0.00014 + stats["output_tokens"] * 0.00028) / 1000
         print(
             f"DeepSeek API: {stats['calls']} calls, "
             f"{stats['input_tokens']} input + {stats['output_tokens']} output tokens, "
             f"~${cost_usd:.4f}"
         )
-        stats_path = ROOT / "reports" / "m2_api_stats.json"
-        stats_path.parent.mkdir(parents=True, exist_ok=True)
-        stats_path.write_text(json.dumps({**stats, "cost_usd": round(cost_usd, 6)}, indent=2))
+    stats_path = ROOT / "reports" / "m2_api_stats.json"
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    stats_path.write_text(
+        json.dumps(
+            {**stats, "cost_usd": round(cost_usd, 6), "lemmas_proposed": len(gap_proposals)},
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

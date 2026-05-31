@@ -23,6 +23,25 @@ import pathlib
 # ── Latin ────────────────────────────────────────────────────────────────────
 
 @functools.lru_cache(maxsize=1)
+def _latin_pos_tagger():
+    from cltk.tag.pos import POSTag
+    return POSTag("lat")
+
+
+def pos_tag_latin(text: str) -> list[tuple[str, str]]:
+    """Return (surface, pos_char) pairs for Latin text.
+
+    pos_char is the first character of the CLTK ngram tag:
+      N=noun, V=verb, A=adjective, P=pronoun, D=adverb,
+      R=preposition, C=conjunction, M=numeral, I=interjection
+      '?'=unknown/not recognized by the tagger
+    """
+    tagger = _latin_pos_tagger()
+    tagged = tagger.tag_ngram_123_backoff(text) or []
+    return [(word, tag[0] if tag else "?") for word, tag in tagged]
+
+
+@functools.lru_cache(maxsize=1)
 def _latin_lemmatizer():
     try:
         from cltk.lemmatize.lat import LatinBackoffLemmatizer

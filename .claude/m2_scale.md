@@ -56,13 +56,40 @@ Dominican Province elsewhere. Log coverage gaps.
 Run the M1 resolver over all segments in the DB.
 Populate `term_usage` corpus-wide.
 
-Wire the DeepSeek V3 gap-term proposal call here (stub in M1, real API call in M2):
-- For `model_proposed` terms: call DeepSeek V3 with (latin_lemma, context_snippet,
-  czech_reference if available, english_reference) → get a proposed Slovak term
-- Write proposed `glossary_sense` + `sense_rendering(sk, model)` rows
-- confidence='needs_review', status='guessed'
+**Two-phase execution:**
+
+**Phase 1 — Gap term pre-scan (before the main loop):**
+- Scan all body segments once to collect every Latin lemma not in Krystal.
+- Filter by: `freq_floor` (default 10 — must appear in ≥10 segments) and
+  `pos_filter` (default {N, A} — nouns and adjectives only; lemmas with
+  all-unknown POS tags are kept as benefit of doubt for medieval theological vocab).
+- Batch-call DeepSeek V3 with `batch_size` lemmas per call (default 25), using
+  Czech (Bahounek) and English (Dominican) excerpts as context.
+  Calls are parallelised via `ThreadPoolExecutor` (`max_workers=10`).
+- Pre-write `glossary_sense` + `sense_rendering(sk, model)` rows before the main loop.
+- All three gap methods receive a real Slovak proposal:
+  - `bahounek_derived` — Czech context available (higher quality)
+  - `english_derived`  — English context only
+  - `model_proposed`   — no reference context
+  The method label indicates what context was available; the proposal is always
+  from DeepSeek.
+
+**Phase 2 — Main resolution loop:**
+- Resolves all segments using Krystal terms + pre-written gap senses.
+- No inline DeepSeek calls; gap senses are already in DB.
+- `_gap_sense` uses `ON CONFLICT DO NOTHING` to preserve Phase 1 proposals.
+
+**Knobs (configurable via env vars or `run()` params):**
+  - `GAP_FREQ_FLOOR`  — min segment frequency (default 10)
+  - `GAP_POS_FILTER`  — comma-separated CLTK POS codes (default "N,A"; "" = no filter)
 
 Track and log: total API calls made, total cost incurred.
+
+**Why ALL gap methods, not just model_proposed:**
+Leaving `bahounek_derived` and `english_derived` as bracketed stubs
+(`[bahounek_derived: continentia]`) would require a human reviewer to hand-write
+thousands of Slovak terms in M3. The reviewer's job is to *approve or correct*
+proposals, not generate them from scratch. DeepSeek proposes; humans verify.
 
 ### Step 5 — Dedup roll-up
 Aggregate per-segment resolutions into a corpus-wide glossary view.
@@ -140,9 +167,10 @@ and document the decision in decisions.md.
 
 ## Acceptance criteria
 - Every article either ingests cleanly or is in `m2_parser_anomalies.txt` with a reason
-- **No new resolution logic** (diff M1 resolver against M2 resolver is empty or trivial)
 - Coverage report states as hard numbers: unique terms needing review,
   segments needing re-run, estimated re-run cost
+- Every gap `sense_rendering(sk, model)` row contains a real Slovak proposal,
+  not a bracketed stub — the reviewer corrects proposals, never fills blanks
 - A reviewer can read the coverage report and make a go/no-go decision
   on translation spend without reading any code
 - Total API cost for gap-term proposals is logged and within expected range (~$5–10)

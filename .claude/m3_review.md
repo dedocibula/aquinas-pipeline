@@ -25,9 +25,16 @@ review. Review emits resolution events; M4 consumes them via the invalidation qu
 
 ## Consumes from M1/M2
 - `glossary_sense` (status, version) — reviewer changes status to 'approved', bumps version
-- `sense_rendering` (sk, human) — reviewer writes the confirmed Slovak term here
+- `sense_rendering` (sk, model)` — M2's DeepSeek proposal; reviewer reads this as a starting point
+- `sense_rendering` (sk, human)` — reviewer writes the *confirmed* Slovak term here (separate row)
 - `term_usage` (sense_version_used, confidence, status) — stale query runs against this
 - M2's dedup roll-up — source for the Sheets export
+
+**Important: every `proposed_slovak` cell already has a DeepSeek-generated term from M2.**
+The reviewer's job is to *approve or correct*, not to fill in blanks. Bracketed stubs
+(`[bahounek_derived: x]`) should never appear in the Sheets export — if they do, it means
+M2's resolve step did not complete or a lemma fell below the freq/POS filter. Stubs below
+the filter are low-frequency or non-theological and acceptable to leave as stubs.
 
 ---
 
@@ -39,9 +46,15 @@ czech_anchor, english_cue, resolution_method, confidence, frequency, sample_loca
 Terms ordered by: flagged first, then by frequency descending.
 Auto-resolved single-sense Krystal terms hidden by default (available in a separate tab).
 
+Reviewer workflow per row:
+- Read `proposed_slovak` (the M2 DeepSeek proposal)
+- Read `czech_anchor` and `english_cue` for context
+- Either: accept as-is (mark approved), or edit the term and mark approved
+- High-frequency terms reviewed first; hapax legomena may be left to M4's model
+
 **Write-back:**
-When reviewer edits a row's `proposed_slovak` and marks it 'approved':
-1. Update `sense_rendering(sk, human)` with the approved term
+When reviewer approves a row (with or without editing `proposed_slovak`):
+1. Write confirmed term to `sense_rendering(sk, human)` — preserves model proposal for diff/audit
 2. Update `glossary_sense.status = 'approved'`, increment `glossary_sense.version`
 3. The stale query in M4 picks up the version bump and re-translates affected segments
 

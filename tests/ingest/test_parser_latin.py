@@ -282,6 +282,8 @@ class TestRunFull:
         class FakeConn:
             def __enter__(self): return self
             def __exit__(self, *a): pass
+            def commit(self): pass
+            def rollback(self): pass
 
         from contextlib import contextmanager
 
@@ -329,6 +331,8 @@ class TestRunFull:
         class FakeConn:
             def __enter__(self): return self
             def __exit__(self, *a): pass
+            def commit(self): pass
+            def rollback(self): pass
 
         from contextlib import contextmanager
 
@@ -353,6 +357,8 @@ class TestRunFull:
         class FakeConn:
             def __enter__(self): return self
             def __exit__(self, *a): pass
+            def commit(self): pass
+            def rollback(self): pass
 
         from contextlib import contextmanager
 
@@ -376,6 +382,8 @@ class TestRunFull:
         class FakeConn:
             def __enter__(self): return self
             def __exit__(self, *a): pass
+            def commit(self): pass
+            def rollback(self): pass
 
         from contextlib import contextmanager
 
