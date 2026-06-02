@@ -265,6 +265,15 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
                 parsed[str(k)] = entry
         return parsed
 
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (401, 402, 403):
+            raise RuntimeError(
+                f"DeepSeek API fatal error (HTTP {status}) — "
+                "check DEEPSEEK_API_KEY and account credits. Aborting."
+            ) from exc
+        print(f"  [WARN] DeepSeek batch HTTP error {status} ({len(batch)} lemmas): {exc}", flush=True)
+        return {}
     except Exception as exc:
         print(f"  [WARN] DeepSeek batch error ({len(batch)} lemmas): {exc}", flush=True)
         return {}
@@ -496,19 +505,32 @@ def _resolve_multi(term: dict, czech_text: str | None, english_text: str | None,
 def _ensure_glossary_term(conn, lemma: str, category: str | None = None) -> int:
     """Insert glossary_term (with model category) if not present; return term_id.
 
-    On conflict the category is refreshed so re-runs can re-classify a gap term.
-    Krystal-seeded terms are never touched here (they are loaded with category NULL
-    and resolved via lemma_to_term, not the gap path).
+    On conflict the category is refreshed only for gap terms (no approved senses).
+    Krystal-seeded terms have approved senses and must never have their category
+    overwritten by a model re-run.
     """
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO glossary_term (latin_lemma, is_multiword, category)
             VALUES (%s, false, %s)
-            ON CONFLICT (latin_lemma) DO UPDATE SET category = EXCLUDED.category
+            ON CONFLICT (latin_lemma) DO UPDATE
+                SET category = EXCLUDED.category
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM glossary_sense
+                    WHERE term_id = glossary_term.term_id AND status = 'approved'
+                )
             RETURNING term_id
             """,
             (lemma, category),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            return row[0]
+        # Conflict on a Krystal term (approved senses exist) — fetch without updating
+        cur.execute(
+            "SELECT term_id FROM glossary_term WHERE latin_lemma = %s",
+            (lemma,),
         )
         return cur.fetchone()[0]
 
@@ -545,7 +567,10 @@ def _scan_gap_lemmas(
             cands = lemmatize_latin(token)
             if not cands:
                 continue
-            lemma = _strip_lemma_suffix(cands[0])  # one lemma candidate per token
+            # Phase 2 tries all candidates for Krystal lookup; skip here if any would hit.
+            if any(c in krystal_lemmas for c in cands):
+                continue
+            lemma = _strip_lemma_suffix(cands[0])
             if len(lemma) <= min_len or lemma in krystal_lemmas or lemma in seen_in_seg:
                 continue
             seen_in_seg.add(lemma)
@@ -679,20 +704,19 @@ def _write_gap_proposals(conn, proposals: dict, src_model: int) -> dict[str, dic
         category = term["category"]
         term_id = _ensure_glossary_term(conn, lemma, category)
         with conn.cursor() as cur:
+            # glossary_sense has no unique constraint covering (term_id, NULL context_label)
+            # because NULLs are not equal under standard SQL uniqueness. Use explicit
+            # SELECT-then-INSERT to avoid duplicate proposed senses on re-runs.
             cur.execute(
-                """
-                INSERT INTO glossary_sense (term_id, context_label, status)
-                VALUES (%s, NULL, 'proposed')
-                ON CONFLICT DO NOTHING
-                RETURNING sense_id
-                """,
+                "SELECT sense_id FROM glossary_sense "
+                "WHERE term_id = %s AND context_label IS NULL AND status = 'proposed'",
                 (term_id,),
             )
             row = cur.fetchone()
             if row is None:
                 cur.execute(
-                    "SELECT sense_id FROM glossary_sense "
-                    "WHERE term_id = %s AND context_label IS NULL",
+                    "INSERT INTO glossary_sense (term_id, context_label, status) "
+                    "VALUES (%s, NULL, 'proposed') RETURNING sense_id",
                     (term_id,),
                 )
                 row = cur.fetchone()
@@ -845,8 +869,8 @@ def _write_term_usage(conn, segment_id: int, resolutions: list[Resolution]) -> i
     if not resolutions:
         return 0
     with conn.cursor() as cur:
-        # Wipe existing for this segment (idempotency)
-        cur.execute("DELETE FROM term_usage WHERE segment_id = %s", (segment_id,))
+        # Only wipe guessed rows — confirmed rows survive re-runs (Principle 3).
+        cur.execute("DELETE FROM term_usage WHERE segment_id = %s AND status = 'guessed'", (segment_id,))
         for res in resolutions:
             cur.execute(
                 """
@@ -891,6 +915,12 @@ def run(
       max_workers — concurrent batch requests (default 10)
       min_len     — gap lemma must be longer than this (default 5)
     """
+    # Reset accumulated stats so a single-process multi-step run reports only this run.
+    with _api_stats_lock:
+        _api_stats["calls"] = 0
+        _api_stats["input_tokens"] = 0
+        _api_stats["output_tokens"] = 0
+
     print(f"Loading glossary and segments (freq_floor={freq_floor}, min_len={min_len})...")
 
     with get_conn() as conn:
@@ -927,6 +957,7 @@ def run(
     total_usages = 0
 
     with get_conn() as conn:
+        wid = work_id(conn, "summa_articulus")
         cs_rank = _source_rank(conn, "bahounek")
         en_rank = _source_rank(conn, "dominican")
         multiword_terms, singleword_terms = _load_glossary(conn)
@@ -989,9 +1020,17 @@ def pilot_batch_sizes(
     total_qualifying = len(gap_data)
     n_pilot = len(top_lemmas)
 
+    # Rough cost estimate: ~60 tokens per lemma per batch call (input+output combined).
+    est_calls = sum(-((-n_pilot) // bs) for bs in batch_sizes)
+    est_tokens = n_pilot * len(batch_sizes) * 60
+    est_cost = (est_tokens * 0.00014) / 1000
     print(
         f"\n[PILOT] {n_pilot} lemmas (of {total_qualifying} qualifying) "
         f"at batch sizes {batch_sizes}",
+        flush=True,
+    )
+    print(
+        f"  Estimated: ~{est_calls} API calls, ~{est_tokens} tokens, ~${est_cost:.4f}",
         flush=True,
     )
 

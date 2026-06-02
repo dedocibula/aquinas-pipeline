@@ -147,7 +147,7 @@ def generate_dedup_rollup(conn) -> list[dict]:
                 gt.latin_lemma,
                 gt.category,
                 gs.context_label,
-                max(sr_sk.content)  AS proposed_slovak,
+                sr_sk.content       AS proposed_slovak,
                 count(*)            AS frequency,
                 max(tu.confidence)  AS confidence,
                 array_agg(DISTINCT tu.resolution_method ORDER BY tu.resolution_method)
@@ -157,10 +157,16 @@ def generate_dedup_rollup(conn) -> list[dict]:
             FROM term_usage tu
             JOIN glossary_sense gs   ON tu.sense_id = gs.sense_id
             JOIN glossary_term gt    ON gs.term_id = gt.term_id
-            LEFT JOIN sense_rendering sr_sk
-                ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
+            LEFT JOIN LATERAL (
+                SELECT sr.content
+                FROM sense_rendering sr
+                JOIN source src ON sr.source_id = src.source_id
+                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+                ORDER BY src.authority_rank ASC
+                LIMIT 1
+            ) sr_sk ON true
             JOIN segment s           ON tu.segment_id = s.segment_id
-            GROUP BY gt.latin_lemma, gt.category, gs.context_label, gs.sense_id
+            GROUP BY gt.latin_lemma, gt.category, gs.context_label, gs.sense_id, sr_sk.content
             ORDER BY gt.category NULLS FIRST, frequency DESC, gt.latin_lemma
         """)
         return [dict(r) for r in cur.fetchall()]
