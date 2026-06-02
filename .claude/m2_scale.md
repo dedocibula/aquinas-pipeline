@@ -60,36 +60,52 @@ Populate `term_usage` corpus-wide.
 
 **Phase 1 — Gap term pre-scan (before the main loop):**
 - Scan all body segments once to collect every Latin lemma not in Krystal.
-- Filter by: `freq_floor` (default 10 — must appear in ≥10 segments) and
-  `pos_filter` (default {N, A} — nouns and adjectives only; lemmas with
-  all-unknown POS tags are kept as benefit of doubt for medieval theological vocab).
-- Batch-call DeepSeek V3 with `batch_size` lemmas per call (default 25), using
-  Czech (Bahounek) and English (Dominican) excerpts as context.
-  Calls are parallelised via `ThreadPoolExecutor` (`max_workers=10`).
-- Pre-write `glossary_sense` + `sense_rendering(sk, model)` rows before the main loop.
-- All three gap methods receive a real Slovak proposal:
-  - `bahounek_derived` — Czech context available (higher quality)
-  - `english_derived`  — English context only
-  - `model_proposed`   — no reference context
-  The method label indicates what context was available; the proposal is always
-  from DeepSeek.
+- **Mechanical filter only — no POS filter, no static word lists.** Keep lemmas that
+  pass `freq_floor` (default 10 — ≥10 segments) and a length gate (`len > min_len`,
+  default 5, which drops most Latin function words); strip CLTK's numeric lemma suffix
+  (`dico2` → `dico`). That is the whole pre-filter. Precision is **not** decided in code.
+- Batch-call DeepSeek V3 with `batch_size` lemmas per call (default 25), Czech (Bahounek)
+  and English (Dominican) excerpts as context, parallelised via `ThreadPoolExecutor`
+  (`max_workers=10`). Each call does three things per lemma in one shot:
+  - **classify** — assign a `category`: `term` (theological/philosophical content),
+    `name` (proper noun, e.g. Christus/Augustinus/philosophus=Aristotle),
+    `formula` (recurring structural connective, e.g. Praeterea/Respondeo/Videtur —
+    **kept**, because consistent rendering of the Summa's formulaic scaffolding matters),
+    `prose` (ordinary verb/quantifier/function word).
+  - **canonicalize** — return the Latin dictionary headword, so lemmatizer fragments
+    merge dynamically (`divina`/`divino`/`divinus` → one `divinus`; `Angelis` → `angelus`).
+    No static merge map.
+  - **translate** — the Slovak rendering of the canonical form.
+- Categories are stored on `glossary_term.category` (migration `003_term_category.sql`)
+  and are **fully overridable in M3** — terminology decisions live in the DB, never in
+  code, consistent with Principle 1 (model proposes/triages; humans decide terminology).
+- Pre-write one canonical `glossary_term(category)` + `glossary_sense` +
+  `sense_rendering(sk, model)` per headword. The resolution **method** label
+  (`bahounek_derived` / `english_derived` / `model_proposed`) still records what context
+  was available; the proposal itself is always from DeepSeek.
 
 **Phase 2 — Main resolution loop:**
-- Resolves all segments using Krystal terms + pre-written gap senses.
-- No inline DeepSeek calls; gap senses are already in DB.
-- `_gap_sense` uses `ON CONFLICT DO NOTHING` to preserve Phase 1 proposals.
+- Resolves all segments using Krystal terms + the pre-written canonical gap terms.
+- No inline DeepSeek calls; gap senses are already in the DB.
+- **No-stub invariant:** a gap lemma becomes a `term_usage` row **only if** its canonical
+  headword received a Phase-1 proposal (membership in the proposed set). Non-qualifying
+  lemmas create no `term_usage` row and no bracketed stub — the set of terms translated
+  equals the set surfaced for review.
 
 **Knobs (configurable via env vars or `run()` params):**
   - `GAP_FREQ_FLOOR`  — min segment frequency (default 10)
-  - `GAP_POS_FILTER`  — comma-separated CLTK POS codes (default "N,A"; "" = no filter)
+  - `GAP_BATCH_SIZE`  — lemmas per DeepSeek call (default 25)
+  - `GAP_MAX_WORKERS` — concurrent batch requests (default 10)
 
-Track and log: total API calls made, total cost incurred.
+Track and log: total API calls made, total cost incurred. Use the pilot to size batches
+before the full run: `uv run python -m ingest.pipeline --pilot N --batch-sizes 25,50`
+(prints per-batch-size cost, the category distribution, and canonical-merge examples).
 
-**Why ALL gap methods, not just model_proposed:**
-Leaving `bahounek_derived` and `english_derived` as bracketed stubs
-(`[bahounek_derived: continentia]`) would require a human reviewer to hand-write
-thousands of Slovak terms in M3. The reviewer's job is to *approve or correct*
-proposals, not generate them from scratch. DeepSeek proposes; humans verify.
+**Why dynamic categorization, not a static blocklist:**
+A hardcoded Latin blocklist is brittle, bakes Summa assumptions into Python, and — fatally —
+gives no per-term place to adjust a word's meaning later. Instead every recurring lemma is
+categorized, translated, and stored; nothing is hard-dropped, and the reviewer reorders or
+re-categorizes anything in M3. DeepSeek proposes and triages; humans verify.
 
 ### Step 5 — Dedup roll-up
 Aggregate per-segment resolutions into a corpus-wide glossary view.
@@ -170,7 +186,13 @@ and document the decision in decisions.md.
 - Coverage report states as hard numbers: unique terms needing review,
   segments needing re-run, estimated re-run cost
 - Every gap `sense_rendering(sk, model)` row contains a real Slovak proposal,
-  not a bracketed stub — the reviewer corrects proposals, never fills blanks
+  not a bracketed stub — enforced by a loud guardrail that fails the report if any
+  `proposed_slovak` in the dedup roll-up begins with `[` (the reviewer corrects
+  proposals, never fills blanks)
+- Every gap term carries a model `category` (term/name/formula/prose) on
+  `glossary_term.category`, overridable in M3
+- Lemmatizer fragments are merged under one canonical headword (e.g. `divina`/`divino`/
+  `divinus` resolve to a single `divinus` term, not three)
 - A reviewer can read the coverage report and make a go/no-go decision
   on translation spend without reading any code
 - Total API cost for gap-term proposals is logged and within expected range (~$5–10)

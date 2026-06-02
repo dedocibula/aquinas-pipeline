@@ -8,10 +8,13 @@ import csv
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ingest.report_m2 import (
     _count_anomalies,
     _load_api_stats,
     _load_latin_stats,
+    assert_no_stub_proposals,
     generate_coverage_report,
     write_coverage_report,
     write_dedup_rollup,
@@ -61,13 +64,24 @@ class TestWriteDedupRollup:
         rows = [
             {
                 "latin_lemma": "ratio",
+                "category": None,
                 "context_label": None,
                 "proposed_slovak": "rozum",
                 "frequency": 42,
                 "confidence": "auto",
                 "methods": ["krystal_single"],
                 "locators": ["I.q1.a1.arg1", "I.q2.a3.respondeo"],
-            }
+            },
+            {
+                "latin_lemma": "transsubstantiatio",
+                "category": "term",
+                "context_label": None,
+                "proposed_slovak": "transsubstanciácia",
+                "frequency": 3,
+                "confidence": "needs_review",
+                "methods": ["model_proposed"],
+                "locators": ["III.q75.a4.respondeo"],
+            },
         ]
         path = tmp_path / "rollup.csv"
         write_dedup_rollup(rows, path)
@@ -76,10 +90,13 @@ class TestWriteDedupRollup:
             reader = csv.DictReader(f)
             data = list(reader)
 
-        assert len(data) == 1
+        assert len(data) == 2
+        assert "category" in reader.fieldnames
         assert data[0]["latin_lemma"] == "ratio"
         assert data[0]["frequency"] == "42"
         assert data[0]["context_label"] == ""
+        assert data[0]["category"] == ""  # NULL category (Krystal) → empty string
+        assert data[1]["category"] == "term"  # gap term keeps model-assigned category
         assert "|" in data[0]["locators"]  # multiple locators joined
 
     def test_writes_header_only_for_empty(self, tmp_path):
@@ -87,12 +104,48 @@ class TestWriteDedupRollup:
         write_dedup_rollup([], path)
         content = path.read_text()
         assert "latin_lemma" in content
+        assert "category" in content  # new column present in empty header
         assert content.count("\n") == 1  # header only
 
     def test_creates_parent_directory(self, tmp_path):
         path = tmp_path / "deep" / "nested" / "rollup.csv"
         write_dedup_rollup([], path)
         assert path.exists()
+
+
+# ── assert_no_stub_proposals ──────────────────────────────────────────────────
+
+class TestAssertNoStubProposals:
+    def test_passes_when_no_stubs(self):
+        rows = [
+            {"latin_lemma": "ratio", "proposed_slovak": "rozum"},
+            {"latin_lemma": "gratia", "proposed_slovak": "milosť"},
+            {"latin_lemma": "novum", "proposed_slovak": None},  # NULL is fine
+        ]
+        assert_no_stub_proposals(rows)  # must not raise
+
+    def test_raises_on_bracketed_stub(self):
+        rows = [
+            {"latin_lemma": "ratio", "proposed_slovak": "rozum"},
+            {"latin_lemma": "transsubstantiatio",
+             "proposed_slovak": "[model_proposed: transsubstantiatio]"},
+        ]
+        with pytest.raises(RuntimeError) as exc:
+            assert_no_stub_proposals(rows)
+        assert "transsubstantiatio" in str(exc.value)
+        assert "1" in str(exc.value)  # count of offenders
+
+    def test_reports_all_offenders(self):
+        rows = [
+            {"latin_lemma": "alpha", "proposed_slovak": "[model_proposed: alpha]"},
+            {"latin_lemma": "beta", "proposed_slovak": "[model_proposed: beta]"},
+        ]
+        with pytest.raises(RuntimeError) as exc:
+            assert_no_stub_proposals(rows)
+        msg = str(exc.value)
+        assert "alpha" in msg
+        assert "beta" in msg
+        assert "2" in msg
 
 
 # ── generate_coverage_report ──────────────────────────────────────────────────
@@ -104,6 +157,7 @@ def _make_mock_conn(
     unique_review=80,
     flagged_segments=60,
     czech_with=95,
+    gap_categories=None,
 ):
     if breakdown is None:
         breakdown = {
@@ -114,6 +168,8 @@ def _make_mock_conn(
             "english_derived": 5,
             "model_proposed": 2,
         }
+    if gap_categories is None:
+        gap_categories = {"term": 4, "name": 1, "formula": 2, "prose": 1}
 
     conn = MagicMock()
     cur = MagicMock()
@@ -135,8 +191,17 @@ def _make_mock_conn(
     def pop_fetchone():
         return fetchone_queue.popleft() if fetchone_queue else (0,)
 
+    # fetchall returns differ by call order — build a queue
+    fetchall_queue = deque([
+        list(breakdown.items()),       # _resolution_breakdown
+        list(gap_categories.items()),  # _gap_category_breakdown
+    ])
+
+    def pop_fetchall():
+        return fetchall_queue.popleft() if fetchall_queue else []
+
     cur.fetchone.side_effect = pop_fetchone
-    cur.fetchall.return_value = list(breakdown.items())
+    cur.fetchall.side_effect = pop_fetchall
     return conn
 
 
@@ -154,7 +219,19 @@ class TestGenerateCoverageReport:
         assert "REVIEW SCOPE" in report
         assert "RE-TRANSLATION SCOPE" in report
         assert "BAHOUNEK COVERAGE" in report
+        assert "GAP TERM CATEGORIES" in report
         assert "GAP TERM PROPOSALS" in report
+
+    def test_gap_term_categories_breakdown(self, tmp_path):
+        report = self._run(
+            tmp_path,
+            gap_categories={"term": 4, "name": 1, "formula": 2, "prose": 1},
+        )
+        assert "GAP TERM CATEGORIES" in report
+        for category in ("term", "name", "formula", "prose"):
+            assert category in report
+        # total distinct gap terms = 8
+        assert "8" in report
 
     def test_contains_article_counts(self, tmp_path):
         report = self._run(tmp_path, articles=2663)

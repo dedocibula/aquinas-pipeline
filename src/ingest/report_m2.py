@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 
 import psycopg2.extras
@@ -95,6 +96,20 @@ def _bahounek_coverage(conn) -> tuple[int, int]:
     return with_czech, total
 
 
+def _gap_category_breakdown(conn) -> dict[str, int]:
+    """Count distinct gap terms per category (NULL-category Krystal terms excluded)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT gt.category, count(DISTINCT gt.term_id) "
+            "FROM glossary_term gt "
+            "JOIN glossary_sense gs ON gs.term_id = gt.term_id "
+            "JOIN term_usage tu ON tu.sense_id = gs.sense_id "
+            "WHERE gt.category IS NOT NULL "
+            "GROUP BY gt.category"
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
+
 def _model_proposed_count(conn) -> int:
     with conn.cursor() as cur:
         cur.execute(
@@ -130,6 +145,7 @@ def generate_dedup_rollup(conn) -> list[dict]:
         cur.execute("""
             SELECT
                 gt.latin_lemma,
+                gt.category,
                 gs.context_label,
                 max(sr_sk.content)  AS proposed_slovak,
                 count(*)            AS frequency,
@@ -144,27 +160,49 @@ def generate_dedup_rollup(conn) -> list[dict]:
             LEFT JOIN sense_rendering sr_sk
                 ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
             JOIN segment s           ON tu.segment_id = s.segment_id
-            GROUP BY gt.latin_lemma, gs.context_label, gs.sense_id
-            ORDER BY frequency DESC, gt.latin_lemma
+            GROUP BY gt.latin_lemma, gt.category, gs.context_label, gs.sense_id
+            ORDER BY gt.category NULLS FIRST, frequency DESC, gt.latin_lemma
         """)
         return [dict(r) for r in cur.fetchall()]
+
+
+_STUB_RE = re.compile(r"^\[")
+
+
+def assert_no_stub_proposals(rows: list[dict]) -> None:
+    """Fail loudly if any proposed_slovak is a bracketed stub (e.g. '[model_proposed: x]').
+
+    M2 acceptance criterion: no stub may reach the review export. We raise rather
+    than swallow so a bad run aborts before writing a poisoned roll-up.
+    """
+    offenders = [
+        row["latin_lemma"]
+        for row in rows
+        if row.get("proposed_slovak") and _STUB_RE.match(row["proposed_slovak"])
+    ]
+    if offenders:
+        raise RuntimeError(
+            f"Dedup roll-up contains {len(offenders)} bracketed stub proposal(s) "
+            f"that must never reach review: {', '.join(sorted(set(offenders)))}"
+        )
 
 
 def write_dedup_rollup(rows: list[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
-        path.write_text("latin_lemma,context_label,proposed_slovak,frequency,confidence,methods,locators\n")
+        path.write_text("latin_lemma,category,context_label,proposed_slovak,frequency,confidence,methods,locators\n")
         return
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["latin_lemma", "context_label", "proposed_slovak",
+            fieldnames=["latin_lemma", "category", "context_label", "proposed_slovak",
                         "frequency", "confidence", "methods", "locators"],
         )
         writer.writeheader()
         for row in rows:
             writer.writerow({
                 "latin_lemma": row["latin_lemma"],
+                "category": row["category"] or "",
                 "context_label": row["context_label"] or "",
                 "proposed_slovak": row["proposed_slovak"] or "",
                 "frequency": row["frequency"],
@@ -213,6 +251,8 @@ def generate_coverage_report(conn) -> str:
     czech_pct = 100.0 * czech_with / czech_total if czech_total else 0.0
     czech_without = czech_total - czech_with
 
+    gap_categories = _gap_category_breakdown(conn)
+
     api_cost = api_stats.get("cost_usd", 0.0)
 
     def _pct(n: int) -> str:
@@ -255,6 +295,18 @@ def generate_coverage_report(conn) -> str:
         f"  Segments with Czech reference:    {czech_with}  ({czech_pct:.1f}%)",
         f"  Segments without Czech reference: {czech_without}  ({100.0 - czech_pct:.1f}%)",
         "",
+        "GAP TERM CATEGORIES",
+    ]
+
+    gap_total = sum(gap_categories.values())
+    for category in ("term", "name", "formula", "prose"):
+        n = gap_categories.get(category, 0)
+        lines.append(f"  {category:<28} {n:>6}")
+    lines.append("  " + "─" * 36)
+    lines.append(f"  {'Distinct gap terms':<28} {gap_total:>6}")
+
+    lines += [
+        "",
         "GAP TERM PROPOSALS (DeepSeek V3)",
         f"  Terms proposed by model: {api_stats.get('lemmas_proposed', breakdown.get('model_proposed', 0))}",
         f"  API calls made:          {api_stats.get('calls', 0)}",
@@ -277,6 +329,7 @@ def run() -> None:
     print("Generating M2 coverage report and dedup roll-up...")
     with get_conn() as conn:
         rows = generate_dedup_rollup(conn)
+        assert_no_stub_proposals(rows)
         write_dedup_rollup(rows, DEDUP_ROLLUP_CSV)
         print(f"  Dedup roll-up: {len(rows)} rows → {DEDUP_ROLLUP_CSV}")
 

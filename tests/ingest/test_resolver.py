@@ -9,13 +9,17 @@ from unittest.mock import patch
 from ingest.resolver import (
     _call_deepseek,
     _call_deepseek_batch,
+    _parse_batch_entry,
     _propose_gap_terms,
     _resolve_multi,
     _resolve_single,
     _scan_gap_lemmas,
+    _strip_lemma_suffix,
     get_api_stats,
     mask_spans,
     phrase_match,
+    pilot_batch_sizes,
+    resolve_segment,
 )
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -254,6 +258,48 @@ class TestCallDeepseek:
 
 # ── _call_deepseek_batch ──────────────────────────────────────────────────────
 
+# ── _strip_lemma_suffix ───────────────────────────────────────────────────────
+
+class TestStripLemmaSuffix:
+    def test_strips_trailing_number(self):
+        assert _strip_lemma_suffix("dico2") == "dico"
+
+    def test_no_suffix_unchanged(self):
+        assert _strip_lemma_suffix("anima") == "anima"
+
+    def test_only_trailing_digits_stripped(self):
+        # interior digits are not touched (no such Latin lemmas, but be precise)
+        assert _strip_lemma_suffix("homo1") == "homo"
+
+
+# ── _parse_batch_entry ────────────────────────────────────────────────────────
+
+class TestParseBatchEntry:
+    def test_full_object(self):
+        entry = _parse_batch_entry("divina", {"canonical": "divinus", "category": "term", "slovak": "božský"})
+        assert entry == {"canonical": "divinus", "category": "term", "slovak": "božský"}
+
+    def test_legacy_string_value(self):
+        entry = _parse_batch_entry("ratio", "rozum")
+        assert entry == {"canonical": "ratio", "category": None, "slovak": "rozum"}
+
+    def test_missing_canonical_defaults_to_input(self):
+        entry = _parse_batch_entry("corpus", {"category": "term", "slovak": "telo"})
+        assert entry["canonical"] == "corpus"
+
+    def test_invalid_category_becomes_none(self):
+        entry = _parse_batch_entry("x", {"canonical": "x", "category": "bogus", "slovak": "y"})
+        assert entry["category"] is None
+
+    def test_empty_slovak_is_rejected(self):
+        assert _parse_batch_entry("x", {"canonical": "x", "category": "term", "slovak": ""}) is None
+
+    def test_non_dict_non_str_rejected(self):
+        assert _parse_batch_entry("x", 123) is None
+
+
+# ── _call_deepseek_batch ──────────────────────────────────────────────────────
+
 class TestCallDeepseekBatch:
     def _fake_response(self, content: str):
         from unittest.mock import MagicMock
@@ -265,24 +311,40 @@ class TestCallDeepseekBatch:
         }
         return mock
 
-    def test_parses_json_response(self, monkeypatch):
+    def test_parses_structured_response(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [
             {"lemma": "ratio", "best_latin": "ratio est", "best_czech": "", "best_english": "reason"},
             {"lemma": "anima", "best_latin": "anima vivit", "best_czech": "duše", "best_english": "soul"},
         ]
+        content = (
+            '{"ratio": {"canonical": "ratio", "category": "term", "slovak": "rozum"}, '
+            '"anima": {"canonical": "anima", "category": "term", "slovak": "duša"}}'
+        )
         with patch("ingest.resolver.requests.post") as mock_post:
-            mock_post.return_value = self._fake_response('{"ratio": "rozum", "anima": "duša"}')
+            mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
-        assert result == {"ratio": "rozum", "anima": "duša"}
+        assert result["ratio"] == {"canonical": "ratio", "category": "term", "slovak": "rozum"}
+        assert result["anima"]["slovak"] == "duša"
 
     def test_strips_markdown_fences(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "corpus", "best_latin": "", "best_czech": "", "best_english": ""}]
+        content = '```json\n{"corpus": {"canonical": "corpus", "category": "term", "slovak": "telo"}}\n```'
         with patch("ingest.resolver.requests.post") as mock_post:
-            mock_post.return_value = self._fake_response('```json\n{"corpus": "telo"}\n```')
+            mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
-        assert result == {"corpus": "telo"}
+        assert result == {"corpus": {"canonical": "corpus", "category": "term", "slovak": "telo"}}
+
+    def test_omits_malformed_entries(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        batch = [{"lemma": "a", "best_latin": "", "best_czech": "", "best_english": ""}]
+        # one good, one with empty slovak (should be omitted)
+        content = '{"a": {"canonical": "a", "category": "term", "slovak": "x"}, "b": {"slovak": ""}}'
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value = self._fake_response(content)
+            result = _call_deepseek_batch(batch)
+        assert "a" in result and "b" not in result
 
     def test_returns_empty_on_api_error(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -302,8 +364,9 @@ class TestCallDeepseekBatch:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         before = get_api_stats()["calls"]
         batch = [{"lemma": "pax", "best_latin": "", "best_czech": "", "best_english": ""}]
+        content = '{"pax": {"canonical": "pax", "category": "term", "slovak": "pokoj"}}'
         with patch("ingest.resolver.requests.post") as mock_post:
-            mock_post.return_value = self._fake_response('{"pax": "pokoj"}')
+            mock_post.return_value = self._fake_response(content)
             _call_deepseek_batch(batch)
         assert get_api_stats()["calls"] == before + 1
 
@@ -321,45 +384,50 @@ class TestScanGapLemmas:
             self._seg("virtus bona est", seg_id=1),
             self._seg("virtus magna est", seg_id=2),
         ]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
         assert "virtus" not in result
 
     def test_includes_above_floor(self):
         segs = [self._seg(f"virtus in segmento {i}", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
         # virtus should appear (freq=5 >= 3)
         assert "virtus" in result
 
     def test_excludes_krystal_lemmas(self):
         segs = [self._seg("essentia divina est", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1, pos_filter=None)
+        result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1)
         assert "essentia" not in result
 
     def test_skips_short_tokens(self):
-        # 'deus' (4 chars) should be filtered by the >5 char rule
+        # 'deus' (4 chars) should be filtered by the length gate (len > min_len=5)
         segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1, pos_filter=None)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1)
         assert "deus" not in result
 
-    def test_pos_filter_excludes_verbs(self):
-        # 'dico' lemmatizes and typically tags as verb (V) — should be excluded
-        segs = [self._seg("dico tibi verum", seg_id=i) for i in range(15)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10,
-                                   pos_filter=frozenset({"N", "A"}))
-        # Verbs should not appear (dico = V)
-        for lemma in result:
-            assert lemma != "dico2"
+    def test_min_len_is_configurable(self):
+        # With min_len=3, 'deus' (4 chars) now qualifies.
+        segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1, min_len=3)
+        assert "deus" in result
 
-    def test_no_pos_filter_includes_verbs(self):
-        # With pos_filter=None, freq-qualified lemmas of any POS are included.
-        # Use tokens >5 chars that the lemmatizer/POS tagger will recognise.
-        segs = [self._seg("virtutes animae dicuntur bonae", seg_id=i) for i in range(15)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10, pos_filter=None)
+    def test_no_pos_filter_keeps_verbs(self):
+        # No POS filter any more: any length-qualifying lemma is kept; the model
+        # categorizes later. Verbs like 'dico' are NOT dropped at scan time.
+        segs = [self._seg("dicunt homines verba", seg_id=i) for i in range(12)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10)
         assert len(result) > 0
+
+    def test_strips_numeric_suffix_in_key(self):
+        # CLTK may lemmatize 'dicunt' → 'dico2'; the stored key is suffix-stripped.
+        segs = [self._seg("dicunt multa", seg_id=i) for i in range(12)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10)
+        # No key should carry a trailing digit.
+        for lemma in result:
+            assert not lemma[-1].isdigit()
 
     def test_collects_context(self):
         segs = [self._seg("virtus magna", czech="ctnost", english="virtue", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3, pos_filter=None)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
         if "virtus" in result:
             assert result["virtus"]["best_czech"] == "ctnost"
             assert result["virtus"]["best_english"] == "virtue"
@@ -368,25 +436,68 @@ class TestScanGapLemmas:
 # ── _propose_gap_terms ────────────────────────────────────────────────────────
 
 class TestProposeGapTerms:
-    def test_uses_batch_call_and_merges(self, monkeypatch):
+    def _entry(self, canonical, category="term", slovak="sk"):
+        return {"canonical": canonical, "category": category, "slovak": slovak}
+
+    def test_returns_structured_result(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = {
             "virtus": {"freq": 20, "best_latin": "virtus", "best_czech": "", "best_english": "virtue"},
             "anima": {"freq": 15, "best_latin": "anima", "best_czech": "duše", "best_english": "soul"},
         }
         with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
-            mock_batch.return_value = {"virtus": "cnosť", "anima": "duša"}
+            mock_batch.return_value = {
+                "virtus": self._entry("virtus", slovak="cnosť"),
+                "anima": self._entry("anima", slovak="duša"),
+            }
             result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
-        assert result["virtus"] == "cnosť"
-        assert result["anima"] == "duša"
+        assert set(result["terms"]) == {"virtus", "anima"}
+        assert result["terms"]["virtus"]["slovak"] == "cnosť"
+        assert result["canonical_map"]["anima"] == "anima"
+        assert result["dropped"] == []
 
-    def test_fills_missing_with_stubs(self, monkeypatch):
+    def test_merges_fragments_by_canonical(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = {
+            "divina": {"freq": 10, "best_latin": "la", "best_czech": "", "best_english": ""},
+            "divino": {"freq": 8, "best_latin": "la", "best_czech": "", "best_english": ""},
+            "divinus": {"freq": 5, "best_latin": "la", "best_czech": "", "best_english": ""},
+        }
+        def fake_batch(batch):
+            return {item["lemma"]: self._entry("divinus", slovak="božský") for item in batch}
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
+        # three fragments collapse to one canonical term, frequencies summed
+        assert set(result["terms"]) == {"divinus"}
+        assert result["terms"]["divinus"]["freq"] == 23
+        assert result["terms"]["divinus"]["slovak"] == "božský"
+        assert result["canonical_map"] == {"divina": "divinus", "divino": "divinus", "divinus": "divinus"}
+
+    def test_category_majority_vote(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = {
+            "divina": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""},
+            "divino": {"freq": 8, "best_latin": "", "best_czech": "", "best_english": ""},
+        }
+        responses = {
+            "divina": self._entry("divinus", category="term"),
+            "divino": self._entry("divinus", category="prose"),
+        }
+        def fake_batch(batch):
+            return {item["lemma"]: responses[item["lemma"]] for item in batch}
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
+        # term has more frequency weight (10) than prose (8) → 'term' wins
+        assert result["terms"]["divinus"]["category"] == "term"
+
+    def test_missing_lemmas_are_dropped_not_stubbed(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = {"ratio": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}}
         with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
-            mock_batch.return_value = {}  # batch call returns nothing
+            mock_batch.return_value = {}  # batch returns nothing
             result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
-        assert result["ratio"] == "[model_proposed: ratio]"
+        assert result["terms"] == {}
+        assert result["dropped"] == ["ratio"]
 
     def test_batches_correctly(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -397,11 +508,206 @@ class TestProposeGapTerms:
         calls = []
         def fake_batch(batch):
             calls.append(len(batch))
-            return {item["lemma"]: f"sk_{item['lemma']}" for item in batch}
+            return {item["lemma"]: self._entry(item["lemma"], slovak=f"sk_{item['lemma']}") for item in batch}
 
         with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
             result = _propose_gap_terms(gap_data, batch_size=3, max_workers=1)
 
-        assert len(result) == 10
+        assert len(result["terms"]) == 10
         # 10 lemmas at batch_size=3 → 4 batches (3+3+3+1)
         assert len(calls) == 4
+
+
+# ── pilot_batch_sizes ─────────────────────────────────────────────────────────
+
+class TestPilotBatchSizes:
+    def _gap_data(self, n: int = 20) -> dict:
+        return {
+            f"lemma{i:02d}": {
+                "freq": n - i,
+                "best_latin": f"latin context {i}",
+                "best_czech": "",
+                "best_english": "",
+            }
+            for i in range(n)
+        }
+
+    def _entry(self, lemma, category="term", slovak=None):
+        return {"canonical": lemma, "category": category, "slovak": slovak or f"sk_{lemma}"}
+
+    def _batch(self, batch):
+        return {item["lemma"]: self._entry(item["lemma"]) for item in batch}
+
+    def test_returns_one_result_per_batch_size(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=self._batch):
+            results = pilot_batch_sizes(self._gap_data(), top_n=10, batch_sizes=[5, 10])
+        assert len(results) == 2
+        assert results[0]["batch_size"] == 5
+        assert results[1]["batch_size"] == 10
+
+    def test_selects_top_n_by_frequency(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = self._gap_data(20)  # lemma00 has freq=20, lemma19 has freq=1
+        seen: list[str] = []
+
+        def fake_batch(batch):
+            seen.extend(item["lemma"] for item in batch)
+            return self._batch(batch)
+
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            pilot_batch_sizes(gap_data, top_n=5, batch_sizes=[10])
+
+        unique = set(seen)
+        assert len(unique) == 5
+        assert "lemma00" in unique  # highest freq
+        assert "lemma19" not in unique  # lowest freq, excluded
+
+    def test_result_contains_required_keys(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        with patch("ingest.resolver._call_deepseek_batch", return_value={}):
+            results = pilot_batch_sizes(self._gap_data(5), top_n=5, batch_sizes=[5])
+        r = results[0]
+        for key in ("batch_size", "calls", "input_tokens", "output_tokens", "cost_usd",
+                    "cost_per_lemma", "category_counts", "merges", "samples"):
+            assert key in r, f"missing key: {key}"
+
+    def test_tracks_delta_input_tokens(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        content = (
+            '{"lemma00": {"canonical": "lemma00", "category": "term", "slovak": "sl"}, '
+            '"lemma01": {"canonical": "lemma01", "category": "term", "slovak": "sl"}}'
+        )
+        fake_resp = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 200, "completion_tokens": 10},
+        }
+        with patch("ingest.resolver.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status = lambda: None
+            mock_post.return_value.json.return_value = fake_resp
+            results = pilot_batch_sizes(self._gap_data(2), top_n=2, batch_sizes=[10])
+        r = results[0]
+        assert r["input_tokens"] == 200
+        assert r["output_tokens"] == 10
+        assert r["cost_usd"] >= 0
+
+    def test_smaller_batch_size_makes_more_api_calls(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        # Mocking at _call_deepseek_batch bypasses the stat increment (calls stays 0),
+        # so we verify batching via the mock invocation count itself.
+        batch_calls: list[int] = []
+
+        def fake_batch(batch):
+            batch_calls.append(len(batch))
+            return self._batch(batch)
+
+        gap_data = self._gap_data(10)
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            pilot_batch_sizes(gap_data, top_n=10, batch_sizes=[5, 10])
+
+        # Total calls = 2 (bs=5, 10 lemmas → 2 batches) + 1 (bs=10 → 1 batch)
+        assert len(batch_calls) == 3
+
+    def test_category_counts_populated(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = self._gap_data(4)
+        cats = {"lemma00": "term", "lemma01": "name", "lemma02": "formula", "lemma03": "prose"}
+        def fake_batch(batch):
+            return {item["lemma"]: self._entry(item["lemma"], category=cats[item["lemma"]])
+                    for item in batch}
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            results = pilot_batch_sizes(gap_data, top_n=4, batch_sizes=[10])
+        assert results[0]["category_counts"] == {"term": 1, "name": 1, "formula": 1, "prose": 1}
+
+    def test_reports_canonical_merges(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = self._gap_data(3)  # lemma00, lemma01, lemma02
+        def fake_batch(batch):
+            # all three map to one canonical 'merged'
+            return {item["lemma"]: self._entry("merged") for item in batch}
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+            results = pilot_batch_sizes(gap_data, top_n=3, batch_sizes=[10])
+        merges = results[0]["merges"]
+        assert merges  # non-empty
+        canon, inputs = merges[0]
+        assert canon == "merged"
+        assert set(inputs) == {"lemma00", "lemma01", "lemma02"}
+
+    def test_empty_gap_data_returns_zero_cost(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        with patch("ingest.resolver._call_deepseek_batch", return_value={}):
+            results = pilot_batch_sizes({}, top_n=10, batch_sizes=[25])
+        assert results[0]["cost_usd"] == 0.0
+        assert results[0]["calls"] == 0
+
+    def test_samples_in_frequency_order(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        gap_data = self._gap_data(10)
+        with patch("ingest.resolver._call_deepseek_batch", side_effect=self._batch):
+            results = pilot_batch_sizes(gap_data, top_n=10, batch_sizes=[10], sample_n=3)
+        samples = results[0]["samples"]
+        assert len(samples) == 3
+        # First sample should be highest-freq lemma (lemma00, freq=10)
+        assert samples[0]["lemma"] == "lemma00"
+        assert samples[0]["freq"] == 10
+
+
+# ── resolve_segment — gap no-stub invariant ───────────────────────────────────
+
+class TestResolveSegmentGap:
+    """The no-stub invariant: a gap lemma becomes a term_usage Resolution only if
+    its canonical headword received a Phase-1 proposal. Uses invented alphabetic
+    tokens that the lemmatizer passes through unchanged, so canonical_map keys are
+    deterministic without a DB."""
+
+    def _seg(self, latin, czech=None, english=None):
+        return {"segment_id": 1, "latin": latin, "czech": czech, "english": english}
+
+    _GAP_METHODS = {"bahounek_derived", "english_derived", "model_proposed"}
+
+    def _gap_db(self, canonical, sense_id=7):
+        return {canonical: {"term_id": 1, "sense_id": sense_id, "version": 1,
+                            "category": "term", "slovak": "navrh"}}
+
+    def test_qualified_gap_lemma_resolves(self):
+        seg = self._seg("xyzzyword", czech="nieco")
+        res = resolve_segment(
+            seg, [], {}, cs_rank=20, en_rank=30,
+            gap_canonical_map={"xyzzyword": "xyzzyword"},
+            gap_terms_db=self._gap_db("xyzzyword"),
+        )
+        gap = [r for r in res if r.method in self._GAP_METHODS]
+        assert len(gap) == 1
+        assert gap[0].sense["sense_id"] == 7
+        assert gap[0].method == "bahounek_derived"  # czech present
+        assert gap[0].confidence == "needs_review"
+
+    def test_unqualified_gap_lemma_produces_no_row_and_no_stub(self):
+        # canonical map / db are empty → the lemma is not a proposed term → skipped.
+        seg = self._seg("unmappedword", czech="nieco")
+        res = resolve_segment(
+            seg, [], {}, cs_rank=20, en_rank=30,
+            gap_canonical_map={}, gap_terms_db={},
+        )
+        assert res == []
+        # No resolution carries a bracketed stub.
+        for r in res:
+            assert not str(r.sense.get("sk_content", "")).startswith("[")
+
+    def test_method_reflects_available_context(self):
+        gdb = self._gap_db("xyzzyword")
+        cmap = {"xyzzyword": "xyzzyword"}
+        # english only
+        res = resolve_segment(self._seg("xyzzyword", english="thing"), [], {}, 20, 30, cmap, gdb)
+        assert [r for r in res if r.method in self._GAP_METHODS][0].method == "english_derived"
+        # neither cs nor en
+        res = resolve_segment(self._seg("xyzzyword"), [], {}, 20, 30, cmap, gdb)
+        assert [r for r in res if r.method in self._GAP_METHODS][0].method == "model_proposed"
+
+    def test_fragments_dedupe_to_one_canonical(self):
+        seg = self._seg("alphaword betaword", english="thing")
+        cmap = {"alphaword": "gword", "betaword": "gword"}
+        res = resolve_segment(seg, [], {}, 20, 30, cmap, self._gap_db("gword", sense_id=9))
+        gap = [r for r in res if r.method in self._GAP_METHODS]
+        assert len(gap) == 1  # both fragments collapse to canonical 'gword'
+        assert gap[0].sense["sense_id"] == 9

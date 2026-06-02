@@ -76,13 +76,49 @@ def _step_resolve() -> None:
     from ingest.resolver import run
 
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
-    pos_env = os.environ.get("GAP_POS_FILTER", "N,A")
-    pos_filter = frozenset(p.strip() for p in pos_env.split(",") if p.strip()) if pos_env.strip() else None
+    batch_size = int(os.environ.get("GAP_BATCH_SIZE", "25"))
+    max_workers = int(os.environ.get("GAP_MAX_WORKERS", "10"))
 
-    print(f"[resolve] Running term resolver "
-          f"(freq_floor={freq_floor}, pos_filter={sorted(pos_filter) if pos_filter else 'all'})...")
-    run(freq_floor=freq_floor, pos_filter=pos_filter)
+    print(
+        f"[resolve] Running term resolver "
+        f"(freq_floor={freq_floor}, batch_size={batch_size}, max_workers={max_workers})..."
+    )
+    run(freq_floor=freq_floor, batch_size=batch_size, max_workers=max_workers)
     print("[resolve] Done.")
+
+
+def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
+    import os
+
+    from ingest.db import get_conn, work_id
+    from ingest.resolver import (
+        _load_glossary,
+        _load_segments,
+        _scan_gap_lemmas,
+        pilot_batch_sizes,
+    )
+
+    freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
+
+    print("[pilot] Loading segments and glossary...")
+    with get_conn() as conn:
+        wid = work_id(conn, "summa_articulus")
+        multiword_terms, singleword_terms = _load_glossary(conn)
+        segments = _load_segments(conn, wid)
+
+    krystal_lemmas = (
+        {t["latin_lemma"] for t in singleword_terms}
+        | {t["latin_lemma"] for t in multiword_terms}
+    )
+    print(f"[pilot] Scanning gap lemmas (freq_floor={freq_floor})...")
+    gap_data = _scan_gap_lemmas(segments, krystal_lemmas, freq_floor=freq_floor)
+    print(f"[pilot] {len(gap_data)} qualifying gap lemmas found")
+
+    pilot_batch_sizes(gap_data, top_n=top_n, batch_sizes=batch_sizes)
+    print(
+        "\n[pilot] Choose a batch size, then run the full resolve step:\n"
+        "  GAP_BATCH_SIZE=<N> uv run python -m ingest.pipeline --step resolve"
+    )
 
 
 def _step_report() -> None:
@@ -117,7 +153,34 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run all steps in order (latin → bahounek + english → resolve → report)",
     )
+    group.add_argument(
+        "--pilot",
+        type=int,
+        metavar="N",
+        help=(
+            "Pilot mode: test multiple batch sizes on the top N gap lemmas "
+            "(no DB writes). Use to find the cheapest batch size before a full run."
+        ),
+    )
+    parser.add_argument(
+        "--batch-sizes",
+        default="10,25,50,100",
+        metavar="S1,S2,...",
+        help="Comma-separated batch sizes to compare in pilot mode (default: 10,25,50,100)",
+    )
     args = parser.parse_args(argv)
+
+    if args.pilot is not None:
+        batch_sizes = [int(s.strip()) for s in args.batch_sizes.split(",") if s.strip()]
+        t0 = time.monotonic()
+        try:
+            _step_pilot(args.pilot, batch_sizes)
+        except Exception as exc:
+            print(f"\nFAIL in pilot: {exc}", file=sys.stderr)
+            return 1
+        elapsed = time.monotonic() - t0
+        print(f"[pilot] Completed in {elapsed:.1f}s")
+        return 0
 
     steps_to_run = list(_STEPS) if args.all else [args.step]
 

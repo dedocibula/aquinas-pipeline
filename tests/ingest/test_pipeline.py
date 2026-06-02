@@ -89,3 +89,47 @@ class TestStepFailure:
             mocks["resolve"].side_effect = RuntimeError("DB down")
             result = main(["--step", "resolve"])
         assert result == 1
+
+
+class TestPilotMode:
+    def test_pilot_accepted_with_n(self):
+        import ingest.pipeline as pl
+        mock_pilot = MagicMock()
+        original = pl._step_pilot
+        pl._step_pilot = mock_pilot
+        try:
+            result = main(["--pilot", "50"])
+        finally:
+            pl._step_pilot = original
+        assert result == 0
+        mock_pilot.assert_called_once_with(50, [10, 25, 50, 100])
+
+    def test_pilot_with_custom_batch_sizes(self):
+        import ingest.pipeline as pl
+        mock_pilot = MagicMock()
+        original = pl._step_pilot
+        pl._step_pilot = mock_pilot
+        try:
+            result = main(["--pilot", "30", "--batch-sizes", "5,20,50"])
+        finally:
+            pl._step_pilot = original
+        assert result == 0
+        mock_pilot.assert_called_once_with(30, [5, 20, 50])
+
+    def test_pilot_mutually_exclusive_with_step(self):
+        with pytest.raises(SystemExit):
+            main(["--pilot", "50", "--step", "resolve"])
+
+    def test_pilot_mutually_exclusive_with_all(self):
+        with pytest.raises(SystemExit):
+            main(["--pilot", "50", "--all"])
+
+    def test_pilot_returns_1_on_exception(self):
+        import ingest.pipeline as pl
+        original = pl._step_pilot
+        pl._step_pilot = MagicMock(side_effect=RuntimeError("no DB"))
+        try:
+            result = main(["--pilot", "10"])
+        finally:
+            pl._step_pilot = original
+        assert result == 1

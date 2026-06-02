@@ -176,6 +176,14 @@ Core logic. Process each segment in the test set.
    → In all gap cases: create a `glossary_sense` row with `status='proposed'`
      and a `sense_rendering(sk)` row with the proposed term.
 
+   > **Note (M2 evolution):** the per-segment stub + per-lemma `status='proposed'`
+   > write described here is the M1 prototype. M2 replaces it with a corpus-wide
+   > DeepSeek pass that classifies (category), canonicalizes (merges lemmatizer
+   > fragments under one headword), and translates gap lemmas up front. Under M2 a
+   > gap lemma becomes a `term_usage` row **only if** its canonical headword received
+   > a proposal — non-qualifying lemmas create no row and no bracketed stub. M1's
+   > logic is unchanged; this is downstream scale/precision work, not a re-scope.
+
 4. **Write `term_usage` rows** with full provenance for all resolved terms.
 
 ### Step 8 — Provenance report

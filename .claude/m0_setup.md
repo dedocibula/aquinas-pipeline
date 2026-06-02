@@ -109,6 +109,11 @@ end of M0 and paste the output as the milestone deliverable.
 # - sources/english/freddoso/  : files present, coverage map printed
 # - DB connection   : connects, pgvector extension loaded
 # - .env            : all required keys present (values not checked)
+# - DeepSeek key    : liveness probe — a cheap auth/balance ping that fails on
+#                     HTTP 401/402 (dead or UNFUNDED key). M2's gap-term proposal
+#                     pass depends on a live, funded DeepSeek account; catching a
+#                     402 here prevents the "missing input discovered mid-build"
+#                     failure this milestone exists to prevent.
 ```
 
 ---
@@ -122,6 +127,8 @@ end of M0 and paste the output as the milestone deliverable.
 ## Acceptance criteria
 - `docker compose up -d && psql $DATABASE_URL -c "SELECT 1"` succeeds
 - `python verify_sources.py` prints no failures
+- `DEEPSEEK_API_KEY` passes a liveness probe (not merely present): a dead or
+  unfunded key (HTTP 401/402) fails at verify time, not mid-run
 - Corpus Thomisticum article count confirmed ≥ 2,669
 - Bahounek coordinate tags confirmed present in all four Partes
 - Freddoso coverage gaps documented (so M1 English ingest knows where to fall back)
