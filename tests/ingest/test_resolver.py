@@ -1,24 +1,24 @@
 """
-Tests for src/ingest/resolver.py — pure resolution logic, no DB.
+Tests for ingest resolver modules — pure resolution logic, no DB.
 """
 
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from ingest.resolver import (
-    _call_deepseek_batch,
+from ingest.deepseek import _call_deepseek_batch, _parse_batch_entry, get_api_stats
+from ingest.gap_terms import (
     _load_existing_gap_terms,
-    _parse_batch_entry,
     _propose_gap_terms,
-    _resolve_multi,
-    _resolve_single,
     _scan_gap_lemmas,
     _strip_lemma_suffix,
-    get_api_stats,
+    pilot_batch_sizes,
+)
+from ingest.resolution import (
+    _resolve_multi,
+    _resolve_single,
     mask_spans,
     phrase_match,
-    pilot_batch_sizes,
     resolve_segment,
 )
 
@@ -257,7 +257,7 @@ class TestCallDeepseekBatch:
             '{"ratio": {"category": "term", "slovak": "rozum"}, '
             '"anima": {"category": "term", "slovak": "duša"}}'
         )
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert result["ratio"] == {"category": "term", "slovak": "rozum"}
@@ -267,7 +267,7 @@ class TestCallDeepseekBatch:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "corpus", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '```json\n{"corpus": {"category": "term", "slovak": "telo"}}\n```'
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert result == {"corpus": {"category": "term", "slovak": "telo"}}
@@ -276,7 +276,7 @@ class TestCallDeepseekBatch:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "a", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '{"a": {"category": "term", "slovak": "x"}, "b": {"slovak": ""}}'
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert "a" in result and "b" not in result
@@ -284,7 +284,7 @@ class TestCallDeepseekBatch:
     def test_returns_empty_on_api_error(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "virtus", "best_latin": "", "best_czech": "", "best_english": ""}]
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.side_effect = Exception("timeout")
             result = _call_deepseek_batch(batch)
         assert result == {}
@@ -300,7 +300,7 @@ class TestCallDeepseekBatch:
         before = get_api_stats()["calls"]
         batch = [{"lemma": "pax", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '{"pax": {"category": "term", "slovak": "pokoj"}}'
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             _call_deepseek_batch(batch)
         assert get_api_stats()["calls"] == before + 1
@@ -380,7 +380,7 @@ class TestProposeGapTerms:
             "virtus": {"freq": 20, "best_latin": "virtus", "best_czech": "", "best_english": "virtue"},
             "anima": {"freq": 15, "best_latin": "anima", "best_czech": "duše", "best_english": "soul"},
         }
-        with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
+        with patch("ingest.gap_terms._call_deepseek_batch") as mock_batch:
             mock_batch.return_value = {
                 "virtus": self._entry(slovak="cnosť"),
                 "anima": self._entry(slovak="duša"),
@@ -401,7 +401,7 @@ class TestProposeGapTerms:
         }
         def fake_batch(batch):
             return {item["lemma"]: self._entry(slovak="božský") for item in batch}
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=fake_batch):
             result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
         assert set(result["terms"]) == {"divina", "divino", "divinus"}
         assert result["terms"]["divina"]["freq"] == 10
@@ -412,7 +412,7 @@ class TestProposeGapTerms:
     def test_missing_lemmas_are_dropped_not_stubbed(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = {"ratio": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}}
-        with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
+        with patch("ingest.gap_terms._call_deepseek_batch") as mock_batch:
             mock_batch.return_value = {}  # batch returns nothing
             result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
         assert result["terms"] == {}
@@ -429,7 +429,7 @@ class TestProposeGapTerms:
             calls.append(len(batch))
             return {item["lemma"]: self._entry(slovak=f"sk_{item['lemma']}") for item in batch}
 
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=fake_batch):
             result = _propose_gap_terms(gap_data, batch_size=3, max_workers=1)
 
         assert len(result["terms"]) == 10
@@ -439,7 +439,7 @@ class TestProposeGapTerms:
     def test_gap_terms_db_empty_without_conn(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = {"virtus": {"freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}}
-        with patch("ingest.resolver._call_deepseek_batch") as mock_batch:
+        with patch("ingest.gap_terms._call_deepseek_batch") as mock_batch:
             mock_batch.return_value = {"virtus": self._entry(slovak="cnosť")}
             result = _propose_gap_terms(gap_data, batch_size=10, max_workers=1)
         # Without conn no DB writes happen — gap_terms_db is empty
@@ -524,7 +524,7 @@ class TestWriteGapProposalsCollision:
         return conn, cur
 
     def test_skips_krystal_term_does_not_add_to_gap_terms_db(self):
-        from ingest.resolver import _write_gap_proposals
+        from ingest.gap_terms import _write_gap_proposals
         conn, _ = self._make_conn(existing_status="approved")
         proposals = {"terms": {"ratio": {"slovak": "rozum", "category": "term",
                                           "freq": 10, "best_latin": "", "best_czech": "", "best_english": ""}}}
@@ -532,7 +532,7 @@ class TestWriteGapProposalsCollision:
         assert "ratio" not in result  # Krystal term → skipped, not in gap_terms_db
 
     def test_gap_term_with_existing_proposed_sense_reuses_sense_id(self):
-        from ingest.resolver import _write_gap_proposals
+        from ingest.gap_terms import _write_gap_proposals
         conn, _ = self._make_conn(existing_status="proposed")
         proposals = {"terms": {"virtus": {"slovak": "cnosť", "category": "term",
                                            "freq": 20, "best_latin": "", "best_czech": "", "best_english": ""}}}
@@ -541,7 +541,7 @@ class TestWriteGapProposalsCollision:
         assert result["virtus"]["sense_id"] == 10  # reused existing proposed sense
 
     def test_new_gap_term_creates_sense(self):
-        from ingest.resolver import _write_gap_proposals
+        from ingest.gap_terms import _write_gap_proposals
         conn, _ = self._make_conn(existing_status=None)
         proposals = {"terms": {"disciplina": {"slovak": "disciplína", "category": "term",
                                                "freq": 5, "best_latin": "", "best_czech": "", "best_english": ""}}}
@@ -572,7 +572,7 @@ class TestPilotBatchSizes:
 
     def test_returns_one_result_per_batch_size(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=self._batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=self._batch):
             results = pilot_batch_sizes(self._gap_data(), top_n=10, batch_sizes=[5, 10])
         assert len(results) == 2
         assert results[0]["batch_size"] == 5
@@ -587,7 +587,7 @@ class TestPilotBatchSizes:
             seen.extend(item["lemma"] for item in batch)
             return self._batch(batch)
 
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=fake_batch):
             pilot_batch_sizes(gap_data, top_n=5, batch_sizes=[10])
 
         unique = set(seen)
@@ -597,7 +597,7 @@ class TestPilotBatchSizes:
 
     def test_result_contains_required_keys(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("ingest.resolver._call_deepseek_batch", return_value={}):
+        with patch("ingest.gap_terms._call_deepseek_batch", return_value={}):
             results = pilot_batch_sizes(self._gap_data(5), top_n=5, batch_sizes=[5])
         r = results[0]
         for key in ("batch_size", "calls", "input_tokens", "output_tokens", "cost_usd",
@@ -615,7 +615,7 @@ class TestPilotBatchSizes:
             "choices": [{"message": {"content": content}}],
             "usage": {"prompt_tokens": 200, "completion_tokens": 10},
         }
-        with patch("ingest.resolver.requests.post") as mock_post:
+        with patch("ingest.deepseek.requests.post") as mock_post:
             mock_post.return_value.raise_for_status = lambda: None
             mock_post.return_value.json.return_value = fake_resp
             results = pilot_batch_sizes(self._gap_data(2), top_n=2, batch_sizes=[10])
@@ -635,7 +635,7 @@ class TestPilotBatchSizes:
             return self._batch(batch)
 
         gap_data = self._gap_data(10)
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=fake_batch):
             pilot_batch_sizes(gap_data, top_n=10, batch_sizes=[5, 10])
 
         # Total calls = 2 (bs=5, 10 lemmas → 2 batches) + 1 (bs=10 → 1 batch)
@@ -648,7 +648,7 @@ class TestPilotBatchSizes:
         def fake_batch(batch):
             return {item["lemma"]: self._entry(item["lemma"], category=cats[item["lemma"]])
                     for item in batch}
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=fake_batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=fake_batch):
             results = pilot_batch_sizes(gap_data, top_n=4, batch_sizes=[10])
         assert results[0]["category_counts"] == {"term": 1, "name": 1, "formula": 1, "prose": 1}
 
@@ -656,7 +656,7 @@ class TestPilotBatchSizes:
         # No canonical merging — each CLTK lemma is its own entry in results
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = self._gap_data(3)  # lemma00, lemma01, lemma02
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=self._batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=self._batch):
             results = pilot_batch_sizes(gap_data, top_n=3, batch_sizes=[10])
         samples = results[0]["samples"]
         sample_lemmas = {s["lemma"] for s in samples}
@@ -664,7 +664,7 @@ class TestPilotBatchSizes:
 
     def test_empty_gap_data_returns_zero_cost(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("ingest.resolver._call_deepseek_batch", return_value={}):
+        with patch("ingest.gap_terms._call_deepseek_batch", return_value={}):
             results = pilot_batch_sizes({}, top_n=10, batch_sizes=[25])
         assert results[0]["cost_usd"] == 0.0
         assert results[0]["calls"] == 0
@@ -672,7 +672,7 @@ class TestPilotBatchSizes:
     def test_samples_in_frequency_order(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         gap_data = self._gap_data(10)
-        with patch("ingest.resolver._call_deepseek_batch", side_effect=self._batch):
+        with patch("ingest.gap_terms._call_deepseek_batch", side_effect=self._batch):
             results = pilot_batch_sizes(gap_data, top_n=10, batch_sizes=[10], sample_n=3)
         samples = results[0]["samples"]
         assert len(samples) == 3

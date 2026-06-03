@@ -65,3 +65,20 @@ cat reports/m2_coverage.txt
 ```
 Expected: ~3,496 lemmas scanned → fewer canonical terms after merge; rollup grouped by
 category; no bracketed stubs; logged cost ~$0.10–$10.
+
+## Pre-M3 Refactoring (planned, not yet started)
+
+`resolver.py` (1,120 LOC) mixes three concerns. Split it before M3 adds glossary write-back. Strangler strategy — one commit per step, suite green throughout. **Regression oracle:** `uv run python -m ingest.pipeline --step report` output must be identical before and after.
+
+| Step | New file | What moves | Commit prefix |
+|---|---|---|---|
+| 1 | `ingest/deepseek.py` | `_call_deepseek_batch`, `get_api_stats`, stats lock, cost constants, model/URL env | `refactor(ingest): extract DeepSeek client` |
+| 2 | `ingest/gap_terms.py` | `_strip_lemma_suffix`, `_scan_gap_lemmas`, `_load_existing_gap_terms`, `_ensure_glossary_term`, `_write_gap_proposals`, `_propose_gap_terms`, `pilot_batch_sizes` | `refactor(ingest): extract gap-term scanning and preseed` |
+| 3 | `ingest/resolution.py` | `phrase_match`, `mask_spans`, `_parse_batch_entry`, `_resolve_single`, `_resolve_multi`, `resolve_segment`, `_load_glossary`, `_load_segments`, `_write_term_usage` | `refactor(ingest): extract segment resolution logic` |
+| 4 | `resolver.py` slim | Retain only `run()` coordinator (~150 lines); re-export public names | `refactor(ingest): slim resolver to thin coordinator` |
+| 5 | `ingest/glossary_repo.py` | Move `_load_glossary`, `_load_segments` from resolution.py; add M3 stubs: `update_sense_status`, `bump_sense_version`, `write_human_rendering` (raise NotImplementedError) | `refactor(ingest): introduce glossary_repo as M3 write seam` |
+
+**Excluded from this refactor:**
+- Parser base class extraction — deferred until full Latin scan reveals contract (per `.claude/m2_migration.md`)
+- `models.py` / dataclasses — add once M3 types emerge from design
+- No new dependencies
