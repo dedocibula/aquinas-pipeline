@@ -76,7 +76,7 @@ def _step_resolve() -> None:
     from ingest.resolver import run
 
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
-    batch_size = int(os.environ.get("GAP_BATCH_SIZE", "25"))
+    batch_size = int(os.environ.get("GAP_BATCH_SIZE", "50"))
     max_workers = int(os.environ.get("GAP_MAX_WORKERS", "10"))
 
     print(

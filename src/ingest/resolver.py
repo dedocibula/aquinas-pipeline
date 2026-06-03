@@ -73,7 +73,7 @@ _GAP_FREQ_FLOOR: int = 10
 # proposal (filters most Latin function words). No POS filter, no word lists —
 # precision is handled dynamically by the model's category (see _GAP_CATEGORIES).
 _GAP_MIN_LEN: int = 5
-_GAP_BATCH_SIZE: int = 25   # lemmas per DeepSeek batch call
+_GAP_BATCH_SIZE: int = 50   # lemmas per DeepSeek batch call
 _GAP_MAX_WORKERS: int = 10  # concurrent batch requests
 
 # Model-assigned gap-term categories (stored in glossary_term.category, overridable
@@ -100,79 +100,19 @@ _DEEPSEEK_URL = os.environ.get(
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 
-def _call_deepseek(
-    latin_lemma: str,
-    context_snippet: str,
-    czech_ref: str,
-    english_ref: str,
-) -> str:
-    """Propose a Slovak term for a gap lemma via DeepSeek V3.
-
-    Returns a proposed single Slovak word/term, or a fallback stub on error.
-    """
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "DEEPSEEK_API_KEY is not set. "
-            "Export it before running the resolver with model_proposed terms."
-        )
-
-    prompt = (
-        f"You are a Slovak theological terminologist. "
-        f"Propose a single Slovak term (one word or short phrase) for the Latin lemma '{latin_lemma}'.\n"
-        f"Context (Latin): {context_snippet[:300]}\n"
-    )
-    if czech_ref:
-        prompt += f"Czech reference: {czech_ref[:200]}\n"
-    if english_ref:
-        prompt += f"English reference: {english_ref[:200]}\n"
-    prompt += (
-        "Respond with ONLY the Slovak term — no explanation, no punctuation, no quotes. "
-        "If unsure, give your best single-word guess."
-    )
-
-    with _api_stats_lock:
-        _api_stats["calls"] += 1  # count every attempt, including failures
-    try:
-        resp = requests.post(
-            _DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": _DEEPSEEK_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 20,
-                "temperature": 0.0,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        usage = data.get("usage", {})
-        with _api_stats_lock:
-            _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
-            _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
-
-        term = data["choices"][0]["message"]["content"].strip()
-        return term or f"[model_proposed: {latin_lemma}]"
-
-    except Exception as exc:
-        print(f"  [WARN] DeepSeek API error for {latin_lemma!r}: {exc}", flush=True)
-        return f"[model_proposed: {latin_lemma}]"
 
 
 def _parse_batch_entry(input_lemma: str, value) -> dict | None:
-    """Normalize one model entry into {canonical, category, slovak}.
+    """Normalize one model entry into {category, slovak}.
 
     Returns None for malformed entries (caller fills a fallback). Accepts a plain
-    string (legacy/loose model output) by treating it as the slovak term with the
-    input lemma as canonical and no category.
+    string (legacy/loose model output) by treating it as the slovak term with no category.
     """
     if isinstance(value, str):
         slovak = value.strip()
         if not slovak:
             return None
-        return {"canonical": input_lemma, "category": None, "slovak": slovak}
+        return {"category": None, "slovak": slovak}
 
     if not isinstance(value, dict):
         return None
@@ -180,20 +120,19 @@ def _parse_batch_entry(input_lemma: str, value) -> dict | None:
     slovak = str(value.get("slovak", "")).strip()
     if not slovak:
         return None
-    canonical = str(value.get("canonical", "")).strip() or input_lemma
     category = value.get("category")
     if category is not None:
         category = str(category).strip().lower()
         if category not in _GAP_CATEGORIES:
             category = None
-    return {"canonical": canonical, "category": category, "slovak": slovak}
+    return {"category": category, "slovak": slovak}
 
 
 def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
-    """Classify, canonicalize, and translate a batch of Latin gap lemmas in one call.
+    """Classify and translate a batch of Latin gap lemmas in one call.
 
     Each item: {"lemma": str, "best_latin": str, "best_czech": str, "best_english": str}
-    Returns {input_lemma: {"canonical": str, "category": str|None, "slovak": str}}.
+    Returns {input_lemma: {"category": str|None, "slovak": str}}.
     Missing/malformed entries are omitted; the caller fills per-lemma fallbacks.
     """
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -216,17 +155,14 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
 
     prompt = (
         "You are a Slovak theological terminologist working on Thomas Aquinas's Summa Theologiae.\n"
-        "For each Latin lemma below (with Czech/English context excerpts), return three fields:\n"
-        '  "canonical" — the Latin dictionary headword (nominative singular for nouns/adjectives,\n'
-        "                present infinitive/1st-person for verbs). Collapse inflected or\n"
-        "                mis-lemmatized forms (e.g. divina, divino → divinus; Angelis → angelus).\n"
-        '  "category"  — one of: "term" (theological/philosophical content word),\n'
-        '                "name" (proper noun, e.g. Christus, Augustinus, philosophus=Aristotle),\n'
-        '                "formula" (recurring structural/formulaic connective, e.g. Praeterea,\n'
-        '                Respondeo, Videtur), "prose" (ordinary verb/quantifier/function word).\n'
-        '  "slovak"    — the single best Slovak rendering of the canonical form.\n'
+        "For each Latin lemma below (with Czech/English context excerpts), return two fields:\n"
+        '  "category" — one of: "term" (theological/philosophical content word),\n'
+        '               "name" (proper noun, e.g. Christus, Augustinus, philosophus=Aristotle),\n'
+        '               "formula" (recurring structural/formulaic connective, e.g. Praeterea,\n'
+        '               Respondeo, Videtur), "prose" (ordinary verb/quantifier/function word).\n'
+        '  "slovak"   — the single best Slovak rendering of this lemma.\n'
         'Respond ONLY with a JSON object keyed by the input lemma:\n'
-        '  {"<input_lemma>": {"canonical": "...", "category": "...", "slovak": "..."}, ...}\n'
+        '  {"<input_lemma>": {"category": "...", "slovak": "..."}, ...}\n'
         "No explanations, no markdown fences, no extra text.\n\n"
         "Lemmas:\n" + "\n".join(lines)
     )
@@ -240,7 +176,7 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
             json={
                 "model": _DEEPSEEK_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": len(batch) * 40,
+                "max_tokens": len(batch) * 60,
                 "temperature": 0.0,
             },
             timeout=60,
@@ -258,8 +194,11 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
         content = re.sub(r"```(?:json)?\s*", "", content).replace("```", "").strip()
         result = json.loads(content)
 
+        valid_lemmas = {item["lemma"] for item in batch}
         parsed: dict[str, dict] = {}
         for k, v in result.items():
+            if str(k) not in valid_lemmas:
+                continue  # model hallucinated a key not in the input batch
             entry = _parse_batch_entry(str(k), v)
             if entry is not None:
                 parsed[str(k)] = entry
@@ -597,25 +536,23 @@ def _propose_gap_terms(
     gap_data: dict[str, dict],
     batch_size: int = _GAP_BATCH_SIZE,
     max_workers: int = _GAP_MAX_WORKERS,
+    conn=None,
+    src_model: int | None = None,
 ) -> dict:
-    """Batch-call DeepSeek to classify, canonicalize, and translate gap lemmas.
+    """Batch-call DeepSeek to classify and translate gap lemmas.
 
-    Returns a dict:
+    Each CLTK lemma is its own key — no canonicalization, no fragment merging.
+    When conn + src_model are supplied each successful batch is written to DB
+    immediately after it completes — no re-translation cost on retry runs.
+
+    Returns:
       {
-        "canonical_map": {input_lemma: canonical_lemma},      # for resolve_segment
-        "terms":         {canonical_lemma: {slovak, category, freq,
-                                            best_latin, best_czech, best_english}},
-        "dropped":       [input_lemma, ...],                   # batch failed/omitted
+        "terms":        {lemma: {slovak, category, freq, best_latin, best_czech, best_english}},
+        "dropped":      [lemma, ...],   # batch failed / model omitted
+        "gap_terms_db": {lemma: {term_id, sense_id, version, category, slovak}}
+                        (populated only when conn is provided),
       }
-
-    Fragments that the model maps to the same canonical headword (divina/divino/
-    divinus → divinus) are merged: frequencies summed, category majority-voted, the
-    Slovak/context taken from the highest-frequency contributor. Lemmas whose batch
-    failed are returned in `dropped` and produce NO term/sense — the no-stub
-    invariant means they simply do not become terms this run (logged loudly).
     """
-    from collections import Counter
-
     items = [
         {
             "lemma": lemma,
@@ -633,15 +570,40 @@ def _propose_gap_terms(
         flush=True,
     )
 
-    raw: dict[str, dict] = {}  # input_lemma → {canonical, category, slovak}
+    raw: dict[str, dict] = {}  # lemma → {category, slovak}
+    gap_terms_db: dict[str, dict] = {}
     completed = 0
+
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_batch = {pool.submit(_call_deepseek_batch, b): b for b in batches}
         for future in as_completed(future_to_batch):
             try:
-                raw.update(future.result())
+                batch_raw = future.result()
             except Exception as exc:
                 print(f"  [WARN] batch failed, lemmas dropped this run: {exc}", flush=True)
+                completed += 1
+                if completed % 20 == 0 or completed == len(batches):
+                    print(f"  {completed}/{len(batches)} batches complete", flush=True)
+                continue
+
+            raw.update(batch_raw)
+
+            # Write this batch's proposals to DB immediately when conn is supplied.
+            if conn is not None and src_model is not None and batch_raw:
+                batch_terms = {
+                    lemma: {
+                        "slovak": entry["slovak"],
+                        "category": entry["category"],
+                        "freq": gap_data[lemma]["freq"],
+                        "best_latin": gap_data[lemma]["best_latin"],
+                        "best_czech": gap_data[lemma]["best_czech"],
+                        "best_english": gap_data[lemma]["best_english"],
+                    }
+                    for lemma, entry in batch_raw.items()
+                }
+                new_entries = _write_gap_proposals(conn, {"terms": batch_terms}, src_model)
+                gap_terms_db.update(new_entries)
+
             completed += 1
             if completed % 20 == 0 or completed == len(batches):
                 print(f"  {completed}/{len(batches)} batches complete", flush=True)
@@ -654,48 +616,26 @@ def _propose_gap_terms(
             flush=True,
         )
 
-    canonical_map: dict[str, str] = {}
-    terms: dict[str, dict] = {}
-    for lemma, entry in raw.items():
-        canonical = entry["canonical"]
-        canonical_map[lemma] = canonical
-        freq = gap_data[lemma]["freq"]
-        t = terms.get(canonical)
-        if t is None:
-            t = terms[canonical] = {
-                "slovak": entry["slovak"],
-                "category_votes": Counter(),
-                "freq": 0,
-                "best_latin": "",
-                "best_czech": "",
-                "best_english": "",
-                "_best_freq": -1,
-            }
-        t["freq"] += freq
-        if entry["category"]:
-            t["category_votes"][entry["category"]] += freq
-        # Take the Slovak + context from the highest-frequency contributing fragment.
-        if freq > t["_best_freq"]:
-            t["_best_freq"] = freq
-            t["slovak"] = entry["slovak"]
-            gd = gap_data[lemma]
-            t["best_latin"] = gd["best_latin"]
-            t["best_czech"] = gd["best_czech"]
-            t["best_english"] = gd["best_english"]
+    terms = {
+        lemma: {
+            "slovak": entry["slovak"],
+            "category": entry["category"],
+            "freq": gap_data[lemma]["freq"],
+            "best_latin": gap_data[lemma]["best_latin"],
+            "best_czech": gap_data[lemma]["best_czech"],
+            "best_english": gap_data[lemma]["best_english"],
+        }
+        for lemma, entry in raw.items()
+    }
 
-    for t in terms.values():
-        votes = t.pop("category_votes")
-        t.pop("_best_freq")
-        t["category"] = votes.most_common(1)[0][0] if votes else None
-
-    return {"canonical_map": canonical_map, "terms": terms, "dropped": dropped}
+    return {"terms": terms, "dropped": dropped, "gap_terms_db": gap_terms_db}
 
 
 def _write_gap_proposals(conn, proposals: dict, src_model: int) -> dict[str, dict]:
-    """Pre-write glossary_term(category) + glossary_sense + sense_rendering per canonical term.
+    """Pre-write glossary_term(category) + glossary_sense + sense_rendering per gap term.
 
     Uses DO UPDATE for sense_rendering so re-runs refresh proposals. Returns
-    gap_terms_db: {canonical_lemma: {term_id, sense_id, version, category, slovak}}
+    gap_terms_db: {lemma: {term_id, sense_id, version, category, slovak}}
     for the main loop to attach term_usage rows to.
     """
     gap_terms_db: dict[str, dict] = {}
@@ -704,15 +644,20 @@ def _write_gap_proposals(conn, proposals: dict, src_model: int) -> dict[str, dic
         category = term["category"]
         term_id = _ensure_glossary_term(conn, lemma, category)
         with conn.cursor() as cur:
+            # If this CLTK lemma is already a Krystal term (has an approved sense),
+            # skip creating a gap proposal — it resolves via the Krystal path in Phase 2.
+            cur.execute(
+                "SELECT sense_id, status FROM glossary_sense "
+                "WHERE term_id = %s AND context_label IS NULL",
+                (term_id,),
+            )
+            existing = cur.fetchone()
+            if existing is not None and existing[1] == "approved":
+                continue
             # glossary_sense has no unique constraint covering (term_id, NULL context_label)
             # because NULLs are not equal under standard SQL uniqueness. Use explicit
             # SELECT-then-INSERT to avoid duplicate proposed senses on re-runs.
-            cur.execute(
-                "SELECT sense_id FROM glossary_sense "
-                "WHERE term_id = %s AND context_label IS NULL AND status = 'proposed'",
-                (term_id,),
-            )
-            row = cur.fetchone()
+            row = existing  # may be an existing proposed sense
             if row is None:
                 cur.execute(
                     "INSERT INTO glossary_sense (term_id, context_label, status) "
@@ -744,6 +689,37 @@ def _write_gap_proposals(conn, proposals: dict, src_model: int) -> dict[str, dic
     return gap_terms_db
 
 
+def _load_existing_gap_terms(conn) -> dict[str, dict]:
+    """Return {latin_lemma: {term_id, sense_id, version, category, slovak}}
+    for all gap terms already written to DB (proposed status, sk rendering present).
+    Used on re-runs to skip re-calling DeepSeek for already-translated lemmas.
+    Each key is the CLTK lemma (after suffix strip) — not a DeepSeek-corrected canonical.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT gt.latin_lemma, gt.term_id, gs.sense_id, gs.version,
+                   gt.category, sr.content
+            FROM glossary_term gt
+            JOIN glossary_sense gs
+              ON gs.term_id = gt.term_id AND gs.context_label IS NULL
+            JOIN sense_rendering sr
+              ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+            WHERE gs.status = 'proposed'
+            """
+        )
+        return {
+            row[0]: {
+                "term_id": row[1],
+                "sense_id": row[2],
+                "version": row[3],
+                "category": row[4],
+                "slovak": row[5],
+            }
+            for row in cur.fetchall()
+        }
+
+
 # ── Main resolution loop ──────────────────────────────────────────────────────
 
 
@@ -753,22 +729,20 @@ def resolve_segment(
     lemma_to_term: dict[str, dict],
     cs_rank: int,
     en_rank: int,
-    gap_canonical_map: dict[str, str] | None = None,
     gap_terms_db: dict[str, dict] | None = None,
     min_len: int = _GAP_MIN_LEN,
 ) -> list[Resolution]:
     """Resolve all terms in one segment. Returns list of Resolutions.
 
-    No-stub invariant: a gap lemma becomes a term_usage Resolution ONLY if its
-    canonical headword (via gap_canonical_map) is present in gap_terms_db — i.e.
-    it received a model proposal in Phase 1. Lemmas with no proposal are skipped
-    entirely; they never produce a bracketed stub or an orphan term_usage row.
-    Gap senses are pre-written by Phase 1, so this function performs no DB writes.
+    No-stub invariant: a gap lemma becomes a term_usage Resolution ONLY if it
+    is present in gap_terms_db — i.e. it received a model proposal in Phase 1.
+    Lemmas with no proposal are skipped entirely; they never produce a bracketed
+    stub or an orphan term_usage row. Gap senses are pre-written by Phase 1,
+    so this function performs no DB writes.
     """
     latin = segment["latin"] or ""
     czech = segment["czech"]
     english = segment["english"]
-    gap_canonical_map = gap_canonical_map or {}
     gap_terms_db = gap_terms_db or {}
 
     resolutions: list[Resolution] = []
@@ -820,7 +794,7 @@ def resolve_segment(
         if len(stripped) > min_len:
             gap_candidates.add(stripped)
 
-    # 3. Gap terms: only those whose canonical headword received a Phase-1 proposal.
+    # 3. Gap terms: only those that received a Phase-1 proposal (in gap_terms_db).
     # Method label reflects available context; the proposal itself is the model's.
     if czech:
         method = "bahounek_derived"
@@ -829,15 +803,10 @@ def resolve_segment(
     else:
         method = "model_proposed"
 
-    seen_canonical: set[str] = set()
     for stripped in sorted(gap_candidates):
-        canonical = gap_canonical_map.get(stripped)
-        if canonical is None:
+        db = gap_terms_db.get(stripped)
+        if db is None:
             continue
-        db = gap_terms_db.get(canonical)
-        if db is None or canonical in seen_canonical:
-            continue
-        seen_canonical.add(canonical)
 
         sense = {
             "sense_id": db["sense_id"],
@@ -850,7 +819,7 @@ def resolve_segment(
         }
         gap_term = {
             "term_id": db["term_id"],
-            "latin_lemma": canonical,
+            "latin_lemma": stripped,
             "is_multiword": False,
             "senses": [sense],
         }
@@ -933,24 +902,43 @@ def run(
     print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword Krystal terms")
     print(f"  Segments: {len(segments)} body segments to resolve")
 
-    # ── Phase 1: scan, batch-propose (classify + canonicalize + translate) ────
+    # ── Phase 1: scan, batch-propose (classify + translate) ─────────────────────
     print("\n[Phase 1] Scanning gap lemmas...")
     gap_data = _scan_gap_lemmas(segments, krystal_lemmas, freq_floor, min_len)
     print(f"  {len(gap_data)} gap lemmas qualify (freq≥{freq_floor}, len>{min_len})")
 
-    proposals: dict = {"canonical_map": {}, "terms": {}, "dropped": []}
     gap_terms_db: dict[str, dict] = {}
-    if gap_data:
-        proposals = _propose_gap_terms(gap_data, batch_size=batch_size, max_workers=max_workers)
-        with get_conn() as conn:
-            src_model_conn = source_id(conn, "model")
-            gap_terms_db = _write_gap_proposals(conn, proposals, src_model_conn)
-        print(
-            f"  {len(gap_terms_db)} canonical gap terms pre-written to DB "
-            f"(merged from {len(proposals['canonical_map'])} lemmas)"
-        )
 
-    canonical_map = proposals["canonical_map"]
+    if gap_data:
+        # Load what was already proposed in a previous (possibly partial) run.
+        # Each CLTK lemma is its own key — no fragment mapping needed.
+        with get_conn() as conn:
+            existing = _load_existing_gap_terms(conn)
+            src_model_id = source_id(conn, "model")
+
+        if existing:
+            print(f"  {len(existing)} gap terms already in DB — skipping DeepSeek for those")
+            gap_terms_db.update(existing)
+            for lemma in list(gap_data):
+                if lemma in existing:
+                    del gap_data[lemma]
+
+        if gap_data:
+            with get_conn() as conn:
+                proposals = _propose_gap_terms(
+                    gap_data,
+                    batch_size=batch_size,
+                    max_workers=max_workers,
+                    conn=conn,
+                    src_model=src_model_id,
+                )
+            gap_terms_db.update(proposals["gap_terms_db"])
+            print(
+                f"  {len(gap_terms_db)} gap terms total in DB "
+                f"(+{len(proposals['gap_terms_db'])} new)"
+            )
+        else:
+            print("  All gap lemmas already proposed — no DeepSeek calls needed")
 
     # ── Phase 2: main resolution loop ────────────────────────────────────────
     print(f"\n[Phase 2] Resolving {len(segments)} segments...")
@@ -967,7 +955,7 @@ def run(
         for i, seg in enumerate(segments, 1):
             resolutions = resolve_segment(
                 seg, multiword_terms, lemma_to_term,
-                cs_rank, en_rank, canonical_map, gap_terms_db, min_len,
+                cs_rank, en_rank, gap_terms_db, min_len,
             )
             n = _write_term_usage(conn, seg["segment_id"], resolutions)
             total_usages += n
@@ -1037,13 +1025,11 @@ def pilot_batch_sizes(
     from collections import Counter
 
     def _sk(proposals: dict, lemma: str) -> str:
-        canonical = proposals["canonical_map"].get(lemma)
-        term = proposals["terms"].get(canonical) if canonical else None
+        term = proposals["terms"].get(lemma)
         return term["slovak"] if term else "???"
 
     def _cat(proposals: dict, lemma: str) -> str | None:
-        canonical = proposals["canonical_map"].get(lemma)
-        term = proposals["terms"].get(canonical) if canonical else None
+        term = proposals["terms"].get(lemma)
         return term["category"] if term else None
 
     top_order = sorted(top_lemmas, key=lambda lm: -top_lemmas[lm]["freq"])
@@ -1063,17 +1049,8 @@ def pilot_batch_sizes(
         d_out = stats_after["output_tokens"] - stats_before["output_tokens"]
         cost = (d_in * 0.00014 + d_out * 0.00028) / 1000
 
-        # Category distribution across the canonical terms produced.
         cat_counts = Counter(
             (t["category"] or "uncategorized") for t in proposals["terms"].values()
-        )
-        # Canonical-merge examples: canonicals that >1 input lemma mapped to.
-        inverse: dict[str, list[str]] = {}
-        for inp, canon in proposals["canonical_map"].items():
-            inverse.setdefault(canon, []).append(inp)
-        merges = sorted(
-            ((canon, sorted(inps)) for canon, inps in inverse.items() if len(inps) > 1),
-            key=lambda x: -len(x[1]),
         )
 
         per_size_proposals[bs] = proposals
@@ -1085,11 +1062,9 @@ def pilot_batch_sizes(
             "cost_usd": round(cost, 6),
             "cost_per_lemma": round(cost / n_pilot, 8) if n_pilot else 0.0,
             "category_counts": dict(cat_counts),
-            "merges": merges,
             "samples": [
                 {
                     "lemma": lm,
-                    "canonical": proposals["canonical_map"].get(lm, lm),
                     "category": _cat(proposals, lm),
                     "slovak": _sk(proposals, lm),
                     "freq": top_lemmas[lm]["freq"],
@@ -1114,12 +1089,6 @@ def pilot_batch_sizes(
     if last["category_counts"]:
         dist = ", ".join(f"{c}={n}" for c, n in sorted(last["category_counts"].items()))
         print(f"\nCategory distribution (bs={last['batch_size']}): {dist}")
-
-    # ── canonical-merge examples ──────────────────────────────────────────────
-    if last["merges"]:
-        print("Canonical merges (fragments → headword):")
-        for canon, inps in last["merges"][:sample_n]:
-            print(f"  {', '.join(inps)} → {canon}")
 
     # ── side-by-side sample terms ─────────────────────────────────────────────
     if top_order:

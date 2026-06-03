@@ -176,20 +176,32 @@ _STUB_RE = re.compile(r"^\[")
 
 
 def assert_no_stub_proposals(rows: list[dict]) -> None:
-    """Fail loudly if any proposed_slovak is a bracketed stub (e.g. '[model_proposed: x]').
+    """Fail loudly if any proposed_slovak is a bracketed stub or NULL.
 
-    M2 acceptance criterion: no stub may reach the review export. We raise rather
-    than swallow so a bad run aborts before writing a poisoned roll-up.
+    M2 acceptance criterion: no stub and no missing rendering may reach the review
+    export. We raise rather than swallow so a bad run aborts before writing a
+    poisoned roll-up.
     """
-    offenders = [
+    stubs = [
         row["latin_lemma"]
         for row in rows
         if row.get("proposed_slovak") and _STUB_RE.match(row["proposed_slovak"])
     ]
-    if offenders:
+    nulls = [
+        row["latin_lemma"]
+        for row in rows
+        if not row.get("proposed_slovak")
+        and row.get("resolution_method") in {"bahounek_derived", "english_derived", "model_proposed"}
+    ]
+    if stubs:
         raise RuntimeError(
-            f"Dedup roll-up contains {len(offenders)} bracketed stub proposal(s) "
-            f"that must never reach review: {', '.join(sorted(set(offenders)))}"
+            f"Dedup roll-up contains {len(stubs)} bracketed stub proposal(s) "
+            f"that must never reach review: {', '.join(sorted(set(stubs)))}"
+        )
+    if nulls:
+        raise RuntimeError(
+            f"Dedup roll-up contains {len(nulls)} gap term(s) with NULL Slovak rendering: "
+            f"{', '.join(sorted(set(nulls)))}"
         )
 
 

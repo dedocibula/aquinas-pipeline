@@ -118,27 +118,46 @@ class TestWriteDedupRollup:
 class TestAssertNoStubProposals:
     def test_passes_when_no_stubs(self):
         rows = [
-            {"latin_lemma": "ratio", "proposed_slovak": "rozum"},
-            {"latin_lemma": "gratia", "proposed_slovak": "milosť"},
-            {"latin_lemma": "novum", "proposed_slovak": None},  # NULL is fine
+            {"latin_lemma": "ratio", "proposed_slovak": "rozum", "resolution_method": "krystal_single"},
+            {"latin_lemma": "gratia", "proposed_slovak": "milosť", "resolution_method": "bahounek_derived"},
+            # NULL is fine for Krystal terms (no gap resolution_method)
+            {"latin_lemma": "novum", "proposed_slovak": None, "resolution_method": "krystal_single"},
         ]
         assert_no_stub_proposals(rows)  # must not raise
 
     def test_raises_on_bracketed_stub(self):
         rows = [
-            {"latin_lemma": "ratio", "proposed_slovak": "rozum"},
+            {"latin_lemma": "ratio", "proposed_slovak": "rozum", "resolution_method": "krystal_single"},
             {"latin_lemma": "transsubstantiatio",
-             "proposed_slovak": "[model_proposed: transsubstantiatio]"},
+             "proposed_slovak": "[model_proposed: transsubstantiatio]",
+             "resolution_method": "bahounek_derived"},
         ]
         with pytest.raises(RuntimeError) as exc:
             assert_no_stub_proposals(rows)
         assert "transsubstantiatio" in str(exc.value)
-        assert "1" in str(exc.value)  # count of offenders
+        assert "1" in str(exc.value)
+
+    def test_raises_on_null_for_gap_term(self):
+        # A gap term with NULL proposed_slovak means the rendering is missing entirely
+        rows = [
+            {"latin_lemma": "virtus", "proposed_slovak": None, "resolution_method": "bahounek_derived"},
+        ]
+        with pytest.raises(RuntimeError) as exc:
+            assert_no_stub_proposals(rows)
+        assert "virtus" in str(exc.value)
+
+    def test_null_ok_for_krystal_terms(self):
+        # NULL proposed_slovak is fine for Krystal/non-gap methods
+        rows = [
+            {"latin_lemma": "ratio", "proposed_slovak": None, "resolution_method": "krystal_single"},
+            {"latin_lemma": "gratia", "proposed_slovak": None, "resolution_method": "krystal_multi_voted"},
+        ]
+        assert_no_stub_proposals(rows)  # must not raise
 
     def test_reports_all_offenders(self):
         rows = [
-            {"latin_lemma": "alpha", "proposed_slovak": "[model_proposed: alpha]"},
-            {"latin_lemma": "beta", "proposed_slovak": "[model_proposed: beta]"},
+            {"latin_lemma": "alpha", "proposed_slovak": "[model_proposed: alpha]", "resolution_method": "model_proposed"},
+            {"latin_lemma": "beta", "proposed_slovak": "[model_proposed: beta]", "resolution_method": "english_derived"},
         ]
         with pytest.raises(RuntimeError) as exc:
             assert_no_stub_proposals(rows)
