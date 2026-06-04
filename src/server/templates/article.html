@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article_title }} — Aquinas Pipeline{% endblock %}
+
+{% block breadcrumb %}
+  {# Derive question path from article path: drop last component #}
+  {% set q_path_parts = article_path.split('.')[:-1] %}
+  {% set q_ltree = q_path_parts | join('.') %}
+  {# Rebuild question URL locator #}
+  {% set q_url_parts = [] %}
+  {% for p in q_path_parts %}
+    {% if p.startswith('q') and p[1:].isdigit() %}
+      {% set _ = q_url_parts.append('Q' + p[1:]) %}
+    {% elif p.startswith('a') and p[1:].isdigit() %}
+      {% set _ = q_url_parts.append('A' + p[1:]) %}
+    {% else %}
+      {% set _ = q_url_parts.append(p.upper()) %}
+    {% endif %}
+  {% endfor %}
+  {% set q_url = 'ST.' + q_url_parts | join('.') %}
+  &rsaquo; <a href="/la/sk/~{{ q_url }}">{{ q_url }}</a>
+  &rsaquo; <span>{{ article_title }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="article-nav">
+  {% if nav.prev %}
+    <a href="/la/sk/~{{ nav.prev }}" class="nav-prev">&larr; {{ nav.prev }}</a>
+  {% else %}
+    <span class="nav-prev nav-disabled">&larr; (first)</span>
+  {% endif %}
+
+  <h1 class="article-title">{{ article_title }}</h1>
+
+  {% if nav.next %}
+    <a href="/la/sk/~{{ nav.next }}" class="nav-next">{{ nav.next }} &rarr;</a>
+  {% else %}
+    <span class="nav-next nav-disabled">(last) &rarr;</span>
+  {% endif %}
+</div>
+
+<table class="parallel-text">
+  <thead>
+    <tr>
+      <th class="col-label">Element</th>
+      <th class="col-latin">Latin</th>
+      <th class="col-slovak">Slovak</th>
+      <th class="col-status">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for seg in segments %}
+      {# Determine element label #}
+      {% set etype = seg.element_type %}
+      {% if etype == 'arg' %}
+        {% set label = 'Námietka ' + arg_number[seg.segment_id] | string + '.' %}
+      {% elif etype == 'sed_contra' %}
+        {% set label = formulas.get('sed_contra', 'Na druhej strane:') %}
+      {% elif etype == 'respondeo' %}
+        {% set label = formulas.get('respondeo', 'Odpoveď:') %}
+      {% elif etype == 'reply' %}
+        {% if seg.segment_id in reply_number %}
+          {% set label = 'K námietke ' + reply_number[seg.segment_id] | string + '.' %}
+        {% else %}
+          {% set label = 'K námietke.' %}
+        {% endif %}
+      {% else %}
+        {% set label = etype %}
+      {% endif %}
+
+      {# Status badge #}
+      {% set ts = seg.translation_status %}
+      {% if ts == 'translated' %}
+        {% set badge_html = '<span class="badge badge-ok" title="translated">&#10003;</span>' %}
+      {% elif ts == 'needs_human' %}
+        {% set badge_html = '<span class="badge badge-warn" title="needs review">&#9888;</span>' %}
+      {% else %}
+        {% set badge_html = '<span class="badge badge-pending" title="pending">&#8230;</span>' %}
+      {% endif %}
+
+      <tr class="row-{{ etype }}">
+        <td class="col-label">
+          {% if seg.reviewer_notes %}
+            <abbr title="{{ seg.reviewer_notes }}">{{ label }} &#8505;</abbr>
+          {% else %}
+            {{ label }}
+          {% endif %}
+        </td>
+        <td class="col-latin latin">{{ seg.latin or '' }}</td>
+        <td class="col-slovak slovak">
+          {% if seg.slovak %}
+            {{ seg.slovak }}
+          {% else %}
+            <em class="awaiting">— awaiting translation —</em>
+          {% endif %}
+        </td>
+        <td class="col-status">{{ badge_html | safe }}</td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="4">No segments found for this article.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

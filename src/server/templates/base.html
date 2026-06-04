@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Aquinas Pipeline{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="breadcrumb">
+      <a href="/">Aquinas Pipeline</a>
+      {% block breadcrumb %}{% endblock %}
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <small>Read-only preview — Aquinas Pipeline M4</small>
+  </footer>
+</body>
+</html>

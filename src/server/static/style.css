@@ -1,0 +1,245 @@
+/* -----------------------------------------------------------------------
+   Aquinas Pipeline — preview server stylesheet
+   ----------------------------------------------------------------------- */
+
+/* --- Reset & base --- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: #222;
+  background: #fafaf8;
+  margin: 0;
+  padding: 0;
+}
+
+a {
+  color: #5a3e1b;
+}
+
+a:hover {
+  color: #b35c00;
+}
+
+/* --- Layout --- */
+.site-header {
+  background: #2c1a0e;
+  color: #f5f0e8;
+  padding: 0.6rem 1.5rem;
+}
+
+.site-header a {
+  color: #f5f0e8;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.site-header a:hover {
+  color: #f8d48a;
+}
+
+.breadcrumb {
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 1100px;
+  margin: 1.5rem auto;
+  padding: 0 1.5rem;
+}
+
+.site-footer {
+  text-align: center;
+  padding: 1rem;
+  color: #888;
+  font-size: 0.8rem;
+  border-top: 1px solid #e0d8cc;
+  margin-top: 2rem;
+}
+
+/* --- Index page --- */
+.pars-section {
+  margin-bottom: 2rem;
+}
+
+.pars-section h2 {
+  font-size: 1.2rem;
+  border-bottom: 2px solid #d4c9b0;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.question-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+}
+
+.question-list li a {
+  font-size: 0.95rem;
+}
+
+/* --- Progress bar --- */
+.progress-bar-section {
+  margin-bottom: 2rem;
+}
+
+.progress-track {
+  height: 16px;
+  background: #e8e0d0;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 500px;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #4a8c3f;
+  transition: width 0.3s;
+}
+
+.progress-legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+/* --- Article list table (question.html) --- */
+.article-list {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 700px;
+}
+
+.article-list th,
+.article-list td {
+  padding: 0.4rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid #e0d8cc;
+}
+
+.article-list th {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+}
+
+/* --- Article nav --- */
+.article-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.2rem;
+  gap: 1rem;
+}
+
+.article-title {
+  flex: 1;
+  text-align: center;
+  font-size: 1.4rem;
+  margin: 0;
+}
+
+.nav-prev,
+.nav-next {
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.nav-disabled {
+  color: #bbb;
+}
+
+/* --- Parallel text table --- */
+.parallel-text {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.parallel-text th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 2px solid #c8bfa8;
+  text-align: left;
+}
+
+.parallel-text td {
+  padding: 0.6rem 0.8rem;
+  vertical-align: top;
+  border-bottom: 1px solid #e8e0d0;
+}
+
+/* Column widths */
+.col-label  { width: 13%; }
+.col-latin  { width: 40%; }
+.col-slovak { width: 40%; }
+.col-status { width: 7%;  text-align: center; }
+
+/* --- Element-type colour coding --- */
+.row-arg td {
+  background: #e8f0fb;
+}
+
+.row-sed_contra td {
+  background: #fdf8e1;
+}
+
+.row-respondeo td {
+  background: #eaf7ec;
+}
+
+.row-reply td {
+  background: #ffffff;
+}
+
+/* --- Latin / Slovak cell text --- */
+.latin {
+  font-style: italic;
+  color: #444;
+}
+
+.slovak {
+  color: #111;
+}
+
+.awaiting {
+  color: #aaa;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+/* --- Badges --- */
+.badge {
+  display: inline-block;
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  font-size: 0.85rem;
+  font-family: sans-serif;
+}
+
+.badge-ok {
+  background: #d4edda;
+  color: #2d6a35;
+}
+
+.badge-warn {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.badge-pending {
+  background: #e2e3e5;
+  color: #666;
+}

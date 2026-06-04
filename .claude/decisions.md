@@ -5,36 +5,6 @@ with its rationale. If you think something looks wrong, check here first.
 
 ---
 
-## Article and question titles stored as segments, not a separate table
-
-**Decision:** `question_title` and `article_title` are `segment` rows with their own
-`locator_path` (`I.q3`, `I.q3.a1`) and `element_type` ('question_title', 'article_title').
-Their text lives in `segment_text` alongside body segments.
-
-**Why:** titles are translatable units — the Slovak translation needs them to produce a
-complete, readable document (HTML preview, Word export). Storing them in a separate table
-would require a parallel schema for what is structurally identical content. The renderer
-reads all segment types uniformly via a single `ORDER BY locator_path` query.
-
-**Rendering:** `locator_path` ltree ordering naturally places `I.q3` before `I.q3.a1`
-before `I.q3.a1.arg1`, giving correct document order without any special-casing.
-
-**Source of titles:** Latin HTML (`<H2>/<H3>`) if available; Dominican English (`<h1>/<h2>`)
-is the reliable fallback since it always has clean heading markup. The renderer uses the
-first non-null language in sk→la→en order.
-
----
-
-## No CHECK on `segment.element_type`
-
-**Decision:** `element_type` is a free-text label with no CHECK constraint. The comment documents the Summa values but does not enforce them.
-
-**Why:** a CHECK would bake Summa structure into the schema. Contra Gentiles chapters have no `sed_contra`, no `reply` — different element types entirely. Validation belongs in the parser (fail-loud), not in the DB constraint.
-
-**Known values in use (Summa):** `arg`, `sed_contra`, `respondeo`, `reply`, `preamble`, `question_title`, `article_title`. The last three were added at M1 to support document reconstitution (title segments needed by the renderer). Any code that assumes only the first four values must be updated; use `element_type = ANY(...)` with an explicit list rather than assuming completeness.
-
----
-
 ## Opaque `locator_path` string, not typed columns
 
 **Decision:** `segment.locator_path` is plain TEXT ('I.q3.a1.arg2'), not three
@@ -163,14 +133,6 @@ a viable alternative to LangGraph; the decision is deferred.
 
 ---
 
-## Prefect deferred to M4+
-
-**Decision:** No Prefect in M0–M2. Pipeline orchestration uses a plain `src/ingest/pipeline.py` CLI with `--step` flags.
-
-**Why:** M0–M2 are linear batch pipelines — parse → resolve → report. No cycles, no remote execution, no retry-on-API-rate-limit. Prefect's value realises at M4 (translation loop): deploying the translator on a separate GPU machine, checkpointing between articles, recovering from API failures mid-corpus. Introducing it before the loop shape is designed adds ceremony with zero benefit. Add at M4 when the translation flow is defined and remote deployment is needed.
-
----
-
 ## No vectors in M0–M2 (vector discovery deferred)
 
 **Decision:** no embeddings or vector search in M0–M2. Deferred in favour of a
@@ -196,3 +158,28 @@ tax on every milestone. The real seams only become clear after translating one f
 and trying to point the pipeline at a second. Ship the Summa first; generalize from
 evidence. The two preserved seams cost nothing now and prevent pouring concrete into
 the foundation.
+
+---
+
+## Preview server added at M4 (before full corpus run)
+
+**Decision:** M4 delivers a local Flask server showing Latin | Slovak parallel text,
+navigable by article URL in the style of aquinas.cc.
+
+**Why:** the pilot translation (30 articles) is meaningless without a way to read it.
+A parallel-text server makes Gate 1 review concrete — the engineer and theologian open
+a browser, navigate the output, and make a go/no-go call on quality before the $60–90
+full corpus spend. Without this, Gate 1 would mean diff'ing raw DB text.
+
+---
+
+## Prefect moved to M5 (was M4+)
+
+**Decision:** Prefect orchestration is introduced in M5 Step 1 (full corpus run),
+not M4.
+
+**Why:** M4 translates 30 articles. At that scale, plain Python runs in minutes with
+no crash-recovery concern. Prefect's value — resumable multi-day runs, article-level
+retry, progress monitoring — only materialises at the full 2,669-article corpus run.
+Introducing Prefect in M4 would mean learning and configuring it for a run that needs
+neither durability nor observability. Build it when the need is real.

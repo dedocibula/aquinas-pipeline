@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Summa Theologiae — Aquinas Pipeline{% endblock %}
+
+{% block content %}
+<h1>Summa Theologiae</h1>
+
+<section class="progress-bar-section">
+  <h2>Translation progress</h2>
+  {% set total = progress.pending + progress.translated + progress.needs_human %}
+  {% if total > 0 %}
+    {% set pct = (progress.translated / total * 100) | round(1) %}
+    <div class="progress-track">
+      <div class="progress-fill" style="width: {{ pct }}%"></div>
+    </div>
+    <p class="progress-legend">
+      <span class="badge badge-ok">&#10003; {{ progress.translated }} translated</span>
+      <span class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</span>
+      <span class="badge badge-pending">&#8230; {{ progress.pending }} pending</span>
+    </p>
+  {% else %}
+    <p>No segments found.</p>
+  {% endif %}
+</section>
+
+{% for pars, questions in grouped.items() %}
+  <section class="pars-section">
+    <h2>Pars {{ pars }}</h2>
+    <ul class="question-list">
+      {% for q in questions %}
+        <li>
+          <a href="/la/sk/~{{ ltree_to_url(q['question_path']) }}">
+            {{ ltree_to_url(q['question_path']) }}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% else %}
+  <p>No questions found in the database.</p>
+{% endfor %}
+{% endblock %}

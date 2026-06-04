@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}{{ question_title }} — Aquinas Pipeline{% endblock %}
+
+{% block breadcrumb %}
+  &rsaquo; <a href="/la/sk/~{{ st_locator }}">{{ question_title }}</a>
+{% endblock %}
+
+{% block content %}
+<h1>{{ question_title }}</h1>
+
+<table class="article-list">
+  <thead>
+    <tr>
+      <th>Article</th>
+      <th>Translated</th>
+      <th>Total</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in articles %}
+      <tr>
+        <td>{{ a.title }}</td>
+        <td>{{ a.translated_count }}</td>
+        <td>{{ a.total_count }}</td>
+        <td><a href="/la/sk/~{{ a.url_locator }}">View &rarr;</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4">No articles found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
