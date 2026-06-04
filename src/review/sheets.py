@@ -11,7 +11,10 @@ from __future__ import annotations
 import os
 
 import gspread
+from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
+
+load_dotenv()
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _SECRETS_PATH = ".secrets/gsheets_service_account.json"

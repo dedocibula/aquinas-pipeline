@@ -16,6 +16,11 @@ Read this file at the start of every session before doing any work.
 - **Correction:** Use `psycopg2.connect('postgresql://aquinas:aquinas@localhost:5432/aquinas')` directly. The connection string is in `.env` (`DATABASE_URL=postgresql://aquinas:aquinas@localhost:5432/aquinas`) and in `docker-compose.yml`. Hardcode it for one-off DB queries; load `.env` via `python-dotenv` only in production scripts.
 - **Rule:** When issuing ad-hoc DB queries, always use `uv run python -c "import psycopg2; conn = psycopg2.connect('postgresql://aquinas:aquinas@localhost:5432/aquinas'); ..."`. Do not rely on `psql` being in PATH or on environment variables being pre-loaded.
 
+### [Env vars: always load .env via python-dotenv in production modules]
+- **Mistake:** Scripts that call `os.environ.get("GSHEETS_SPREADSHEET_ID")` or `os.environ.get("DATABASE_URL")` fail when run via `uv run` because `.env` is not automatically loaded — the shell does not export those vars.
+- **Correction:** Add `from dotenv import load_dotenv; load_dotenv()` at module level in every shared env-reading helper (`src/ingest/db.py`, `src/review/sheets.py`). All callers inherit the load automatically. Add `python-dotenv>=1.0` to `pyproject.toml`.
+- **Rule:** Any new module that reads env vars via `os.environ` must call `load_dotenv()` at import time. Do not rely on the shell pre-exporting vars, and do not inline env vars on the command line.
+
 ### [Source layout: code in src/, tests in tests/]
 - **Mistake:** Placed `verify.py` at `src/verify.py` (project root of src/) rather than inside the `src/acquire/` package where all production code lives. Tests were added correctly in `tests/` but the production module was outside the package.
 - **Correction:** All production Python modules belong inside `src/acquire/` (the package exposed by hatchling). Thin entry-point wrappers (like `verify_sources.py`) may live at the project root only if they do nothing but delegate to a module inside `src/acquire/`.

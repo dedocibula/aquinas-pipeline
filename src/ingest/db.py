@@ -16,6 +16,9 @@ from typing import Generator
 
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def _database_url() -> str:
