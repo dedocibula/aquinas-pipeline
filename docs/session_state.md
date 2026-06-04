@@ -1,7 +1,35 @@
 # Session State
 
 ## Current Milestone
-M3 — **NOT STARTED** — M2 complete and accepted.
+M3 — **COMPLETE** — M4 is next.
+
+## M3 Deliverables (all complete)
+- `src/review/export_sheet.py` — exports dedup roll-up to Google Sheets (idempotent); two tabs: Review (3,523 rows) + Auto-resolved (116 krystal_single rows)
+- `src/review/import_approvals.py` — reads ticked rows, writes `sense_rendering(sk, human)`, bumps version if content changed, conflict detection on `db_version`
+- `src/review/sheets.py` — shared helpers: auth, header, idempotent batch write, checkbox validation
+- `reports/m3_import_summary.txt` — output of first real import run (1 approved, idempotent re-run confirmed)
+- `.env.example` updated with `GSHEETS_SPREADSHEET_ID`
+- `.secrets/` gitignored
+
+## M3 Sheet Layout (actual, differs from spec — improved)
+| Col | Header | Notes |
+|---|---|---|
+| A | `approved` | checkbox; preserved on re-export |
+| B | `category` | term/name/formula/prose |
+| C | `latin_lemma` | |
+| D | `proposed_slovak` | **editable, preserved on re-export** |
+| E | `latin_occurrence` | full Latin segment text from sample occurrence |
+| F | `czech_occurrence` | full Czech segment text |
+| G | `english_occurrence` | full English segment text |
+| H | `resolution_method` | |
+| I | `frequency` | |
+| J | `sample_locator` | ltree path of sample segment |
+| K | `sense_id` | hidden; idempotency key |
+| L | `group_id` | hidden |
+| M | `db_version` | hidden; conflict detection |
+
+## Known Gaps
+- `glossary_term.category` is NULL for the 116 Krystal-seeded terms (predate DeepSeek categorization); Auto-resolved tab shows blank category for these rows — data gap, not a code bug
 
 ## M2 Final DB State
 | Table | Rows | Notes |
@@ -13,27 +41,16 @@ M3 — **NOT STARTED** — M2 complete and accepted.
 | `glossary_term.category` | 3,496 set | all gap terms categorized |
 | `glossary_sense` | 3,639 | 3,496 proposed + 143 approved |
 
-## M2 Coverage Summary (reports/m2_coverage.txt — Jun 3)
-- 2,663 articles; 22,621 segments; 8 anomalous (see m2_parser_anomalies.txt)
-- Auto-resolved (no review needed): 9.3%
-- Needs human review: 90.7% — 3,503 unique terms
-- Gap terms proposed by DeepSeek V3: 3,496 at ~$0.0002
-- No bracketed stubs; no-stub guardrail passed
-
 ## Exact Next Step
-Build M3: `src/review/export_sheet.py` and `src/review/import_approvals.py`.
+Build M4: translation loop.
 
-**Prerequisites before coding:**
-1. Create Google Cloud service account with Sheets API enabled
-2. Store JSON key at `.secrets/gsheets_service_account.json` (gitignored)
-3. Add `GSHEETS_SPREADSHEET_ID` to `.env` and `.env.example`
-4. Add `gspread>=6.0` and `google-auth>=2.0` to `pyproject.toml`
+**Before coding, read:**
+- `.claude/m4_translation.md`
+- `.claude/decisions.md`
+- `.claude/database.md`
 
-**Then build (per m3_review.md):**
-- `export_sheet.py` — exports dedup roll-up to Google Sheets (idempotent); separate "Auto-resolved" tab for krystal_single terms
-- `import_approvals.py` — reads ticked rows, writes `sense_rendering(sk, human)`, bumps version if content changed, conflict detection on `db_version`
-
-**Key design constraints:**
-- No migration needed — M2 schema already has everything M3 needs
-- Version bump only when Slovak content changed (triggers M4 stale query)
-- M3 is not a blocking gate — M4 may start as soon as some terms are approved
+**Key M4 design constraints (from m4_translation.md):**
+- Uses `anthropic` Batch API — add to `pyproject.toml` at M4 start
+- Hard constraints: approved Slovak terms injected into prompt; model translates prose around them
+- Re-run scope: only stale segments (`term_usage.sense_version_used < glossary_sense.version`)
+- M3 is not a blocking gate — M4 may begin as soon as some terms are approved
