@@ -3,8 +3,8 @@
 CLI:
     uv run python -m review.export_sheet
 
-Idempotent — safe to re-run. On re-run, reference columns (B-D, F-M) are
-refreshed from DB; column A (checkbox) and column E (proposed_slovak) are
+Idempotent — safe to re-run. On re-run, reference columns (B-C, E-M) are
+refreshed from DB; column A (checkbox) and column D (proposed_slovak) are
 preserved so reviewer edits survive.
 
 Prerequisites:
@@ -36,10 +36,10 @@ WITH base AS (
         gs.sense_id,
         gt.latin_lemma,
         gt.category,
-        gs.context_label,
         sr_sk.content       AS proposed_slovak,
-        sr_cs.content       AS czech_anchor,
-        sr_en.content       AS english_cue,
+        st_la.content       AS latin_occurrence,
+        st_cs.content       AS czech_occurrence,
+        st_en.content       AS english_occurrence,
         tu_agg.method       AS resolution_method,
         tu_agg.freq         AS frequency,
         tu_agg.sample       AS sample_locator,
@@ -53,19 +53,23 @@ WITH base AS (
     JOIN glossary_sense gs ON gs.term_id = gt.term_id
     LEFT JOIN sense_rendering sr_sk
            ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
-    LEFT JOIN sense_rendering sr_cs
-           ON sr_cs.sense_id = gs.sense_id AND sr_cs.lang = 'cs'
-    LEFT JOIN sense_rendering sr_en
-           ON sr_en.sense_id = gs.sense_id AND sr_en.lang = 'en'
     LEFT JOIN (
         SELECT tu.sense_id,
-               mode() WITHIN GROUP (ORDER BY tu.resolution_method) AS method,
-               count(*)                                             AS freq,
-               min(s.locator_path::text)                           AS sample
+               mode() WITHIN GROUP (ORDER BY tu.resolution_method)              AS method,
+               count(*)                                                          AS freq,
+               min(s.locator_path::text)                                        AS sample,
+               -- segment_id of the earliest-path occurrence, for context join below
+               (array_agg(s.segment_id ORDER BY s.locator_path::text))[1]      AS sample_segment_id
         FROM term_usage tu
         JOIN segment s USING (segment_id)
         GROUP BY tu.sense_id
     ) tu_agg ON tu_agg.sense_id = gs.sense_id
+    LEFT JOIN segment_text st_la
+           ON st_la.segment_id = tu_agg.sample_segment_id AND st_la.lang = 'la'
+    LEFT JOIN segment_text st_cs
+           ON st_cs.segment_id = tu_agg.sample_segment_id AND st_cs.lang = 'cs'
+    LEFT JOIN segment_text st_en
+           ON st_en.segment_id = tu_agg.sample_segment_id AND st_en.lang = 'en'
     ORDER BY
         CASE gt.category
             WHEN 'term'    THEN 1
@@ -112,19 +116,19 @@ def rows_to_sheet_values(rows: list[dict]) -> list[list]:
     result = []
     for r in rows:
         result.append([
-            False,                                   # A — checkbox, unchecked on export
-            r["latin_lemma"] or "",                  # B
-            r["category"] or "",                     # C
-            r["context_label"] or "",                # D
-            r["proposed_slovak"] or "",              # E
-            r["czech_anchor"] or "",                 # F
-            r["english_cue"] or "",                  # G
-            r["resolution_method"] or "",            # H
-            r["frequency"] if r["frequency"] is not None else "",  # I
-            r["sample_locator"] or "",               # J
-            r["sense_id"],                           # K — hidden
-            r["group_id"] if r["group_id"] is not None else "",    # L — hidden
-            r["version"] if r["version"] is not None else "",      # M — hidden
+            False,                                                      # A — checkbox
+            r["category"] or "",                                        # B
+            r["latin_lemma"] or "",                                     # C
+            r["proposed_slovak"] or "",                                 # D
+            r["latin_occurrence"] or "",                                # E
+            r["czech_occurrence"] or "",                                # F
+            r["english_occurrence"] or "",                              # G
+            r["resolution_method"] or "",                               # H
+            r["frequency"] if r["frequency"] is not None else "",       # I
+            r["sample_locator"] or "",                                  # J
+            r["sense_id"],                                              # K — hidden
+            r["group_id"] if r["group_id"] is not None else "",        # L — hidden
+            r["version"] if r["version"] is not None else "",          # M — hidden
         ])
     return result
 
@@ -146,7 +150,14 @@ def export_tab(
     # One API call covers both header check and existing-row map.
     all_values = ws.get_all_values()
     header_written = write_header(ws, existing_values=all_values)
-    existing_map = {} if header_written else read_existing_rows_from_data(all_values)
+    if header_written:
+        # Header changed — stale rows have the old column layout; remove them
+        # before inserting fresh so we don't leave misaligned data behind.
+        if len(all_values) > 1:
+            ws.delete_rows(2, len(all_values))
+        existing_map = {}
+    else:
+        existing_map = read_existing_rows_from_data(all_values)
 
     sheet_values = rows_to_sheet_values(db_rows)
     batch_write_rows(ws, sheet_values, existing_map)
