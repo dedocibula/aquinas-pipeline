@@ -1,75 +1,224 @@
-# M3 — Glossary Review & Re-run Trigger
+# M3 — Glossary Review & Lock
 
-**Status:** design-intent (NOT build-locked)
-**Do not implement from this file. Open decisions are marked [OPEN].**
-
----
-
-## Purpose
-This file exists so M1/M2 schema elements have a documented consumer.
-Specifically: `glossary_sense.version`, `glossary_sense.status`,
-`term_usage.sense_version_used`, `term_usage.status`, and `term_usage.confidence`
-are all written in M1/M2 and consumed here.
+**Status:** build-locked
+**Reads:** database.md, decisions.md, sources.md
+**Estimate:** 1 day (engineering); theologian review runs in parallel, duration open
+**Prerequisite:** M2 complete and accepted
 
 ---
 
-## What M3 does
-Takes M2's raw deduplicated term list and turns it into two things:
-1. A human-reviewable surface (Google Sheets) where a theologian approves/edits terms
-2. A write-back mechanism that updates the DB and triggers targeted re-translation
+## User story
+*As the engineer, I need a reliable two-script pipeline that exports the M2 glossary
+to a Google Sheet for theologian review and imports approvals back to the DB — so that
+a non-technical reviewer can approve or correct Slovak terms without touching code, and
+every approval is precisely reflected in the translation pipeline.*
 
-M3 is **not a blocking gate**. Translation (M4) may start before, during, or after
-review. Review emits resolution events; M4 consumes them via the invalidation query.
-
----
-
-## Consumes from M1/M2
-- `glossary_sense` (status, version) — reviewer changes status to 'approved', bumps version
-- `sense_rendering` (sk, model)` — M2's DeepSeek proposal; reviewer reads this as a starting point
-- `sense_rendering` (sk, human)` — reviewer writes the *confirmed* Slovak term here (separate row)
-- `term_usage` (sense_version_used, confidence, status) — stale query runs against this
-- M2's dedup roll-up — source for the Sheets export
-
-**Important: every `proposed_slovak` cell already has a DeepSeek-generated term from M2.**
-The reviewer's job is to *approve or correct*, not to fill in blanks. Bracketed stubs
-(`[bahounek_derived: x]`) should never appear in the Sheets export — if they do, it means
-M2's resolve step did not complete or a lemma fell below the freq/POS filter. Stubs below
-the filter are low-frequency or non-theological and acceptable to leave as stubs.
+## Objective
+Build `export_sheet.py` and `import_approvals.py`. Both are manual-trigger scripts.
+M3 is **not a blocking gate** — M4 may begin translating as soon as some terms are
+approved. The Sheet is a living review queue; approvals flow in continuously and M4
+picks them up via the stale-segment query.
 
 ---
 
-## Intended shape
+## Schema (no migration required)
+M2 already wrote everything M3 needs:
+- `glossary_term.category` (term/name/formula/prose) — drives Sheet ordering
+- `glossary_sense.status` + `glossary_sense.version` — write-back targets
+- `sense_rendering(sk, model)` — the M2 DeepSeek proposal the reviewer reads
+- `sense_rendering(sk, human)` — the confirmed term write-back creates
+- `term_usage.sense_version_used` — stale query reads this
 
-**Export to Sheets:**
-One row per (term, sense). Columns: latin_lemma, context_label, proposed_slovak,
-czech_anchor, english_cue, resolution_method, confidence, frequency, sample_locators.
-Terms ordered by: flagged first, then by frequency descending.
-Auto-resolved single-sense Krystal terms hidden by default (available in a separate tab).
+Add `gspread` and `google-auth` to `pyproject.toml`. No other new dependencies.
 
-Reviewer workflow per row:
-- Read `proposed_slovak` (the M2 DeepSeek proposal)
-- Read `czech_anchor` and `english_cue` for context
-- Either: accept as-is (mark approved), or edit the term and mark approved
-- High-frequency terms reviewed first; hapax legomena may be left to M4's model
+---
 
-**Write-back:**
-When reviewer approves a row (with or without editing `proposed_slovak`):
-1. Write confirmed term to `sense_rendering(sk, human)` — preserves model proposal for diff/audit
-2. Update `glossary_sense.status = 'approved'`, increment `glossary_sense.version`
-3. The stale query in M4 picks up the version bump and re-translates affected segments
+## Steps
 
-**Re-run trigger query (to be wired in M4):**
+### Step 1 — Google credentials
+Create a service account in Google Cloud Console with Sheets API enabled.
+Store the JSON key at `.secrets/gsheets_service_account.json` (gitignored).
+Add `GSHEETS_SPREADSHEET_ID` to `.env.example`.
+Share the target Sheet with the service account email.
+
+### Step 2 — export_sheet.py
+Exports the M2 dedup roll-up to Google Sheets. Idempotent — safe to re-run;
+existing rows are updated in place, new rows appended.
+
+**Query (the dedup roll-up):**
 ```sql
-SELECT DISTINCT segment_id FROM term_usage
-WHERE sense_id = $1
-  AND sense_version_used < (SELECT version FROM glossary_sense WHERE sense_id = $1);
+SELECT
+    gt.term_id,
+    gs.sense_id,
+    gt.latin_lemma,
+    gt.category,
+    gs.context_label,
+    sr_sk.content       AS proposed_slovak,
+    sr_cs.content       AS czech_anchor,
+    sr_en.content       AS english_cue,
+    tu_agg.method       AS resolution_method,
+    tu_agg.freq         AS frequency,
+    tu_agg.sample       AS sample_locator,
+    gs.status,
+    gs.version,
+    -- group_id: same proposed_slovak + same category → same group
+    dense_rank() OVER (
+        PARTITION BY gt.category
+        ORDER BY sr_sk.content
+    )                   AS group_id
+FROM glossary_term gt
+JOIN glossary_sense gs ON gs.term_id = gt.term_id
+LEFT JOIN sense_rendering sr_sk ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
+LEFT JOIN sense_rendering sr_cs ON sr_cs.sense_id = gs.sense_id AND sr_cs.lang = 'cs'
+LEFT JOIN sense_rendering sr_en ON sr_en.sense_id = gs.sense_id AND sr_en.lang = 'en'
+LEFT JOIN (
+    SELECT sense_id,
+           mode() WITHIN GROUP (ORDER BY resolution_method) AS method,
+           count(*) AS freq,
+           min(s.locator_path::text)                        AS sample
+    FROM term_usage tu
+    JOIN segment s USING (segment_id)
+    GROUP BY sense_id
+) tu_agg ON tu_agg.sense_id = gs.sense_id
+ORDER BY
+    CASE gt.category
+        WHEN 'term'    THEN 1
+        WHEN 'name'    THEN 2
+        WHEN 'formula' THEN 3
+        WHEN 'prose'   THEN 4
+        ELSE 5
+    END,
+    CASE gs.status WHEN 'flagged' THEN 1 ELSE 2 END,  -- flagged first
+    tu_agg.freq DESC NULLS LAST,
+    sr_sk.content,        -- near-duplicates cluster here (same Slovak = adjacent rows)
+    gt.latin_lemma;
+```
+
+**Sheet columns (in order):**
+
+| col | header | notes |
+|---|---|---|
+| A | `approved` | checkbox; FALSE on export; reviewer ticks to approve |
+| B | `latin_lemma` | read-only for reviewer |
+| C | `category` | term / name / formula / prose |
+| D | `context_label` | NULL shown as blank |
+| E | `proposed_slovak` | **editable** — reviewer corrects here if needed |
+| F | `czech_anchor` | read-only reference |
+| G | `english_cue` | read-only reference |
+| H | `resolution_method` | read-only |
+| I | `frequency` | read-only; how many segments use this |
+| J | `sample_locator` | read-only; one example coordinate |
+| K | `sense_id` | hidden column; used by import script as the join key |
+| L | `group_id` | hidden column; near-duplicate grouping indicator |
+| M | `db_version` | hidden column; the DB version at export time |
+
+**Near-duplicate visual grouping:** rows with the same `group_id` within a category
+have the same `proposed_slovak`. The sort order naturally clusters them (sr_sk.content
+sort). The reviewer sees `divina / divino / divinus` as three consecutive rows with
+identical proposed Slovak and can tick all three in one pass. No special Sheet
+formatting is required — the clustering does the work.
+
+**Do not export** `krystal_single` terms with status='approved' to the main tab.
+Put them in a separate "Auto-resolved" tab for audit if needed. The reviewer works
+only the terms that need attention.
+
+### Step 3 — import_approvals.py
+Reads ticked rows from the Sheet and writes approvals back to the DB.
+Idempotent — safe to re-run; already-confirmed rows are skipped.
+
+**Logic per approved row:**
+
+```python
+def process_approval(row):
+    sense_id      = row['sense_id']       # hidden column K
+    new_slovak    = row['proposed_slovak'] # possibly edited by reviewer
+    sheet_version = row['db_version']      # hidden column M
+
+    # 1. Conflict check — did the DB change while the Sheet was open?
+    current = db.get_sense(sense_id)
+    if current.version != sheet_version:
+        log.warning(f"Version conflict on sense {sense_id}: "
+                    f"sheet has {sheet_version}, DB has {current.version}. Skipping.")
+        return 'CONFLICT'
+
+    # 2. Write the confirmed term as a NEW row (preserve model proposal for diff)
+    db.upsert_sense_rendering(
+        sense_id=sense_id, lang='sk', source='human', content=new_slovak
+    )
+
+    # 3. Bump version ONLY if Slovak content changed
+    model_proposal = db.get_sense_rendering(sense_id, lang='sk', source='model')
+    if new_slovak != model_proposal.content:
+        db.increment_sense_version(sense_id)   # triggers M4 stale query
+        log.info(f"sense {sense_id}: content changed → version bumped")
+    else:
+        log.info(f"sense {sense_id}: content unchanged → version held")
+
+    # 4. Always update status
+    db.update_sense_status(sense_id, status='approved')
+    return 'OK'
+```
+
+**Conflict handling:** if `sheet_version != current DB version`, the sense was
+modified after the Sheet was exported (e.g. a prior import run already approved it).
+Log the conflict, skip the row, do not overwrite. Print a summary of conflicts at
+the end so the engineer can investigate.
+
+**Run output:**
+```
+Import complete.
+  Approved:   N terms
+  Skipped:    N (already confirmed)
+  Conflicts:  N (see conflicts.log)
+  Version bumped (re-run triggered): N terms
+  Version held (no content change):  N terms
 ```
 
 ---
 
-## Open decisions
-- [OPEN] Sheets sync mechanism: gspread polling vs webhook vs manual CSV round-trip
-- [OPEN] Reviewer auth: who has write access to the Sheet
-- [OPEN] How to present sample context to the reviewer (locator links? excerpts?)
-- [OPEN] Batch re-run trigger: automatic on approval, or manual "run re-translation" button
-- [OPEN] Whether M3 needs any UI beyond Sheets + a nightly sync script
+## The re-run trigger
+`import_approvals.py` does not execute re-translations — it only bumps versions.
+The re-run is triggered when M4 runs (or re-runs). M4's stale query finds segments
+whose `sense_version_used` is behind the current version and adds them to the
+translation queue. This separation is intentional: approvals and re-translations
+are decoupled. The reviewer can batch-approve 50 terms, then run M4 once to
+re-translate all affected segments in one pass.
+
+**The stale query (used by M4):**
+```sql
+SELECT DISTINCT tu.segment_id
+FROM term_usage tu
+JOIN glossary_sense gs ON tu.sense_id = gs.sense_id
+WHERE tu.sense_version_used < gs.version;
+```
+
+---
+
+## Technologies
+Python 3.12 + uv · psycopg2-binary · gspread · google-auth
+
+New in `pyproject.toml`:
+```toml
+gspread = ">=6.0"
+google-auth = ">=2.0"
+```
+
+---
+
+## Deliverables
+1. `src/review/export_sheet.py` — runnable, outputs row count exported
+2. `src/review/import_approvals.py` — runnable, outputs summary + conflict log
+3. `.env.example` updated with `GSHEETS_SPREADSHEET_ID`
+4. `.secrets/` added to `.gitignore`
+5. `reports/m3_import_summary.txt` — output of first real import run
+
+## Acceptance criteria
+- `export_sheet.py` exports all non-krystal_single terms; Sheet opens with correct
+  columns and checkbox in col A; near-duplicate rows are adjacent
+- `import_approvals.py` on a Sheet with 10 manually ticked rows: correct rows
+  get `sense_rendering(sk, human)`, correct version bumps, correct skips
+- Re-running `import_approvals.py` on already-confirmed rows is a no-op
+- A row where proposed_slovak was edited AND approved: version bumps
+- A row where proposed_slovak was NOT edited AND approved: version does NOT bump
+- Conflict detection fires correctly when DB version != sheet version
+- `Auto-resolved` tab present and populated with krystal_single terms

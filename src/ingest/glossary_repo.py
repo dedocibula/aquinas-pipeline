@@ -102,7 +102,11 @@ def update_sense_status(conn, sense_id: int, status: str) -> None:
     Valid statuses: 'approved', 'rejected'. 'proposed' is the initial state set
     by the M2 gap-term preseed and must not be set here.
     """
-    raise NotImplementedError("update_sense_status is implemented in M3")
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE glossary_sense SET status = %s WHERE sense_id = %s",
+            (status, sense_id),
+        )
 
 
 def bump_sense_version(conn, sense_id: int) -> int:
@@ -111,7 +115,13 @@ def bump_sense_version(conn, sense_id: int) -> int:
     M4's stale-segment query uses sense_version_used < current version to find
     segments that need re-translation after a reviewer correction.
     """
-    raise NotImplementedError("bump_sense_version is implemented in M3")
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE glossary_sense SET version = version + 1 "
+            "WHERE sense_id = %s RETURNING version",
+            (sense_id,),
+        )
+        return cur.fetchone()[0]
 
 
 def write_human_rendering(conn, sense_id: int, sk_text: str, src_id: int) -> None:
@@ -121,4 +131,13 @@ def write_human_rendering(conn, sense_id: int, sk_text: str, src_id: int) -> Non
     text. The model-proposed rendering (source_id=model) is preserved alongside it
     for audit.
     """
-    raise NotImplementedError("write_human_rendering is implemented in M3")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sense_rendering (sense_id, lang, content, source_id)
+            VALUES (%s, 'sk', %s, %s)
+            ON CONFLICT (sense_id, lang, source_id) DO UPDATE
+                SET content = EXCLUDED.content
+            """,
+            (sense_id, sk_text, src_id),
+        )

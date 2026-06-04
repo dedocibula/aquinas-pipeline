@@ -55,6 +55,7 @@ dist/
 !.env.example
 *.pem
 *.key
+.secrets/
 
 # ─── Editor ──────────────────────────────────────────
 .vscode/
@@ -66,6 +67,9 @@ dist/
 # ─── Pipeline sources (large scraped/binary files) ───
 sources/
 !sources/**/.gitkeep
+
+# ─── ML models (large binary weights) ───────────────
+models/
 
 # ─── Output / media ──────────────────────────────────
 output/

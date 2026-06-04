@@ -1,0 +1,44 @@
+CORPUS OVERVIEW
+  Total articles:     2663
+  Total segments:     22621
+  Articles clean:     2655
+  Articles anomalous: 8 (see m2_parser_anomalies.txt)
+
+TERM RESOLUTION BREAKDOWN
+  krystal_single                33777  (8.5%)
+  krystal_multi_voted            2964  (0.7%)
+  krystal_multi_flagged           857  (0.2%)  → NEEDS human review
+  bahounek_derived             337120  (85.1%)  → NEEDS human review
+  english_derived               20939  (5.3%)  → NEEDS human review
+  model_proposed                  330  (0.1%)  → NEEDS human review
+  ────────────────────────────────────────────────────
+  Auto-resolved (no review needed): 9.3%
+  Needs human review:               90.7%
+
+REVIEW SCOPE
+  Unique terms needing review: 3503
+  (Each unique term reviewed once regardless of frequency.)
+
+RE-TRANSLATION SCOPE (if reviewer changes a term)
+  Segments containing ≥1 flagged term: 22621
+  Estimated max re-run cost:
+    22621 segments × avg ~400 tokens × $0.00014/1k = ~$1.2668
+  Note: each segment re-translated AT MOST ONCE regardless of how many
+  of its terms were changed. Batch all term changes before re-running.
+
+BAHOUNEK COVERAGE
+  Segments with Czech reference:    20673  (91.4%)
+  Segments without Czech reference: 1948  (8.6%)
+
+GAP TERM CATEGORIES
+  term                           1818
+  name                            180
+  formula                          58
+  prose                          1440
+  ────────────────────────────────────
+  Distinct gap terms             3496
+
+GAP TERM PROPOSALS (DeepSeek V3)
+  Terms proposed by model: 3496
+  API calls made:          1
+  API cost incurred:       ~$0.0002

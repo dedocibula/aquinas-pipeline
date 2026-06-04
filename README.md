@@ -55,53 +55,9 @@ docker compose up -d
 
 This starts PostgreSQL 16 with the `pgvector` extension available. The `ltree` extension is enabled during M1 schema creation.
 
-**4. Acquire source texts**
-
-Run each acquisition script once. They download and save sources to `sources/` (gitignored).
-
-```bash
-uv run python src/acquire/latin.py       # Corpus Thomisticum — ~87 HTML files
-uv run python src/acquire/bahounek.py    # Bahounek Czech — 4 HTML files
-uv run python src/acquire/dominican.py   # Dominican Province English — 614 HTML files
-uv run python src/acquire/freddoso.py    # Freddoso English — TOC pages + coverage map
-```
-
-Place the Krystal docx manually at:
-```
-sources/czech/krystal/Teologická Suma úzus - verze 4.docx
-```
-
-**5. Verify everything**
-
-```bash
-uv run python verify_sources.py
-```
-
-All 7 checks must pass (Latin, Bahounek, Krystal, Dominican, Freddoso, DB, .env).
-
-## Development
-
-```bash
-uv run pytest              # run tests
-uv run ruff check src/ tests/ verify_sources.py   # lint
-```
-
-**Install the pre-commit hook** (once, after cloning):
-
 ```bash
 bash scripts/install-hooks.sh
 ```
 
 This symlinks `scripts/pre-commit` into `.git/hooks/`. On every `git commit`, ruff runs against
 staged `.py` files only — the commit is blocked if any lint errors are found.
-
-## Milestone Status
-
-| Milestone | Status | Deliverable |
-|---|---|---|
-| M0 | complete | env + sources on disk, verified |
-| M1 | next | schema + resolver proven on 10 articles |
-| M2 | — | full corpus ingested, coverage report |
-| M3 | — | glossary review surface + re-run trigger |
-| M4 | — | translation loop |
-| M5 | — | polish + orchestration + consistency |
