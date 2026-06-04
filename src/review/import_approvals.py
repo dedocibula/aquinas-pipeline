@@ -23,8 +23,8 @@ _REVIEW_TAB = "Review"
 # Column indices (0-based) matching the sheet layout in export_sheet.py
 COLS = {
     "approved": 0,          # A
-    "latin_lemma": 1,       # B
-    "proposed_slovak": 4,   # E
+    "latin_lemma": 2,       # C
+    "proposed_slovak": 3,   # D
     "sense_id": 10,         # K
     "db_version": 12,       # M
 }
