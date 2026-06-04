@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import psycopg2.extras
 
-from ingest.db import get_conn
+from common.db import get_conn
 from review.sheets import (
     apply_checkbox_validation,
     authenticate,

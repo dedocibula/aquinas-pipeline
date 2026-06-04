@@ -141,34 +141,38 @@ def test_batch_write_rows_existing_row_issues_range_updates():
     batch_write_rows(ws, [row], existing_map={101: 2})
     assert len(ws.batch_updates_issued) == 1
     updated_ranges = [u["range"] for u in ws.batch_updates_issued[0]]
-    # Two ranges per row: B:D and F:M
-    assert "B2:D2" in updated_ranges
-    assert "F2:M2" in updated_ranges
-    # Individual cell ranges must NOT appear
+    # Two ranges per row: B:C (category+lemma) and E:M (occurrence cols through version)
+    # Preserved: A (checkbox) and D (proposed_slovak — reviewer editable)
+    assert "B2:C2" in updated_ranges
+    assert "E2:M2" in updated_ranges
+    # Preserved columns must NOT appear as update targets
     assert "A2" not in updated_ranges
-    assert "E2" not in updated_ranges
+    assert "D2" not in updated_ranges
 
 
-def test_batch_write_rows_preserves_col_a_and_e():
-    """Columns A and E must never appear as update range targets."""
+def test_batch_write_rows_preserves_col_a_and_d():
+    """Columns A (checkbox) and D (proposed_slovak) must never appear as update range targets."""
     ws = FakeWorksheet(rows=[HEADER])
     row = _make_row(sense_id=55)
     batch_write_rows(ws, [row], existing_map={55: 3})
     all_ranges = {u["range"] for u in ws.batch_updates_issued[0]}
-    assert not any("A" in r and ":A" not in r for r in all_ranges if r.startswith("A"))
-    assert "B3:D3" in all_ranges
-    assert "F3:M3" in all_ranges
+    assert "B3:C3" in all_ranges
+    assert "E3:M3" in all_ranges
+    assert not any(r.startswith("A") for r in all_ranges)
+    assert not any(r.startswith("D") for r in all_ranges)
 
 
 def test_batch_write_rows_range_values_correct():
-    """B:D range carries cols 1,2,3; F:M carries cols 5-12."""
+    """B:C range carries cols 1-2 (category, lemma); E:M carries cols 4-12 (occurrences onward)."""
     ws = FakeWorksheet(rows=[HEADER])
-    row = ["chk", "lemma", "cat", "ctx", "slovak", "cs", "en", "method",
+    #                   0      1        2      3         4         5     6     7
+    row = ["chk", "cat", "lemma", "slovak", "la_occ", "cs_occ", "en_occ", "method",
            42, "loc", 101, 7, 3]
+    #       8      9    10   11  12
     batch_write_rows(ws, [row], existing_map={101: 2})
     updates_by_range = {u["range"]: u["values"][0] for u in ws.batch_updates_issued[0]}
-    assert updates_by_range["B2:D2"] == ["lemma", "cat", "ctx"]
-    assert updates_by_range["F2:M2"] == ["cs", "en", "method", 42, "loc", 101, 7, 3]
+    assert updates_by_range["B2:C2"] == ["cat", "lemma"]
+    assert updates_by_range["E2:M2"] == ["la_occ", "cs_occ", "en_occ", "method", 42, "loc", 101, 7, 3]
 
 
 def test_batch_write_rows_mixed_new_and_existing():

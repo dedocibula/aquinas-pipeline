@@ -90,9 +90,9 @@ def _step_resolve() -> None:
 def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
     import os
 
+    from common.glossary_repo import _load_glossary, _load_segments
     from ingest.db import get_conn, work_id
     from ingest.gap_terms import _scan_gap_lemmas, pilot_batch_sizes
-    from ingest.glossary_repo import _load_glossary, _load_segments
 
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
 

@@ -32,7 +32,7 @@ from typing import IO
 import bs4
 from bs4 import BeautifulSoup
 
-from ingest.db import get_conn, source_id
+from common.db import get_conn, source_id
 from ingest.parser_latin import _PARS_CODE, TEST_ARTICLES
 
 # Bahounek HTML is XHTML served without the XML declaration BeautifulSoup expects.

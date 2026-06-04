@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ingest.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
+from common.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
 from ingest.lemmatize import lemmatize_latin
 
 # ── Gap term proposal knobs ───────────────────────────────────────────────────

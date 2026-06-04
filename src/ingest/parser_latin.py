@@ -26,7 +26,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from ingest.db import get_conn, source_id, work_id
+from common.db import get_conn, source_id, work_id
 
 ROOT = Path(__file__).resolve().parents[2]
 LATIN_DIR = ROOT / "sources" / "latin"

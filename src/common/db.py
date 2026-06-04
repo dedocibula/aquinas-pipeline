@@ -1,5 +1,5 @@
 """
-Shared database connection helper for the ingest package.
+Shared database connection helper.
 
 Usage:
     with get_conn() as conn:
@@ -7,7 +7,7 @@ Usage:
             cur.execute(...)
 
 Connection parameters are read from the DATABASE_URL environment variable,
-which must be set before any ingest script runs.
+which must be set before any script runs (loaded automatically via python-dotenv).
 """
 
 import os

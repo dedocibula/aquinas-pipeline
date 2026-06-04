@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from ingest.glossary_repo import bump_sense_version, update_sense_status, write_human_rendering
+from common.glossary_repo import bump_sense_version, update_sense_status, write_human_rendering
 
 # ── Fake connection ───────────────────────────────────────────────────────────
 

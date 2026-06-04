@@ -46,8 +46,9 @@ import json
 import sys
 from pathlib import Path
 
-from ingest.db import get_conn, source_id, work_id
-from ingest.deepseek import _api_stats, _api_stats_lock, get_api_stats
+from common.db import get_conn, source_id, work_id
+from common.deepseek import _api_stats, _api_stats_lock, get_api_stats
+from common.glossary_repo import _load_glossary, _load_segments
 from ingest.gap_terms import (
     _GAP_BATCH_SIZE,
     _GAP_FREQ_FLOOR,
@@ -57,7 +58,6 @@ from ingest.gap_terms import (
     _propose_gap_terms,
     _scan_gap_lemmas,
 )
-from ingest.glossary_repo import _load_glossary, _load_segments
 from ingest.resolution import _source_rank, _write_term_usage, resolve_segment
 
 ROOT = Path(__file__).resolve().parents[2]

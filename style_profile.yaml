@@ -1,38 +1,34 @@
-heading_templates:
-  sed_contra: Na druhé straně
-  respondeo: Odpověď.
-  replies_section: K námitkám
-  drop_formulas:
-  - praeterea
-  - ad primum dicendum
-  number_objections: true
+# Krystal style rules for the Slovak translation of Summa Theologiae.
+# This file drives translator and reviewer prompt construction.
+#
+# IMPORTANT: Structural heading formulas (sed_contra, respondeo, reply markers)
+# are NOT here — they live in the DB (glossary_sense / sense_rendering) and are
+# loaded at runtime. This file contains only translation *rules*.
+
 citation_rules:
   aristotle: Bekker numbers in footnotes
   church_fathers: PL/PG references
-  bible_abbreviations: JB (liturgický překlad)
-  bible_text_source: ČEP (u NZ může být vhodnější liturgický překlad)
+  bible_abbreviations: JB (liturgický preklad)
+  bible_text_source: ČEP (pri NZ môže byť vhodnejší liturgický preklad)
   translate_thomas_bible_from_latin: true
-  note: Nepřekládáme Bibli, ale TA. Pokud Tomáš cituje Bibli, překládáme z jeho latiny.
+  note: Neprekladáme Bibliu, ale TA. Ak Tomáš cituje Bibliu, prekladáme z jeho latinčiny.
+
 name_forms:
-  Augustinus: Augustin
-  Gregorius: Řehoř
-  Dionysius: Dionýsios
-  Athanasius: Athanasios
-  Boethius: Boethius
-  note: 'Nepoužívat: Diviš (místo Dionýsios), Atanáš (místo Athanasios).'
-  author_names_in_text: KAPITÁLKY (nikoli majuskule)
+  author_names_in_text: KAPITÁLKY (nie majuskule)
   work_titles: kurzíva
+
 orthography:
   prefer:
-  - filosofie
-  - teologie
-  - -ismus
+    - filozofia
+    - teológia
+    - -izmus
   avoid:
-  - filozofie
-  - theologie
-  - -izmus
+    - filosofia
+    - theológia
+    - -ismus
+
 negative_constraints:
-- Nezvedat literární kvalitu nad originál.
-- Zachovávat opakování (nesnažit se o variaci).
-- Zachovávat scholastické spojky a výrazy.
-- Zachovávat hranice vět.
+  - Nezvyšovať literárnu kvalitu nad originál.
+  - Zachovávať opakovania (nesnažiť sa o variáciu).
+  - Zachovávať scholastické spojky a výrazy.
+  - Zachovávať hranice viet.

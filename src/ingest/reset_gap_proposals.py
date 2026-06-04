@@ -35,7 +35,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ingest.db import get_conn
+from common.db import get_conn
 
 # The set of "gap term" term_ids: every sense for the term is 'proposed' (no
 # approved sense). bool_and over the status predicate is true only when ALL of a

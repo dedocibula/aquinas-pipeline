@@ -67,10 +67,10 @@ def _db_row(**overrides) -> dict:
         "sense_id": 101,
         "latin_lemma": "ratio",
         "category": "term",
-        "context_label": None,
         "proposed_slovak": "rozum",
-        "czech_anchor": "rozum (cs)",
-        "english_cue": "reason",
+        "latin_occurrence": "Ratio est...",
+        "czech_occurrence": "Rozum je...",
+        "english_occurrence": "Reason is...",
         "resolution_method": "krystal_single",
         "frequency": 4400,
         "sample_locator": "I.q1.a1.arg1",
@@ -99,26 +99,27 @@ def test_rows_to_sheet_values_approved_is_false():
 def test_rows_to_sheet_values_column_order():
     row = _db_row()
     values = rows_to_sheet_values([row])[0]
-    assert values[1] == "ratio"           # B latin_lemma
-    assert values[2] == "term"            # C category
-    assert values[3] == ""               # D context_label (None → '')
-    assert values[4] == "rozum"           # E proposed_slovak
-    assert values[5] == "rozum (cs)"      # F czech_anchor
-    assert values[6] == "reason"          # G english_cue
-    assert values[7] == "krystal_single"  # H resolution_method
-    assert values[8] == 4400              # I frequency
-    assert values[9] == "I.q1.a1.arg1"   # J sample_locator
-    assert values[10] == 101              # K sense_id
-    assert values[11] == 1               # L group_id
-    assert values[12] == 1               # M db_version
+    assert values[1] == "term"              # B category
+    assert values[2] == "ratio"             # C latin_lemma
+    assert values[3] == "rozum"             # D proposed_slovak
+    assert values[4] == "Ratio est..."      # E latin_occurrence
+    assert values[5] == "Rozum je..."       # F czech_occurrence
+    assert values[6] == "Reason is..."      # G english_occurrence
+    assert values[7] == "krystal_single"    # H resolution_method
+    assert values[8] == 4400                # I frequency
+    assert values[9] == "I.q1.a1.arg1"     # J sample_locator
+    assert values[10] == 101                # K sense_id
+    assert values[11] == 1                  # L group_id
+    assert values[12] == 1                  # M db_version
 
 
 def test_rows_to_sheet_values_none_to_empty_string():
-    row = _db_row(category=None, context_label=None, proposed_slovak=None,
-                  czech_anchor=None, english_cue=None, resolution_method=None,
-                  sample_locator=None, frequency=None, group_id=None, version=None)
+    row = _db_row(category=None, proposed_slovak=None,
+                  latin_occurrence=None, czech_occurrence=None, english_occurrence=None,
+                  resolution_method=None, sample_locator=None,
+                  frequency=None, group_id=None, version=None)
     values = rows_to_sheet_values([row])[0]
-    for col in [2, 3, 4, 5, 6, 7, 8, 9, 11, 12]:
+    for col in [1, 3, 4, 5, 6, 7, 8, 9, 11, 12]:
         assert values[col] == "", f"col {col} should be empty string, got {values[col]!r}"
 
 

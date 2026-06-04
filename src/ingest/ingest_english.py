@@ -29,7 +29,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
-from ingest.db import get_conn, source_id
+from common.db import get_conn, source_id
 from ingest.parser_latin import TEST_ARTICLES
 
 ROOT = Path(__file__).resolve().parents[2]
