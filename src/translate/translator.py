@@ -14,6 +14,8 @@ import requests
 import yaml
 from dotenv import load_dotenv
 
+from common.pricing import UsageInfo, extract_usage
+
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -56,7 +58,7 @@ def call_translator_v3(
     prior_draft: str | None,
     prior_feedback: str | None,
     style_profile: dict,
-) -> str:
+) -> tuple[str, UsageInfo]:
     """Call DeepSeek V3 to produce a Slovak translation draft for one segment.
 
     Args:
@@ -68,7 +70,7 @@ def call_translator_v3(
         style_profile: Loaded style_profile.yaml dict.
 
     Returns:
-        Non-empty Slovak draft string.
+        Tuple of (non-empty Slovak draft string, UsageInfo with token counts and cost).
 
     Raises:
         RuntimeError: On missing API key, 4xx/5xx HTTP errors, empty response.
@@ -119,7 +121,8 @@ def call_translator_v3(
         raise RuntimeError(
             f"DeepSeek translator returned empty content for segment_id={seg.get('segment_id')}."
         )
-    return draft
+    usage = extract_usage(_DEEPSEEK_MODEL, data)
+    return draft, usage
 
 
 # ── Prompt builders ───────────────────────────────────────────────────────────

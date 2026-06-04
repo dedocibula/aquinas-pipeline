@@ -1,15 +1,41 @@
 # Session State
 
 ## Current Milestone
-M3 — **COMPLETE** — M4 is next.
+M4 — **IN PROGRESS** — translation loop built; preview server verified; pilot run pending.
 
-## M3 Deliverables (all complete)
-- `src/review/export_sheet.py` — exports dedup roll-up to Google Sheets (idempotent); two tabs: Review (3,523 rows) + Auto-resolved (116 krystal_single rows)
-- `src/review/import_approvals.py` — reads ticked rows, writes `sense_rendering(sk, human)`, bumps version if content changed, conflict detection on `db_version`
-- `src/review/sheets.py` — shared helpers: auth, header, idempotent batch write, checkbox validation
-- `reports/m3_import_summary.txt` — output of first real import run (1 approved, idempotent re-run confirmed)
-- `.env.example` updated with `GSHEETS_SPREADSHEET_ID`
-- `.secrets/` gitignored
+## M4 Deliverables (status)
+- `migrations/004_translation_status.sql` — **applied**; `translation_status` + `reviewer_notes` columns live
+- `src/translate/translator.py` — DeepSeek V3 caller with cached system prompt
+- `src/translate/reviewer.py` — DeepSeek R1 caller with cached rubric; verdict parser
+- `src/translate/prechecks.py` — structure + terminology pre-checks (no LLM)
+- `src/translate/loop.py` — `translate_segment()` — MAX_ITERATIONS=3 loop
+- `src/translate/pilot.py` — pilot runner for Q1–Q6 (294 segments); writes `reports/m4_pilot.txt`
+- `src/server/app.py` + `src/server/db.py` + templates — **Flask preview server verified** (`localhost:5000`)
+- `reports/m4_pilot.txt` — **NOT YET WRITTEN** — pilot run not started
+
+## Preview Server
+Running at `http://localhost:5000`. Start with:
+```
+uv run flask --app src/server/app.py run --port 5000
+```
+Routes verified:
+- `/` → index (200)
+- `/la/sk/~ST.I.Q1.A1` → article view (200, pending segments show "— awaiting translation —")
+- `/la/sk/~ST.I.Q1` → question view (200)
+- `/api/status` → `{"pending":25782,"translated":0,"needs_human":0}`
+
+Bug fixed this session: `server/db.py:get_all_questions()` — `SELECT DISTINCT … ORDER BY` referenced a non-select expression; fixed by adding `_sort_key` to the select list.
+
+## Pilot Run State
+- 294 segments pending in Q1–Q6 (Q1=8a, Q2=3a, Q3=8a, Q4=3a, Q5=6a, Q6=4a × ~10 segs/article)
+- 0 translated so far
+- **Next action:** run `uv run python -m translate.pilot` — will abort if needs_human > 20% or avg_iters > 2.5
+
+## M4 DB State (pre-pilot)
+| Table | Rows | Notes |
+|---|---|---|
+| `segment` | 25,782 | `translation_status='pending'` for all |
+| `segment_text` | 68,760 | la + cs + en; no sk yet |
 
 ## M3 Sheet Layout (actual, differs from spec — improved)
 | Col | Header | Notes |
@@ -42,15 +68,12 @@ M3 — **COMPLETE** — M4 is next.
 | `glossary_sense` | 3,639 | 3,496 proposed + 143 approved |
 
 ## Exact Next Step
-Build M4: translation loop.
+Run the pilot:
+```
+uv run python -m translate.pilot
+```
+Watch for abort conditions:
+- `needs_human > 20%` → adjust `reviewer.py` rubric
+- `avg_iterations > 2.5` → tune translator prompt
 
-**Before coding, read:**
-- `.claude/m4_translation.md`
-- `.claude/decisions.md`
-- `.claude/database.md`
-
-**Key M4 design constraints (from m4_translation.md):**
-- Uses `anthropic` Batch API — add to `pyproject.toml` at M4 start
-- Hard constraints: approved Slovak terms injected into prompt; model translates prose around them
-- Re-run scope: only stale segments (`term_usage.sense_version_used < glossary_sense.version`)
-- M3 is not a blocking gate — M4 may begin as soon as some terms are approved
+After pilot completes, review output at `http://localhost:5000` and record Gate 1 sign-off before M5.

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import requests
 from dotenv import load_dotenv
 
+from common.pricing import UsageInfo, extract_usage
+
 load_dotenv()
 
 _DEEPSEEK_URL = os.environ.get(
@@ -47,9 +49,10 @@ OUTPUT FORMAT — respond with exactly one of:
 
 @dataclass
 class ReviewResult:
-    verdict: str          # 'APPROVED' | 'APPROVED_WITH_NOTES' | 'REVISION_NEEDED'
-    notes: dict | None    # structured notes when APPROVED_WITH_NOTES; None otherwise
-    feedback: str | None  # revision instructions when REVISION_NEEDED; None otherwise
+    verdict: str              # 'APPROVED' | 'APPROVED_WITH_NOTES' | 'REVISION_NEEDED'
+    notes: dict | None        # structured notes when APPROVED_WITH_NOTES; None otherwise
+    feedback: str | None      # revision instructions when REVISION_NEEDED; None otherwise
+    usage: UsageInfo | None = None  # token counts and cost for this R1 call
 
 
 def call_reviewer_r1(
@@ -125,7 +128,9 @@ def call_reviewer_r1(
         )
     content = choices[0]["message"]["content"].strip()
 
-    return _parse_verdict(content)
+    result = _parse_verdict(content)
+    result.usage = extract_usage(_DEEPSEEK_R1_MODEL, data)
+    return result
 
 
 def _parse_verdict(content: str) -> ReviewResult:

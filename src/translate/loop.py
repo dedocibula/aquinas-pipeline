@@ -13,6 +13,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 from common.db import source_id
+from common.pricing import UsageInfo
 from translate.prechecks import check_structure, check_terminology
 from translate.reviewer import call_reviewer_r1
 from translate.translator import call_translator_v3, load_style_profile
@@ -129,10 +130,12 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
-def translate_segment(segment_id: int, conn) -> str:
+def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
     """Translate one segment through the full draft → pre-check → R1 → revise loop.
 
-    Returns 'translated' or 'needs_human'. Always commits before returning.
+    Returns (status, usages) where status is 'translated' or 'needs_human' and
+    usages is the list of UsageInfo from every API call made.
+    Always commits before returning.
     Raises RuntimeError only if the segment is not found in DB.
     """
     seg = get_segment_with_texts(conn, segment_id)
@@ -152,12 +155,14 @@ def translate_segment(segment_id: int, conn) -> str:
     prior_feedback: str | None = None
     best_draft: str | None = None   # last draft that cleared pre-checks
     last_draft: str | None = None   # most recent draft regardless of pre-checks
+    usages: list[UsageInfo] = []
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         try:
-            draft = call_translator_v3(
+            draft, t_usage = call_translator_v3(
                 seg, constraints, prior_draft, prior_feedback, style_profile
             )
+            usages.append(t_usage)
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d translator error: %s", segment_id, iteration, exc)
             break
@@ -186,6 +191,8 @@ def translate_segment(segment_id: int, conn) -> str:
 
         try:
             review = call_reviewer_r1(latin, draft, constraints)
+            if review.usage is not None:
+                usages.append(review.usage)
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d reviewer error: %s", segment_id, iteration, exc)
             break
@@ -199,7 +206,7 @@ def translate_segment(segment_id: int, conn) -> str:
                 update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
             conn.commit()
             log.info("segment_id=%d translated in %d iteration(s)", segment_id, iteration)
-            return "translated"
+            return "translated", usages
 
         prior_feedback = review.feedback
         prior_draft = draft
@@ -209,7 +216,7 @@ def translate_segment(segment_id: int, conn) -> str:
     if final_draft is None:
         # No draft was ever produced (e.g., translator raised on iteration 1)
         log.error("segment_id=%d: no draft produced; skipping DB write", segment_id)
-        return "needs_human"
+        return "needs_human", usages
 
     write_segment_text(conn, segment_id, "sk", src_model, final_draft)
     update_translation_status(conn, segment_id, "needs_human")
@@ -217,4 +224,4 @@ def translate_segment(segment_id: int, conn) -> str:
         update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
     conn.commit()
     log.warning("segment_id=%d flagged needs_human after %d iterations", segment_id, MAX_ITERATIONS)
-    return "needs_human"
+    return "needs_human", usages

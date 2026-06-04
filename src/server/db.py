@@ -20,9 +20,10 @@ def get_all_questions(conn: psycopg2.extensions.connection) -> list[dict]:
     """
     sql = """
         SELECT DISTINCT
-            ltree2text(subpath(locator_path, 0, 2)) AS question_path
+            ltree2text(subpath(locator_path, 0, 2)) AS question_path,
+            subpath(locator_path, 0, 2)             AS _sort_key
         FROM segment
-        ORDER BY subpath(locator_path, 0, 2)
+        ORDER BY _sort_key
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql)

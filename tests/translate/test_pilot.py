@@ -13,6 +13,11 @@ from translate.pilot import (
     fetch_reviewer_notes,
 )
 
+# Silence the corpus-char DB query that _write_report now issues.
+# It's wrapped in try/except so the tests pass either way, but mocking
+# avoids spurious connection-refused warnings in CI.
+_PATCH_GET_CONN = "translate.pilot.get_conn"
+
 # ── Fake DB helpers ───────────────────────────────────────────────────────────
 
 
@@ -130,24 +135,26 @@ def test_iteration_count_notes_with_no_iteration_key():
 
 
 def test_write_report_creates_file(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=40,
             needs_human=5,
             iterations_list=[1, 1, 2, 1, 2, 2, 3, 1, 1, 2] + [1] * 35,
+            stats_list=[],
             elapsed=125.0,
         )
     assert (tmp_path / "m4_pilot.txt").exists()
 
 
 def test_write_report_contains_key_fields(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=40,
             needs_human=5,
             iterations_list=[1] * 45,
+            stats_list=[],
             elapsed=90.0,
         )
     content = (tmp_path / "m4_pilot.txt").read_text()
@@ -158,12 +165,13 @@ def test_write_report_contains_key_fields(tmp_path):
 
 
 def test_write_report_abort_threshold_needs_human_ok(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=100,
             translated=90,
             needs_human=10,  # 10% — below 20% threshold
             iterations_list=[1] * 100,
+            stats_list=[],
             elapsed=60.0,
         )
     content = (tmp_path / "m4_pilot.txt").read_text()
@@ -171,12 +179,13 @@ def test_write_report_abort_threshold_needs_human_ok(tmp_path):
 
 
 def test_write_report_abort_threshold_needs_human_triggered(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=100,
             translated=70,
             needs_human=30,  # 30% — above 20% threshold
             iterations_list=[3] * 100,
+            stats_list=[],
             elapsed=60.0,
         )
     content = (tmp_path / "m4_pilot.txt").read_text()
@@ -184,12 +193,13 @@ def test_write_report_abort_threshold_needs_human_triggered(tmp_path):
 
 
 def test_write_report_avg_iterations(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=10,
             translated=8,
             needs_human=2,
             iterations_list=[1, 1, 2, 3, 1, 1, 1, 2, 3, 3],
+            stats_list=[],
             elapsed=30.0,
         )
     content = (tmp_path / "m4_pilot.txt").read_text()
@@ -199,12 +209,13 @@ def test_write_report_avg_iterations(tmp_path):
 
 def test_write_report_empty_run(tmp_path):
     """Should not crash when no segments were run."""
-    with patch("translate.pilot._REPORTS_DIR", tmp_path):
+    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=0,
             needs_human=0,
             iterations_list=[],
+            stats_list=[],
             elapsed=5.0,
         )
     assert (tmp_path / "m4_pilot.txt").exists()

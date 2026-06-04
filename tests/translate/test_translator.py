@@ -23,7 +23,12 @@ def _fake_response(content: str, status_code: int = 200):
         mock.raise_for_status = lambda: None
     mock.json.return_value = {
         "choices": [{"message": {"content": content}}],
-        "usage": {"prompt_tokens": 150, "completion_tokens": 40},
+        "usage": {
+            "prompt_tokens": 150,
+            "completion_tokens": 40,
+            "prompt_cache_hit_tokens": 120,
+            "prompt_cache_miss_tokens": 30,
+        },
     }
     return mock
 
@@ -69,9 +74,10 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response(expected)
             from translate.translator import call_translator_v3
-            result = call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None, _MINIMAL_STYLE_PROFILE)
-        assert isinstance(result, str)
-        assert result == expected
+            draft, usage = call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None, _MINIMAL_STYLE_PROFILE)
+        assert isinstance(draft, str)
+        assert draft == expected
+        assert usage.cost_usd > 0
 
     def test_system_prompt_contains_negative_constraints(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")

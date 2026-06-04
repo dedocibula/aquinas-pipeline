@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from translate.reviewer import _SYSTEM_PROMPT, ReviewResult, call_reviewer_r1
+from translate.reviewer import _SYSTEM_PROMPT, call_reviewer_r1
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,10 @@ class TestCallReviewerR1:
         with patch("translate.reviewer.requests.post") as mock_post:
             mock_post.return_value = _fake_response("APPROVED")
             result = call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
-        assert result == ReviewResult(verdict="APPROVED", notes=None, feedback=None)
+        assert result.verdict == "APPROVED"
+        assert result.notes is None
+        assert result.feedback is None
+        assert result.usage is not None  # populated from API response
 
     def test_approved_with_notes_verdict(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
