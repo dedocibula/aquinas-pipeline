@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # url_to_ltree unit tests
 # ---------------------------------------------------------------------------
@@ -134,9 +133,9 @@ def client():
         patch("server.app.get_prev_next_article",   return_value=FAKE_NAV),
         patch("server.app.get_translation_progress", return_value=FAKE_PROGRESS),
     ):
-        from server.app import app, _formulas
         # Reset formula cache so before_request fires during test.
         import server.app as _app_module
+        from server.app import app
         _app_module._formulas = {}
 
         app.config["TESTING"] = True

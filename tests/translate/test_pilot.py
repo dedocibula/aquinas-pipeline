@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from translate.pilot import (
-    _ABORT_AVG_ITERATIONS,
-    _ABORT_NEEDS_HUMAN_RATE,
     _PILOT_QUESTIONS,
     _iteration_count,
     _write_report,
@@ -18,7 +12,6 @@ from translate.pilot import (
     fetch_pilot_segments,
     fetch_reviewer_notes,
 )
-
 
 # ── Fake DB helpers ───────────────────────────────────────────────────────────
 

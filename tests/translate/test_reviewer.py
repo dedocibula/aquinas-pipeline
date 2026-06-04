@@ -4,11 +4,11 @@ Tests for the DeepSeek R1 reviewer agent — no real API calls.
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from translate.reviewer import ReviewResult, call_reviewer_r1, _SYSTEM_PROMPT
+import pytest
 
+from translate.reviewer import _SYSTEM_PROMPT, ReviewResult, call_reviewer_r1
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 

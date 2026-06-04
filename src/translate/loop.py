@@ -8,7 +8,6 @@ The loop writes the best qualifying draft and updates DB state, then commits.
 from __future__ import annotations
 
 import logging
-import sys
 
 import psycopg2.extras
 from dotenv import load_dotenv
