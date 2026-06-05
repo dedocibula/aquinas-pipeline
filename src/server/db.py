@@ -59,11 +59,11 @@ def get_article_segments(
     conn: psycopg2.extensions.connection,
     article_path: str,
 ) -> list[dict]:
-    """Return all segments for an article with Latin and preferred Slovak text.
+    """Return all segments for an article with Latin, Czech, English, and preferred Slovak text.
 
     Prefers the human SK source over the model source when both are present.
     Returns: segment_id, locator_path, element_type, reply_to,
-             translation_status, reviewer_notes, latin, slovak.
+             translation_status, reviewer_notes, latin, czech, english, slovak.
     """
     sql = """
         SELECT
@@ -74,11 +74,31 @@ def get_article_segments(
             s.translation_status,
             s.reviewer_notes,
             latin.content   AS latin,
+            czech.content   AS czech,
+            english.content AS english,
             slovak.content  AS slovak
         FROM segment s
         JOIN segment_text latin
             ON  latin.segment_id = s.segment_id
             AND latin.lang = 'la'
+        LEFT JOIN LATERAL (
+            SELECT st3.content
+            FROM segment_text st3
+            JOIN source src3 ON src3.source_id = st3.source_id
+            WHERE st3.segment_id = s.segment_id
+              AND st3.lang = 'cs'
+            ORDER BY src3.authority_rank ASC
+            LIMIT 1
+        ) czech ON true
+        LEFT JOIN LATERAL (
+            SELECT st4.content
+            FROM segment_text st4
+            JOIN source src4 ON src4.source_id = st4.source_id
+            WHERE st4.segment_id = s.segment_id
+              AND st4.lang = 'en'
+            ORDER BY src4.authority_rank ASC
+            LIMIT 1
+        ) english ON true
         LEFT JOIN LATERAL (
             SELECT st2.content
             FROM segment_text st2

@@ -61,6 +61,8 @@ FAKE_SEGMENTS = [
         "translation_status": "pending",
         "reviewer_notes": None,
         "latin": "Videtur quod non.",
+        "czech": "Zdá se, že ne.",
+        "english": "It seems that not.",
         "slovak": None,
     },
     {
@@ -71,6 +73,8 @@ FAKE_SEGMENTS = [
         "translation_status": "translated",
         "reviewer_notes": None,
         "latin": "Sed contra est quod.",
+        "czech": "Avšak proti tomu.",
+        "english": "On the contrary.",
         "slovak": "Na druhej strane:",
     },
     {
@@ -81,6 +85,8 @@ FAKE_SEGMENTS = [
         "translation_status": "translated",
         "reviewer_notes": "Checked by reviewer",
         "latin": "Respondeo dicendum.",
+        "czech": "Odpovídám.",
+        "english": "I answer that.",
         "slovak": "Odpoveď:",
     },
     {
@@ -91,6 +97,8 @@ FAKE_SEGMENTS = [
         "translation_status": "translated",
         "reviewer_notes": None,
         "latin": "Ad primum dicendum.",
+        "czech": "K první námitce.",
+        "english": "Reply to objection 1.",
         "slovak": "K námietke 1.",
     },
 ]
@@ -166,6 +174,38 @@ def test_article_view_404_when_empty(client):
     with patch("server.app.get_article_segments", return_value=[]):
         response = client.get("/la/sk/~ST.I.Q3.A1")
     assert response.status_code == 404
+
+
+def test_article_view_has_ref_lang_dropdown(client):
+    """Article view includes a <select> with Latin, Czech, English options."""
+    response = client.get("/la/sk/~ST.I.Q3.A1")
+    html = response.data.decode()
+    assert 'id="ref-lang-select"' in html
+    assert '<option value="la">Latin</option>' in html
+    assert '<option value="cs">Czech</option>' in html
+    assert '<option value="en">English</option>' in html
+
+
+def test_article_view_embeds_all_ref_language_spans(client):
+    """Each reference cell has three spans: la (visible), cs and en (hidden)."""
+    response = client.get("/la/sk/~ST.I.Q3.A1")
+    html = response.data.decode()
+    # Latin span visible by default (no inline display:none)
+    assert 'class="ref-text" data-lang="la"' in html
+    # Czech and English spans hidden by default
+    assert 'data-lang="cs" style="display:none"' in html
+    assert 'data-lang="en" style="display:none"' in html
+    # Actual Czech and English content present
+    assert "Zdá se, že ne." in html
+    assert "It seems that not." in html
+
+
+def test_article_view_has_switcher_script(client):
+    """Article view includes the JS listener for the language switcher."""
+    response = client.get("/la/sk/~ST.I.Q3.A1")
+    html = response.data.decode()
+    assert "ref-lang-select" in html
+    assert "querySelectorAll('.ref-text')" in html
 
 
 def test_status_endpoint_returns_progress_keys(client):

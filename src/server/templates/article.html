@@ -43,7 +43,13 @@
   <thead>
     <tr>
       <th class="col-label">Element</th>
-      <th class="col-latin">Latin</th>
+      <th class="col-latin">
+        <select id="ref-lang-select">
+          <option value="la">Latin</option>
+          <option value="cs">Czech</option>
+          <option value="en">English</option>
+        </select>
+      </th>
       <th class="col-slovak">Slovak</th>
       <th class="col-status">Status</th>
     </tr>
@@ -86,7 +92,11 @@
             {{ label }}
           {% endif %}
         </td>
-        <td class="col-latin latin">{{ seg.latin or '' }}</td>
+        <td class="col-latin">
+          <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
+          <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
+          <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
+        </td>
         <td class="col-slovak slovak">
           {% if seg.slovak %}
             {{ seg.slovak }}
@@ -103,4 +113,13 @@
     {% endfor %}
   </tbody>
 </table>
+
+<script>
+document.getElementById('ref-lang-select').addEventListener('change', function () {
+  var lang = this.value;
+  document.querySelectorAll('.ref-text').forEach(function (el) {
+    el.style.display = el.dataset.lang === lang ? '' : 'none';
+  });
+});
+</script>
 {% endblock %}
