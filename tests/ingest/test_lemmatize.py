@@ -36,7 +36,7 @@ def _morphodita_model_present() -> bool:
 @pytest.mark.skipif(not _cltk_models_present(), reason="lat_models_cltk not downloaded")
 class TestLemmatizeLatin:
     def setup_method(self):
-        from ingest.lemmatize import lemmatize_latin
+        from common.lemmatize import lemmatize_latin
         self.lemmatize = lemmatize_latin
 
     def test_essentia(self):
@@ -78,7 +78,7 @@ class TestLemmatizeLatin:
 @pytest.mark.skipif(not _morphodita_model_present(), reason="czech-morfflex*.dict not present in models/")
 class TestLemmatizeCzech:
     def setup_method(self):
-        from ingest.lemmatize import lemmatize_czech
+        from common.lemmatize import lemmatize_czech
         self.lemmatize = lemmatize_czech
 
     def test_dychteniv_nominative(self):

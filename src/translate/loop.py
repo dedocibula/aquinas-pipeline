@@ -8,11 +8,13 @@ The loop writes the best qualifying draft and updates DB state, then commits.
 from __future__ import annotations
 
 import logging
+import re
 
 import psycopg2.extras
 from dotenv import load_dotenv
 
 from common.db import source_id
+from common.lemmatize import lemmatize_latin
 from common.pricing import UsageInfo
 from translate.prechecks import check_structure
 from translate.prompt_logger import PromptLogger
@@ -135,6 +137,52 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
         )
 
 
+# ── Term lookup ───────────────────────────────────────────────────────────────
+
+_SUFFIX_RE = re.compile(r"\d+$")
+
+
+def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict]:
+    """Replace lemma-form constraints with the inflected surface forms from the Latin text.
+
+    For each approved single-word term, finds all tokens in `latin` whose CLTK lemma
+    matches and substitutes those surface forms so the translator sees the exact inflected
+    words (e.g. 'rationem → rozum', 'rationi → rozum' rather than 'ratio → rozum').
+
+    Multiword terms (space in lemma) are kept as-is — phrase matching, not lemmatization.
+    Falls back to the original lemma form for any term CLTK does not find in this text.
+    Each constraint is processed independently, so two approved senses sharing the same
+    lemma (different Slovak renderings) are both emitted correctly.
+    """
+    if not constraints or not latin:
+        return constraints
+
+    tokens = set(re.findall(r"[a-zA-Z]+", latin))
+
+    # Pre-compute token → set of stripped lemmas once to avoid re-calling CLTK per constraint.
+    token_lemmas: dict[str, set[str]] = {
+        token: {_SUFFIX_RE.sub("", cand) for cand in lemmatize_latin(token)}
+        for token in tokens
+    }
+
+    result: list[dict] = []
+    for c in constraints:
+        lemma = c["latin_lemma"]
+        if " " in lemma:
+            result.append(c)
+            continue
+
+        stripped = _SUFFIX_RE.sub("", lemma)
+        surfaces = sorted(t for t, ls in token_lemmas.items() if stripped in ls)
+        if surfaces:
+            for surface in surfaces:
+                result.append({"latin_lemma": surface, "required_slovak": c["required_slovak"]})
+        else:
+            result.append(c)
+
+    return result
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
@@ -162,6 +210,11 @@ def translate_segment(
         {"latin_lemma": t["latin_lemma"], "required_slovak": t["required_slovak"]}
         for t in locked_terms
     ]
+    # Surface-form constraints for the translator: CLTK maps each approved lemma
+    # to the inflected forms that actually appear in this segment's Latin text,
+    # so the model sees e.g. 'rationem → rozum' rather than 'ratio → rozum'.
+    # The reviewer still receives lemma-form constraints (more semantic for auditing).
+    translator_constraints = _build_surface_constraints(seg.get("latin") or "", constraints)
 
     src_model = source_id(conn, "model")
     style_profile = _get_style_profile()
@@ -180,11 +233,11 @@ def translate_segment(
         # functions; call_translator_v3 calls them again internally with identical
         # arguments, so the logged strings match what is sent.
         system_prompt = build_system_prompt(style_profile) if prompt_log else ""
-        user_turn = build_user_turn(seg, constraints, prior_draft, prior_feedback) if prompt_log else ""
+        user_turn = build_user_turn(seg, translator_constraints, prior_draft, prior_feedback) if prompt_log else ""
 
         try:
             draft, t_usage = call_translator_v3(
-                seg, constraints, prior_draft, prior_feedback, style_profile
+                seg, translator_constraints, prior_draft, prior_feedback, style_profile
             )
             usages.append(t_usage)
         except RuntimeError as exc:

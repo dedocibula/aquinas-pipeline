@@ -1,5 +1,4 @@
-"""
-Lemmatization utilities for the ingest pipeline.
+"""Lemmatization utilities shared across ingest and translate pipelines.
 
 Two functions:
   lemmatize_latin(surface) -> list[str]   — uses CLTK BackoffLatinLemmatizer
@@ -20,7 +19,8 @@ from __future__ import annotations
 import functools
 import pathlib
 
-# ── Latin ────────────────────────────────────────────────────────────────────
+# ── Latin ─────────────────────────────────────────────────────────────────────
+
 
 @functools.lru_cache(maxsize=1)
 def _latin_pos_tagger():
@@ -70,7 +70,7 @@ def lemmatize_latin(surface: str) -> list[str]:
     return list(dict.fromkeys(lemmas)) or [surface]
 
 
-# ── Czech ────────────────────────────────────────────────────────────────────
+# ── Czech ─────────────────────────────────────────────────────────────────────
 
 _MODELS_DIR = pathlib.Path(__file__).resolve().parents[2] / "models"
 _CZECH_DICT_GLOB = "czech-morfflex*.dict"

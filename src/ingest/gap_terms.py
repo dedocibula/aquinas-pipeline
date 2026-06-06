@@ -7,7 +7,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from common.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
-from ingest.lemmatize import lemmatize_latin
+from common.lemmatize import lemmatize_latin
 
 # ── Gap term proposal knobs ───────────────────────────────────────────────────
 # Override via run() parameters or GAP_* env vars read in pipeline.py.

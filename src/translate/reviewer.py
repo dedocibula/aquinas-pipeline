@@ -111,9 +111,9 @@ def call_reviewer_r1(
                     {"role": "user", "content": user_content},
                 ],
                 "temperature": 0.0,
-                "max_tokens": 1024,
+                "max_tokens": 8000,  # R1 reasoning + output share this budget; 1024 was too low
             },
-            timeout=60,
+            timeout=90,
         )
     except requests.RequestException as exc:
         raise RuntimeError(f"DeepSeek R1 network error: {exc}") from exc

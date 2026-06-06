@@ -6,8 +6,8 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from common.lemmatize import lemmatize_czech, lemmatize_latin
 from ingest.gap_terms import _GAP_MIN_LEN, _strip_lemma_suffix
-from ingest.lemmatize import lemmatize_czech, lemmatize_latin
 
 # Authority rank threshold for a "strong" signal (Krystal=10, Bahounek=20)
 _STRONG_RANK_THRESHOLD = 20
