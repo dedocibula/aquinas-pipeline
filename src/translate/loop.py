@@ -14,9 +14,15 @@ from dotenv import load_dotenv
 
 from common.db import source_id
 from common.pricing import UsageInfo
-from translate.prechecks import check_structure, check_terminology
-from translate.reviewer import call_reviewer_r1
-from translate.translator import call_translator_v3, load_style_profile
+from translate.prechecks import check_structure
+from translate.prompt_logger import PromptLogger
+from translate.reviewer import build_reviewer_turn, call_reviewer_r1
+from translate.translator import (
+    build_system_prompt,
+    build_user_turn,
+    call_translator_v3,
+    load_style_profile,
+)
 
 load_dotenv()
 
@@ -71,7 +77,7 @@ def get_locked_terms(conn, segment_id: int) -> list[dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT
+            SELECT DISTINCT ON (gs.sense_id)
                 gt.latin_lemma,
                 sr.content  AS required_slovak,
                 gs.sense_id,
@@ -80,8 +86,10 @@ def get_locked_terms(conn, segment_id: int) -> list[dict]:
             JOIN glossary_sense gs  ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
             JOIN glossary_term  gt  ON gt.term_id  = gs.term_id
             JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+            JOIN source          s  ON s.source_id  = sr.source_id
             WHERE tu.segment_id = %s
               AND sr.content IS NOT NULL
+            ORDER BY gs.sense_id, s.authority_rank
             """,
             (segment_id,),
         )
@@ -130,7 +138,9 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
-def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
+def translate_segment(
+    segment_id: int, conn, prompt_log: PromptLogger | None = None
+) -> tuple[str, list[UsageInfo]]:
     """Translate one segment through the full draft → pre-check → R1 → revise loop.
 
     Returns (status, usages) where status is 'translated' or 'needs_human' and
@@ -141,6 +151,11 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
     seg = get_segment_with_texts(conn, segment_id)
     if seg is None:
         raise RuntimeError(f"segment_id={segment_id} not found in DB")
+    if not seg.get("latin"):
+        log.error("segment_id=%d: no Latin text in DB; flagging needs_human", segment_id)
+        update_translation_status(conn, segment_id, "needs_human")
+        conn.commit()
+        return "needs_human", []
 
     locked_terms = get_locked_terms(conn, segment_id)
     constraints = [
@@ -153,11 +168,20 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
 
     prior_draft: str | None = None
     prior_feedback: str | None = None
-    best_draft: str | None = None   # last draft that cleared pre-checks
-    last_draft: str | None = None   # most recent draft regardless of pre-checks
+    best_draft: str | None = None            # last draft that cleared pre-checks
+    best_draft_iteration: int | None = None
+    last_draft: str | None = None            # most recent draft regardless of pre-checks
+    last_draft_iteration: int | None = None
     usages: list[UsageInfo] = []
+    locator = seg.get("locator_path", "")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
+        # Build prompts for logging. build_system_prompt / build_user_turn are pure
+        # functions; call_translator_v3 calls them again internally with identical
+        # arguments, so the logged strings match what is sent.
+        system_prompt = build_system_prompt(style_profile) if prompt_log else ""
+        user_turn = build_user_turn(seg, constraints, prior_draft, prior_feedback) if prompt_log else ""
+
         try:
             draft, t_usage = call_translator_v3(
                 seg, constraints, prior_draft, prior_feedback, style_profile
@@ -168,26 +192,43 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
             break
 
         last_draft = draft
+        last_draft_iteration = iteration
 
         structure_result = check_structure(seg, draft, conn)
-        terminology_result = check_terminology(draft, constraints)
 
-        if not (structure_result.ok and terminology_result.ok):
-            failures = structure_result.failures + terminology_result.failures
+        if not structure_result.ok:
             prior_feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
-                f"  - {f}" for f in failures
+                f"  - {f}" for f in structure_result.failures
             )
+            if prompt_log:
+                prompt_log.log_iteration(
+                    segment_id=segment_id,
+                    locator_path=locator,
+                    iteration=iteration,
+                    system_prompt=system_prompt,
+                    user_turn=user_turn,
+                    draft=draft,
+                    precheck_ok=False,
+                    precheck_failures=structure_result.failures,
+                    reviewer_turn=None,
+                    verdict=None,
+                    feedback=prior_feedback,
+                )
             prior_draft = draft
             if best_draft is None:
                 best_draft = draft
+                best_draft_iteration = iteration
             continue  # back to translator; do NOT call R1
 
         best_draft = draft  # cleared pre-checks — candidate for best
+        best_draft_iteration = iteration
 
         latin = seg.get("latin")
         if not latin:
             log.error("segment_id=%d iteration=%d: missing Latin text; skipping R1", segment_id, iteration)
             break
+
+        reviewer_turn = build_reviewer_turn(latin, draft, constraints) if prompt_log else ""
 
         try:
             review = call_reviewer_r1(latin, draft, constraints)
@@ -196,6 +237,21 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d reviewer error: %s", segment_id, iteration, exc)
             break
+
+        if prompt_log:
+            prompt_log.log_iteration(
+                segment_id=segment_id,
+                locator_path=locator,
+                iteration=iteration,
+                system_prompt=system_prompt,
+                user_turn=user_turn,
+                draft=draft,
+                precheck_ok=True,
+                precheck_failures=[],
+                reviewer_turn=reviewer_turn,
+                verdict=review.verdict,
+                feedback=review.feedback,
+            )
 
         if review.verdict in ("APPROVED", "APPROVED_WITH_NOTES"):
             write_segment_text(conn, segment_id, "sk", src_model, draft)
@@ -206,16 +262,33 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
                 update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
             conn.commit()
             log.info("segment_id=%d translated in %d iteration(s)", segment_id, iteration)
+            if prompt_log:
+                prompt_log.log_final(
+                    segment_id=segment_id,
+                    locator_path=locator,
+                    status="translated",
+                    chosen_iteration=iteration,
+                    chosen_draft=draft,
+                )
             return "translated", usages
 
         prior_feedback = review.feedback
         prior_draft = draft
 
     # Exhausted — write best_draft (last to clear pre-checks) or fall back to last_draft
-    final_draft = best_draft or last_draft
+    final_draft = best_draft if best_draft is not None else last_draft
+    chosen_iter = best_draft_iteration if best_draft_iteration is not None else last_draft_iteration
     if final_draft is None:
         # No draft was ever produced (e.g., translator raised on iteration 1)
         log.error("segment_id=%d: no draft produced; skipping DB write", segment_id)
+        if prompt_log:
+            prompt_log.log_final(
+                segment_id=segment_id,
+                locator_path=locator,
+                status="needs_human",
+                chosen_iteration=None,
+                chosen_draft=None,
+            )
         return "needs_human", usages
 
     write_segment_text(conn, segment_id, "sk", src_model, final_draft)
@@ -224,4 +297,12 @@ def translate_segment(segment_id: int, conn) -> tuple[str, list[UsageInfo]]:
         update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
     conn.commit()
     log.warning("segment_id=%d flagged needs_human after %d iterations", segment_id, MAX_ITERATIONS)
+    if prompt_log:
+        prompt_log.log_final(
+            segment_id=segment_id,
+            locator_path=locator,
+            status="needs_human",
+            chosen_iteration=chosen_iter,
+            chosen_draft=final_draft,
+        )
     return "needs_human", usages

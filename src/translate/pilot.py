@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from common.db import get_conn
 from common.pricing import UsageInfo
 from translate.loop import translate_segment
+from translate.prompt_logger import PromptLogger
 
 load_dotenv()
 
@@ -35,6 +36,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 _PILOT_QUESTIONS = ["I.q1", "I.q2", "I.q3", "I.q4", "I.q5", "I.q6"]
+_DEBUG_QUESTION = "I.q1"
+_DEBUG_LIMIT = 10
 _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20
@@ -54,16 +57,45 @@ class SegmentStats:
 
 
 def fetch_pilot_segments(conn) -> list[dict]:
-    """Return all pending segments in Q1–Q6, ordered by locator_path."""
+    """Return pending segments in Q1–Q6 that have Latin text, ordered by locator_path.
+
+    Structural segments (article_title, question_title) have no Latin text and
+    are excluded — they are not translatable content.
+    """
     sql = f"""
-        SELECT segment_id, locator_path::text, translation_status
-        FROM segment
-        WHERE ({" OR ".join("locator_path <@ %s::ltree" for _ in _PILOT_QUESTIONS)})
-          AND translation_status = 'pending'
-        ORDER BY locator_path
+        SELECT s.segment_id, s.locator_path::text, s.translation_status
+        FROM segment s
+        WHERE ({" OR ".join("s.locator_path <@ %s::ltree" for _ in _PILOT_QUESTIONS)})
+          AND s.translation_status = 'pending'
+          AND EXISTS (
+              SELECT 1 FROM segment_text st
+              WHERE st.segment_id = s.segment_id AND st.lang = 'la'
+          )
+        ORDER BY s.locator_path
     """
     with conn.cursor() as cur:
         cur.execute(sql, _PILOT_QUESTIONS)
+        return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
+
+
+def fetch_debug_segments(conn) -> list[dict]:
+    """Return first _DEBUG_LIMIT pending segments in _DEBUG_QUESTION that have Latin text."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT s.segment_id, s.locator_path::text, s.translation_status
+            FROM segment s
+            WHERE s.locator_path <@ %s::ltree
+              AND s.translation_status = 'pending'
+              AND EXISTS (
+                  SELECT 1 FROM segment_text st
+                  WHERE st.segment_id = s.segment_id AND st.lang = 'la'
+              )
+            ORDER BY s.locator_path
+            LIMIT %s
+            """,
+            (_DEBUG_QUESTION, _DEBUG_LIMIT),
+        )
         return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
 
 
@@ -139,22 +171,24 @@ def _iteration_count(notes: dict | None, status: str) -> int:
 
 def run_pilot() -> None:
     start = time.time()
+    debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
 
     with get_conn() as conn:
-        pending = fetch_pilot_segments(conn)
-        total_all = len(fetch_all_pilot_segments(conn))
+        pending = fetch_debug_segments(conn)
 
     log.info(
-        "Pilot set: %d total segments in Q1–Q6, %d pending translation",
-        total_all,
+        "Debug pilot: %d segments from %s (limit %d). Prompt log → %s",
         len(pending),
+        _DEBUG_QUESTION,
+        _DEBUG_LIMIT,
+        debug_log_path,
     )
 
     if not pending:
-        log.info("All segments already translated — nothing to do.")
+        log.info("No pending segments found — nothing to do.")
         _write_report(
-            total_segments=total_all,
-            translated=total_all,
+            total_segments=0,
+            translated=0,
             needs_human=0,
             iterations_list=[],
             stats_list=[],
@@ -167,7 +201,7 @@ def run_pilot() -> None:
     iterations_list: list[int] = []
     stats_list: list[SegmentStats] = []
 
-    with get_conn() as conn:
+    with get_conn() as conn, PromptLogger(debug_log_path) as prompt_log:
         for i, seg in enumerate(pending, 1):
             sid = seg["segment_id"]
             log.info(
@@ -178,7 +212,7 @@ def run_pilot() -> None:
                 seg["locator_path"],
             )
 
-            status, usages = translate_segment(sid, conn)
+            status, usages = translate_segment(sid, conn, prompt_log=prompt_log)
             notes = fetch_reviewer_notes(conn, sid)
             iters = _iteration_count(notes, status)
             iterations_list.append(iters)
@@ -210,7 +244,7 @@ def run_pilot() -> None:
     elapsed = time.time() - start
     total_run = len(pending)
     _write_report(
-        total_segments=total_all,
+        total_segments=total_run,
         translated=translated_count,
         needs_human=needs_human_count,
         iterations_list=iterations_list,

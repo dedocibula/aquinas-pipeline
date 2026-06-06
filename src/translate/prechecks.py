@@ -154,7 +154,15 @@ def _normalise(s: str) -> str:
 
 
 def check_terminology(draft: str, constraints: list[dict]) -> CheckResult:
-    """Check that all hard term constraints appear in the draft.
+    """Check that all hard term constraints appear in the draft (exact normalised match).
+
+    NOTE: This check is NOT wired into the translation loop's pre-check gate.
+    Slovak is highly inflected and exact matching rejects grammatically correct
+    declined forms. Proper enforcement requires a morphological analyser
+    (MorphoDiTa); until that is implemented, terminology compliance is delegated
+    entirely to the R1 reviewer which receives the full constraints in its prompt.
+
+    This function is kept for future use and for direct diagnostic calls.
 
     Args:
         draft:       Slovak translation draft.

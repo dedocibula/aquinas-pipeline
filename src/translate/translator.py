@@ -82,8 +82,8 @@ def call_translator_v3(
             "Export it or add it to .env before running the translator."
         )
 
-    system_content = _build_system_prompt(style_profile)
-    user_content = _build_user_turn(seg, constraints, prior_draft, prior_feedback)
+    system_content = build_system_prompt(style_profile)
+    user_content = build_user_turn(seg, constraints, prior_draft, prior_feedback)
 
     try:
         resp = requests.post(
@@ -127,7 +127,7 @@ def call_translator_v3(
 
 # ── Prompt builders ───────────────────────────────────────────────────────────
 
-def _build_system_prompt(style_profile: dict) -> str:
+def build_system_prompt(style_profile: dict) -> str:
     """Build the stable (cache-eligible) system prompt from style_profile."""
     orth = style_profile.get("orthography", {})
     prefer = orth.get("prefer", [])
@@ -162,7 +162,7 @@ def _build_system_prompt(style_profile: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_user_turn(
+def build_user_turn(
     seg: dict,
     constraints: list[dict],
     prior_draft: str | None,

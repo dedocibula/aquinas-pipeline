@@ -10,7 +10,7 @@ M4 — **IN PROGRESS** — translation loop built; preview server verified; pilo
 - `src/translate/prechecks.py` — structure + terminology pre-checks (no LLM)
 - `src/translate/loop.py` — `translate_segment()` — MAX_ITERATIONS=3 loop
 - `src/translate/pilot.py` — pilot runner for Q1–Q6 (294 segments); writes `reports/m4_pilot.txt`
-- `src/server/app.py` + `src/server/db.py` + templates — **Flask preview server verified** (`localhost:5000`)
+- `src/server/app.py` + `src/server/db.py` + templates — **Flask preview server verified** (`localhost:5000`); reference-language switcher added (Latin/Czech/English dropdown in article view, commit `0fd8ca2`)
 - `reports/m4_pilot.txt` — **NOT YET WRITTEN** — pilot run not started
 
 ## Preview Server
@@ -27,9 +27,13 @@ Routes verified:
 Bug fixed this session: `server/db.py:get_all_questions()` — `SELECT DISTINCT … ORDER BY` referenced a non-select expression; fixed by adding `_sort_key` to the select list.
 
 ## Pilot Run State
-- 294 segments pending in Q1–Q6 (Q1=8a, Q2=3a, Q3=8a, Q4=3a, Q5=6a, Q6=4a × ~10 segs/article)
+- **Debug mode active:** pilot scoped to first 10 pending segments of I.q1 (changed from Q1–Q6)
 - 0 translated so far
-- **Next action:** run `uv run python -m translate.pilot` — will abort if needs_human > 20% or avg_iters > 2.5
+- **Next action:** run `uv run python -m translate.pilot`
+  - Prompt log written to `reports/debug_{timestamp}.jsonl` (JSONL, one record per iteration + one "final" record per segment)
+  - Analyze with `jq` or Python to inspect system_prompt, user_turn, draft, verdict, feedback, chosen_draft
+  - Goal: verify whether style_profile.yaml is making translations too academic/stern
+  - After analysis, tune prompts/style_profile and rerun; then restore Q1–Q6 scope for full pilot
 
 ## M4 DB State (pre-pilot)
 | Table | Rows | Notes |

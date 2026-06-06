@@ -55,6 +55,19 @@ class ReviewResult:
     usage: UsageInfo | None = None  # token counts and cost for this R1 call
 
 
+def build_reviewer_turn(latin: str, draft: str, constraints: list[dict]) -> str:
+    """Build the per-segment user turn sent to the R1 reviewer."""
+    term_lines = "\n".join(
+        f"  {c['latin_lemma']} → {c['required_slovak']}"
+        for c in constraints
+    )
+    return (
+        f"REQUIRED TERMS:\n{term_lines}\n\n"
+        f"LATIN:\n{latin}\n\n"
+        f"DRAFT:\n{draft}"
+    )
+
+
 def call_reviewer_r1(
     latin: str,
     draft: str,
@@ -82,16 +95,7 @@ def call_reviewer_r1(
             "Export it before running the reviewer."
         )
 
-    # Build per-segment user turn (not cached)
-    term_lines = "\n".join(
-        f"  {c['latin_lemma']} → {c['required_slovak']}"
-        for c in constraints
-    )
-    user_content = (
-        f"REQUIRED TERMS:\n{term_lines}\n\n"
-        f"LATIN:\n{latin}\n\n"
-        f"DRAFT:\n{draft}"
-    )
+    user_content = build_reviewer_turn(latin, draft, constraints)
 
     try:
         resp = requests.post(
