@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -17,34 +19,19 @@ _DEEPSEEK_URL = os.environ.get(
 )
 _DEEPSEEK_R1_MODEL = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-reasoner")
 
-_SYSTEM_PROMPT = """\
-You are a quality reviewer for a Slovak translation of Aquinas's Summa Theologiae.
-Evaluate against four axes. Verdict must be one of three options (exact strings).
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
-AXIS 1 — STRUCTURE
-Count objections in Latin; confirm same count in draft.
-Check: sed_contra and respondeo markers present where applicable.
-A missing structural element is always FAIL.
 
-AXIS 2 — TERMINOLOGY
-Each required term must appear verbatim in the draft.
-A missing required term is always FAIL.
-
-AXIS 3 — SEMANTICS
-Does the Slovak convey the logical argument faithfully?
-MAJOR failure: argument direction changes, conditional replaces categorical,
-  modal distinctions collapse. → REVISION NEEDED
-MINOR imprecision: slightly loose rendering, no argument change. → note only, not FAIL.
-
-AXIS 4 — REGISTER
-Flag colloquialisms, modern idioms, restructured sentences.
-Register issues → notes only, never FAIL (handled in M5 polish).
-
-OUTPUT FORMAT — respond with exactly one of:
-  APPROVED
-  APPROVED_WITH_NOTES: <bulleted advisory items>
-  REVISION_NEEDED: <bulleted required changes — structure/terminology/major-semantic only>\
-"""
+@functools.lru_cache(maxsize=None)
+def load_reviewer_system_prompt() -> str:
+    """Load (and cache) the reviewer system prompt from prompts/reviewer_system.txt."""
+    path = _PROMPTS_DIR / "reviewer_system.txt"
+    if not path.exists():
+        raise RuntimeError(
+            f"reviewer_system.txt not found at {path}. "
+            "Ensure the file exists under the project-root prompts/ directory."
+        )
+    return path.read_text(encoding="utf-8")
 
 
 @dataclass
@@ -107,7 +94,7 @@ def call_reviewer_r1(
             json={
                 "model": _DEEPSEEK_R1_MODEL,
                 "messages": [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "system", "content": load_reviewer_system_prompt()},
                     {"role": "user", "content": user_content},
                 ],
                 "temperature": 0.0,

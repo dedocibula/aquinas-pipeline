@@ -9,7 +9,6 @@ Produces:
   - glossary_sense rows (one per sense; multi-sense terms get N rows)
   - sense_rendering(cs) rows from DOCX Czech renderings
   - sense_rendering(sk) rows using Czech as placeholder (status='proposed')
-  - style_profile.yaml — Krystal house style rules
 
 Sense detection:
   Pattern 1 — comma-separated senses: "term1 (context1), term2 (context2)"
@@ -28,13 +27,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import docx
-import yaml
 
 from common.db import get_conn, source_id
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCX_PATH = ROOT / "sources" / "czech" / "krystal" / "Teologická Suma úzus - verze 4.docx"
-STYLE_YAML_PATH = ROOT / "style_profile.yaml"
 
 # Paragraph index where the glossary begins (heading "SLOVNÍČEK TERMÍNŮ")
 _GLOSSARY_HEADER = "SLOVNÍČEK TERMÍNŮ"
@@ -256,54 +253,6 @@ def parse_glossary(doc: docx.Document) -> list[GlossaryEntry]:
     return entries
 
 
-# ── Style profile extraction ──────────────────────────────────────────────────
-
-
-def build_style_profile() -> dict:
-    """Build style_profile.yaml content from documented Krystal house rules.
-
-    TODO(M2): wire to actual DOCX paragraph extraction so this reflects
-    DOCX changes automatically instead of being a static transcription.
-    """
-    return {
-        "heading_templates": {
-            "sed_contra": "Na druhé straně",
-            "respondeo": "Odpověď.",
-            "replies_section": "K námitkám",
-            "drop_formulas": ["praeterea", "ad primum dicendum"],
-            "number_objections": True,
-        },
-        "citation_rules": {
-            "aristotle": "Bekker numbers in footnotes",
-            "church_fathers": "PL/PG references",
-            "bible_abbreviations": "JB (liturgický překlad)",
-            "bible_text_source": "ČEP (u NZ může být vhodnější liturgický překlad)",
-            "translate_thomas_bible_from_latin": True,
-            "note": "Nepřekládáme Bibli, ale TA. Pokud Tomáš cituje Bibli, překládáme z jeho latiny.",
-        },
-        "name_forms": {
-            "Augustinus": "Augustin",
-            "Gregorius": "Řehoř",
-            "Dionysius": "Dionýsios",
-            "Athanasius": "Athanasios",
-            "Boethius": "Boethius",
-            "note": "Nepoužívat: Diviš (místo Dionýsios), Atanáš (místo Athanasios).",
-            "author_names_in_text": "KAPITÁLKY (nikoli majuskule)",
-            "work_titles": "kurzíva",
-        },
-        "orthography": {
-            "prefer": ["filosofie", "teologie", "-ismus"],
-            "avoid": ["filozofie", "theologie", "-izmus"],
-        },
-        "negative_constraints": [
-            "Nezvedat literární kvalitu nad originál.",
-            "Zachovávat opakování (nesnažit se o variaci).",
-            "Zachovávat scholastické spojky a výrazy.",
-            "Zachovávat hranice vět.",
-        ],
-    }
-
-
 # ── Review output ─────────────────────────────────────────────────────────────
 
 
@@ -446,7 +395,6 @@ def run(*, skip_confirm: bool = False) -> None:
     print(f"Parsing {DOCX_PATH.name} ...")
     doc = docx.Document(DOCX_PATH)
     entries = parse_glossary(doc)
-    style = build_style_profile()
 
     print()
     print_review(entries)
@@ -457,11 +405,6 @@ def run(*, skip_confirm: bool = False) -> None:
         if answer != "yes":
             print("Aborted.")
             return
-
-    # Write style profile
-    with open(STYLE_YAML_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(style, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    print(f"Wrote {STYLE_YAML_PATH}")
 
     # Insert into DB
     with get_conn() as conn:

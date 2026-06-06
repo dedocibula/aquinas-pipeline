@@ -7,11 +7,11 @@ text; raises RuntimeError loudly on all failure modes.
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 
 import requests
-import yaml
 from dotenv import load_dotenv
 
 from common.pricing import UsageInfo, extract_usage
@@ -25,31 +25,21 @@ _DEEPSEEK_URL = os.environ.get(
 )
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_STYLE_PROFILE_PATH = _PROJECT_ROOT / "style_profile.yaml"
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def load_style_profile(path: str | None = None) -> dict:
-    """Load and return the style_profile.yaml as a dict.
-
-    Defaults to the project-root style_profile.yaml.  Raises RuntimeError if the
-    file is missing or cannot be parsed.
-    """
-    target = Path(path) if path is not None else _STYLE_PROFILE_PATH
-    if not target.exists():
+@functools.lru_cache(maxsize=None)
+def load_translator_system_prompt() -> str:
+    """Load (and cache) the translator system prompt from prompts/translator_system.txt."""
+    path = _PROMPTS_DIR / "translator_system.txt"
+    if not path.exists():
         raise RuntimeError(
-            f"style_profile.yaml not found at {target}. "
-            "Ensure the file exists at the project root."
+            f"translator_system.txt not found at {path}. "
+            "Ensure the file exists under the project-root prompts/ directory."
         )
-    with target.open(encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-    if not isinstance(data, dict):
-        raise RuntimeError(
-            f"style_profile.yaml at {target} did not parse as a mapping."
-        )
-    return data
+    return path.read_text(encoding="utf-8")
 
 
 def call_translator_v3(
@@ -57,7 +47,6 @@ def call_translator_v3(
     constraints: list[dict],
     prior_draft: str | None,
     prior_feedback: str | None,
-    style_profile: dict,
 ) -> tuple[str, UsageInfo]:
     """Call DeepSeek V3 to produce a Slovak translation draft for one segment.
 
@@ -67,7 +56,6 @@ def call_translator_v3(
         constraints: List of {latin_lemma, required_slovak} dicts — hard term constraints.
         prior_draft: Previous Slovak draft, or None for first-pass translation.
         prior_feedback: Reviewer feedback addressing the prior draft, or None.
-        style_profile: Loaded style_profile.yaml dict.
 
     Returns:
         Tuple of (non-empty Slovak draft string, UsageInfo with token counts and cost).
@@ -82,7 +70,7 @@ def call_translator_v3(
             "Export it or add it to .env before running the translator."
         )
 
-    system_content = build_system_prompt(style_profile)
+    system_content = load_translator_system_prompt()
     user_content = build_user_turn(seg, constraints, prior_draft, prior_feedback)
 
     try:
@@ -125,42 +113,7 @@ def call_translator_v3(
     return draft, usage
 
 
-# ── Prompt builders ───────────────────────────────────────────────────────────
-
-def build_system_prompt(style_profile: dict) -> str:
-    """Build the stable (cache-eligible) system prompt from style_profile."""
-    orth = style_profile.get("orthography", {})
-    prefer = orth.get("prefer", [])
-    avoid = orth.get("avoid", [])
-
-    name_forms = style_profile.get("name_forms", {})
-
-    lines = [
-        "You are translating Thomas Aquinas's Summa Theologiae from Scholastic Latin into Slovak.",
-        "",
-        "STYLE RULES:",
-    ]
-
-    # Spelling
-    if prefer or avoid:
-        prefer_str = ", ".join(str(p) for p in prefer) if prefer else "(none)"
-        avoid_str = ", ".join(str(a) for a in avoid) if avoid else "(none)"
-        lines.append(f"  Spelling    → {prefer_str} (not {avoid_str})")
-
-    # Name forms
-    for key, value in name_forms.items():
-        lines.append(f"  {key}    → {value}")
-
-    # Negative constraints
-    neg = style_profile.get("negative_constraints", [])
-    if neg:
-        lines.append("")
-        lines.append("NEGATIVE CONSTRAINTS:")
-        for constraint in neg:
-            lines.append(f"  {constraint}")
-
-    return "\n".join(lines)
-
+# ── Prompt builder ────────────────────────────────────────────────────────────
 
 def build_user_turn(
     seg: dict,

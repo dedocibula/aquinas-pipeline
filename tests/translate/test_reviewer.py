@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from translate.reviewer import _SYSTEM_PROMPT, call_reviewer_r1
+from translate.reviewer import call_reviewer_r1, load_reviewer_system_prompt
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -105,7 +105,14 @@ class TestCallReviewerR1:
 
 class TestSystemPrompt:
     def test_system_prompt_contains_revision_needed(self):
-        assert "REVISION_NEEDED" in _SYSTEM_PROMPT
+        assert "REVISION_NEEDED" in load_reviewer_system_prompt()
+
+    def test_raises_runtime_error_when_file_not_found(self, monkeypatch, tmp_path):
+        import translate.reviewer as mod
+        mod.load_reviewer_system_prompt.cache_clear()
+        monkeypatch.setattr(mod, "_PROMPTS_DIR", tmp_path)
+        with pytest.raises(RuntimeError, match="reviewer_system.txt not found"):
+            mod.load_reviewer_system_prompt()
 
 
 # ── TestUserTurn ───────────────────────────────────────────────────────────────

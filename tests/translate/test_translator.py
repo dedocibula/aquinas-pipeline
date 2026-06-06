@@ -4,12 +4,9 @@ Tests for translate.translator — no real API calls.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -32,23 +29,6 @@ def _fake_response(content: str, status_code: int = 200):
     }
     return mock
 
-
-_MINIMAL_STYLE_PROFILE = {
-    "orthography": {
-        "prefer": ["filozofia", "teológia", "-izmus"],
-        "avoid": ["filosofia", "theológia", "-ismus"],
-    },
-    "name_forms": {
-        "author_names_in_text": "KAPITÁLKY (nie majuskule)",
-        "work_titles": "kurzíva",
-    },
-    "negative_constraints": [
-        "Nezvyšovať literárnu kvalitu nad originál.",
-        "Zachovávať opakovania (nesnažiť sa o variáciu).",
-        "Zachovávať scholastické spojky a výrazy.",
-        "Zachovávať hranice viet.",
-    ],
-}
 
 _MINIMAL_SEG = {
     "segment_id": 42,
@@ -74,7 +54,7 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response(expected)
             from translate.translator import call_translator_v3
-            draft, usage = call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None, _MINIMAL_STYLE_PROFILE)
+            draft, usage = call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None)
         assert isinstance(draft, str)
         assert draft == expected
         assert usage.cost_usd > 0
@@ -84,22 +64,20 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, [], None, None, _MINIMAL_STYLE_PROFILE)
+            call_translator_v3(_MINIMAL_SEG, [], None, None)
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
         system_msg = next(m for m in messages if m["role"] == "system")
-        for constraint in _MINIMAL_STYLE_PROFILE["negative_constraints"]:
-            assert constraint in system_msg["content"], (
-                f"Expected constraint not found in system prompt: {constraint!r}"
-            )
+        assert "NEGATIVE CONSTRAINTS" in system_msg["content"]
+        assert "Nezvyšovať literárnu kvalitu nad originál." in system_msg["content"]
 
     def test_user_turn_contains_hard_term_constraints(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None, _MINIMAL_STYLE_PROFILE)
+            call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None)
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
@@ -113,7 +91,7 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, [], None, None, _MINIMAL_STYLE_PROFILE)
+            call_translator_v3(_MINIMAL_SEG, [], None, None)
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
@@ -128,7 +106,7 @@ class TestCallTranslatorV3:
             mock_post.return_value = _fake_response("Revidovaný preklad.")
             from translate.translator import call_translator_v3
             call_translator_v3(
-                _MINIMAL_SEG, [], prior_draft, prior_feedback, _MINIMAL_STYLE_PROFILE
+                _MINIMAL_SEG, [], prior_draft, prior_feedback
             )
 
         call_args = mock_post.call_args
@@ -143,7 +121,7 @@ class TestCallTranslatorV3:
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         from translate.translator import call_translator_v3
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
-            call_translator_v3(_MINIMAL_SEG, [], None, None, _MINIMAL_STYLE_PROFILE)
+            call_translator_v3(_MINIMAL_SEG, [], None, None)
 
     def test_raises_runtime_error_on_http_401(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "bad-key")
@@ -151,7 +129,7 @@ class TestCallTranslatorV3:
             mock_post.return_value = _fake_response("", status_code=401)
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="401"):
-                call_translator_v3(_MINIMAL_SEG, [], None, None, _MINIMAL_STYLE_PROFILE)
+                call_translator_v3(_MINIMAL_SEG, [], None, None)
 
     def test_raises_runtime_error_on_empty_choices(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -161,30 +139,22 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post", return_value=empty_choices):
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="no choices"):
-                call_translator_v3(_MINIMAL_SEG, [], None, None, _MINIMAL_STYLE_PROFILE)
+                call_translator_v3(_MINIMAL_SEG, [], None, None)
 
 
-# ── TestLoadStyleProfile ───────────────────────────────────────────────────────
+# ── TestLoadTranslatorSystemPrompt ────────────────────────────────────────────
 
-class TestLoadStyleProfile:
-    def test_raises_runtime_error_when_file_not_found(self):
-        from translate.translator import load_style_profile
-        with pytest.raises(RuntimeError, match="style_profile.yaml not found"):
-            load_style_profile("/nonexistent/path/style_profile.yaml")
+class TestLoadTranslatorSystemPrompt:
+    def test_raises_runtime_error_when_file_not_found(self, monkeypatch, tmp_path):
+        import translate.translator as mod
+        mod.load_translator_system_prompt.cache_clear()
+        monkeypatch.setattr(mod, "_PROMPTS_DIR", tmp_path)
+        with pytest.raises(RuntimeError, match="translator_system.txt not found"):
+            mod.load_translator_system_prompt()
 
-    def test_returns_dict_with_expected_keys_when_file_exists(self):
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        ) as fh:
-            yaml.dump(_MINIMAL_STYLE_PROFILE, fh, allow_unicode=True)
-            tmp_path = fh.name
-
-        try:
-            from translate.translator import load_style_profile
-            result = load_style_profile(tmp_path)
-            assert isinstance(result, dict)
-            assert "orthography" in result
-            assert "negative_constraints" in result
-            assert "name_forms" in result
-        finally:
-            os.unlink(tmp_path)
+    def test_returns_nonempty_string_when_file_exists(self):
+        from translate.translator import load_translator_system_prompt
+        result = load_translator_system_prompt()
+        assert isinstance(result, str)
+        assert len(result) > 0
+        assert "NEGATIVE CONSTRAINTS" in result

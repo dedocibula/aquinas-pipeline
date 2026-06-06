@@ -20,25 +20,15 @@ from translate.prechecks import check_structure
 from translate.prompt_logger import PromptLogger
 from translate.reviewer import build_reviewer_turn, call_reviewer_r1
 from translate.translator import (
-    build_system_prompt,
     build_user_turn,
     call_translator_v3,
-    load_style_profile,
+    load_translator_system_prompt,
 )
 
 load_dotenv()
 
 MAX_ITERATIONS = 3
 log = logging.getLogger(__name__)
-
-_style_profile: dict | None = None
-
-
-def _get_style_profile() -> dict:
-    global _style_profile
-    if _style_profile is None:
-        _style_profile = load_style_profile()
-    return _style_profile
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -217,7 +207,6 @@ def translate_segment(
     translator_constraints = _build_surface_constraints(seg.get("latin") or "", constraints)
 
     src_model = source_id(conn, "model")
-    style_profile = _get_style_profile()
 
     prior_draft: str | None = None
     prior_feedback: str | None = None
@@ -229,15 +218,15 @@ def translate_segment(
     locator = seg.get("locator_path", "")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
-        # Build prompts for logging. build_system_prompt / build_user_turn are pure
-        # functions; call_translator_v3 calls them again internally with identical
-        # arguments, so the logged strings match what is sent.
-        system_prompt = build_system_prompt(style_profile) if prompt_log else ""
+        # Build prompts for logging. load_translator_system_prompt returns a cached string;
+        # build_user_turn is deterministic given the same arguments. call_translator_v3
+        # calls them again internally, so the logged strings match what is sent.
+        system_prompt = load_translator_system_prompt() if prompt_log else ""
         user_turn = build_user_turn(seg, translator_constraints, prior_draft, prior_feedback) if prompt_log else ""
 
         try:
             draft, t_usage = call_translator_v3(
-                seg, translator_constraints, prior_draft, prior_feedback, style_profile
+                seg, translator_constraints, prior_draft, prior_feedback
             )
             usages.append(t_usage)
         except RuntimeError as exc:
