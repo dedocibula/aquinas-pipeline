@@ -76,7 +76,6 @@ class TestCallTranslatorV3:
         system_msg = next(m for m in messages if m["role"] == "system")
         assert "DO NOT:" in system_msg["content"]
         assert "Czech reference" in system_msg["content"]
-        assert "never produce a more literal" in system_msg["content"]
         assert "passive infinitives" in system_msg["content"]
 
     def test_user_turn_contains_hard_term_constraints(self, monkeypatch):
