@@ -256,6 +256,7 @@ def translate_segment(
                     precheck_failures=all_failures,
                     reviewer_turn=None,
                     verdict=None,
+                    notes=None,
                     feedback=prior_feedback,
                 )
             prior_draft = draft
@@ -291,6 +292,7 @@ def translate_segment(
                 precheck_failures=[],
                 reviewer_turn=reviewer_turn,
                 verdict=review.verdict,
+                notes=review.notes,
                 feedback=review.feedback,
             )
 

@@ -34,6 +34,7 @@ class PromptLogger:
         precheck_failures: list[str],
         reviewer_turn: str | None,
         verdict: str | None,
+        notes: dict | None,
         feedback: str | None,
     ) -> None:
         self._write(
@@ -49,6 +50,7 @@ class PromptLogger:
                 "precheck_failures": precheck_failures,
                 "reviewer_turn": reviewer_turn,
                 "verdict": verdict,
+                "notes": notes,
                 "feedback": feedback,
             }
         )
