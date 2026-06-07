@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
+import threading
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+_SENTINEL = object()
+
 
 class PromptLogger:
     """Append-mode JSONL writer for translation loop debug output.
+
+    Thread-safe: callers enqueue records via a queue.Queue; a single dedicated
+    writer thread drains the queue and writes to disk, so worker threads never
+    block on file I/O or synchronise with each other.
 
     Each segment produces N iteration records (one per translate+review cycle)
     followed by one final record marking the chosen draft and outcome status.
@@ -20,6 +28,9 @@ class PromptLogger:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = self._path.open("a", encoding="utf-8")
+        self._queue: queue.Queue = queue.Queue()
+        self._thread = threading.Thread(target=self._drain, daemon=True, name="prompt-logger")
+        self._thread.start()
 
     def log_iteration(
         self,
@@ -76,13 +87,22 @@ class PromptLogger:
         )
 
     def _write(self, record: dict) -> None:
-        try:
-            self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-            self._fh.flush()
-        except Exception as exc:
-            log.warning("PromptLogger write failed: %s", exc)
+        self._queue.put(record)
+
+    def _drain(self) -> None:
+        while True:
+            record = self._queue.get()
+            if record is _SENTINEL:
+                break
+            try:
+                self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                self._fh.flush()
+            except Exception as exc:
+                log.warning("PromptLogger write failed: %s", exc)
 
     def close(self) -> None:
+        self._queue.put(_SENTINEL)
+        self._thread.join()
         try:
             self._fh.close()
         except Exception as exc:

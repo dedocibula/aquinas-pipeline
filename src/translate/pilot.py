@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,6 +43,7 @@ _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20
 _ABORT_AVG_ITERATIONS = 2.5
+_DEFAULT_WORKERS = 1
 
 
 @dataclass
@@ -172,17 +174,26 @@ def _iteration_count(notes: dict | None, status: str) -> int:
 def run_pilot() -> None:
     start = time.time()
     debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
+    full_mode = os.environ.get("PILOT_FULL", "").strip() == "1"
 
     with get_conn() as conn:
-        pending = fetch_debug_segments(conn)
+        pending = fetch_pilot_segments(conn) if full_mode else fetch_debug_segments(conn)
 
-    log.info(
-        "Debug pilot: %d segments from %s (limit %d). Prompt log → %s",
-        len(pending),
-        _DEBUG_QUESTION,
-        _DEBUG_LIMIT,
-        debug_log_path,
-    )
+    if full_mode:
+        log.info(
+            "Full pilot: %d pending segments across %s. Prompt log → %s",
+            len(pending),
+            _PILOT_QUESTIONS,
+            debug_log_path,
+        )
+    else:
+        log.info(
+            "Debug pilot: %d segments from %s (limit %d). Prompt log → %s",
+            len(pending),
+            _DEBUG_QUESTION,
+            _DEBUG_LIMIT,
+            debug_log_path,
+        )
 
     if not pending:
         log.info("No pending segments found — nothing to do.")
@@ -196,28 +207,50 @@ def run_pilot() -> None:
         )
         return
 
+    try:
+        n_workers = int(os.environ.get("PILOT_WORKERS", str(_DEFAULT_WORKERS)))
+    except ValueError:
+        log.warning("PILOT_WORKERS is not a valid integer; defaulting to %d", _DEFAULT_WORKERS)
+        n_workers = _DEFAULT_WORKERS
+    log.info("Workers: %d", n_workers)
+
     translated_count = 0
     needs_human_count = 0
     iterations_list: list[int] = []
     stats_list: list[SegmentStats] = []
 
-    with get_conn() as conn, PromptLogger(debug_log_path) as prompt_log:
-        for i, seg in enumerate(pending, 1):
-            sid = seg["segment_id"]
-            log.info(
-                "[%d/%d] segment_id=%d  %s",
-                i,
-                len(pending),
-                sid,
-                seg["locator_path"],
-            )
+    def _translate_worker(
+        seg: dict, pl: PromptLogger
+    ) -> tuple[dict, str, list, dict | None, dict]:
+        """Translate one segment in its own DB connection."""
+        with get_conn() as wconn:
+            status, usages = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
+            notes = fetch_reviewer_notes(wconn, seg["segment_id"])
+            lengths = fetch_segment_text_lengths(wconn, seg["segment_id"])
+        return seg, status, usages, notes, lengths
 
-            status, usages = translate_segment(sid, conn, prompt_log=prompt_log)
-            notes = fetch_reviewer_notes(conn, sid)
+    completed = 0
+    with PromptLogger(debug_log_path) as prompt_log, ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = {pool.submit(_translate_worker, seg, prompt_log): seg for seg in pending}
+        for fut in as_completed(futures):
+            try:
+                seg, status, usages, notes, lengths = fut.result()
+            except Exception as exc:
+                orig_seg = futures[fut]
+                log.error(
+                    "segment_id=%d (%s) failed: %s — skipping",
+                    orig_seg["segment_id"],
+                    orig_seg["locator_path"],
+                    exc,
+                )
+                completed += 1
+                continue
+            sid = seg["segment_id"]
+            completed += 1
+
             iters = _iteration_count(notes, status)
             iterations_list.append(iters)
 
-            lengths = fetch_segment_text_lengths(conn, sid)
             seg_stats = SegmentStats(
                 segment_id=sid,
                 usages=usages,
@@ -234,11 +267,15 @@ def run_pilot() -> None:
                 needs_human_count += 1
 
             log.info(
-                "  → %s (iter=%d, cost=$%.4f, running needs_human=%.1f%%)",
+                "[%d/%d] segment_id=%d  %s → %s (iter=%d, cost=$%.4f, running needs_human=%.1f%%)",
+                completed,
+                len(pending),
+                sid,
+                seg["locator_path"],
                 status,
                 iters,
                 seg_cost,
-                100.0 * needs_human_count / i,
+                100.0 * needs_human_count / completed,
             )
 
     elapsed = time.time() - start

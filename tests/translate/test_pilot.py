@@ -86,6 +86,37 @@ def test_fetch_all_pilot_segments_no_pending_filter():
     assert "pending" not in sql
 
 
+# ── PILOT_FULL mode switch ────────────────────────────────────────────────────
+
+
+def test_run_pilot_full_mode_calls_fetch_pilot_segments(monkeypatch):
+    """PILOT_FULL=1 must route to fetch_pilot_segments, not fetch_debug_segments."""
+    monkeypatch.setenv("PILOT_FULL", "1")
+    from translate.pilot import run_pilot
+
+    with patch("translate.pilot.fetch_pilot_segments", return_value=[]) as mock_full, \
+         patch("translate.pilot.fetch_debug_segments") as mock_debug, \
+         patch(_PATCH_GET_CONN):
+        run_pilot()
+
+    mock_full.assert_called_once()
+    mock_debug.assert_not_called()
+
+
+def test_run_pilot_debug_mode_calls_fetch_debug_segments(monkeypatch):
+    """Without PILOT_FULL, must route to fetch_debug_segments."""
+    monkeypatch.delenv("PILOT_FULL", raising=False)
+    from translate.pilot import run_pilot
+
+    with patch("translate.pilot.fetch_debug_segments", return_value=[]) as mock_debug, \
+         patch("translate.pilot.fetch_pilot_segments") as mock_full, \
+         patch(_PATCH_GET_CONN):
+        run_pilot()
+
+    mock_debug.assert_called_once()
+    mock_full.assert_not_called()
+
+
 # ── fetch_reviewer_notes ──────────────────────────────────────────────────────
 
 
