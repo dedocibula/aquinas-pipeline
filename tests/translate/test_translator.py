@@ -75,7 +75,9 @@ class TestCallTranslatorV3:
         messages = call_args.kwargs["json"]["messages"]
         system_msg = next(m for m in messages if m["role"] == "system")
         assert "DO NOT:" in system_msg["content"]
-        assert "passive infinitive" in system_msg["content"]
+        assert "Czech reference" in system_msg["content"]
+        assert "never produce a more literal" in system_msg["content"]
+        assert "passive infinitives" in system_msg["content"]
 
     def test_user_turn_contains_hard_term_constraints(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")

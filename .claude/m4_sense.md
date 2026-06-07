@@ -13,17 +13,56 @@ use it as a context label.
 
 The goal is twofold:
 1. Backfill `context_label` for approved senses so the translator prompt can surface it
-2. Remove hardcoded WRONG/RIGHT grammar examples from `translator_system.txt` and replace
-   with data-driven constraint lines
+2. Strengthen `translator_system.txt` with a Czech-ceiling rule alongside the existing
+   GRAMMAR examples — not replace them
 
 ---
 
-## Part 1 — Translator prompt change (small, do first)
+## Part 1 — Translator prompt change
 
-### Current state (`prompts/translator_system.txt`)
+### What the pilot run revealed
 
-Contains a hardcoded GRAMMAR section:
+Removing the GRAMMAR block caused immediate regression on seg 187 — both forms the
+examples guarded against (`mala iná náuka` for `haberi`, `odovzdané` for `traduntur`)
+reappeared in the first run without them. The one-line passive infinitive rule alone
+was insufficient.
 
+**Root cause:** CLTK lemmatizes `haberi` → `habeo`, `traduntur/tradi` → `trado`. Neither
+`habeo` nor `trado` exists in `glossary_term`. The glossary mechanism structurally cannot
+handle these — they are high-frequency common verbs whose correct Slovak rendering depends
+on grammatical construction, not word meaning. `habeo` usually means "to have"; only the
+passive infinitive construction `haberi` means "to exist/be considered." Entering `habeo →
+existovať` as a glossary constraint would be wrong in most occurrences.
+
+**The Czech reference already solves this at scale.** In seg 187's user turn, Czech renders
+`haberi` as `byla` and `traduntur` as `pojednávají` — exactly the right grammatical calls.
+The model already sees the Czech reference. It just wasn't told to follow Czech's
+grammatical lead, only to match its legibility floor.
+
+**Three-way pilot result (R1=GRAMMAR, R2=no rule, R3=Czech-ceiling):** R3 produced the
+same calque forms as R2 on seg 187 — `mať iné učenie` and `odovzdané`. The Czech-ceiling
+rule alone is insufficient because V3 uses Czech as a passive reference, not an active
+self-check. The GRAMMAR examples work because they pre-empt the literal pull by showing
+the specific failure mode before generation, not after.
+
+**R1 (GRAMMAR) > R3 (Czech-ceiling) > R2 (no rule). Keep both.**
+
+### Target state (`prompts/translator_system.txt`)
+
+Keep the GRAMMAR block. Add the Czech-ceiling rule to LEGIBILITY alongside it. They are
+complementary — the examples guard known specific failure modes, the Czech-ceiling rule
+covers unknown construction-level cases without enumeration.
+
+**Replace the LEGIBILITY line with:**
+```
+LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
+  Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.
+  For verb forms and grammatical constructions not covered by term constraints,
+  follow the Czech reference's grammatical approach — never produce a more literal
+  construction than Czech.
+```
+
+**Keep the GRAMMAR block unchanged:**
 ```
 GRAMMAR — Latin passive infinitives:
   Do not calque Latin passive infinitives (haberi, tradi, esse + passive) literally.
@@ -33,19 +72,6 @@ GRAMMAR — Latin passive infinitives:
   WRONG: sufficienter traduntur → je dostatočne odovzdané
   RIGHT: sufficienter traduntur → je dostatočne podané / rozoberané
 ```
-
-### Target state
-
-Remove that GRAMMAR section entirely. The `haberi`, `tradi`, `traduntur` cases should be
-handled by glossary entries with `context_label` populated (see Part 2). The system prompt
-should contain only structural rules, not term-specific examples.
-
-The passive infinitive rule as a general principle can stay in one sentence:
-```
-Do not calque Latin passive infinitives literally — use natural Slovak existential or
-stative verbs (byť, existovať, nachádzať sa).
-```
-No WRONG/RIGHT examples in the system prompt. Those belong in the data layer.
 
 ---
 
@@ -333,12 +359,13 @@ Bad labels: `'meaning 1'`, `'see context'`, anything over 8 words.
   The 116 auto-resolved rows are `status='approved'` in DB regardless of the Sheet value.
 - **Multi-sense Krystal terms are all `status='proposed'`.** `fides`, `gratia`,
   `intellectus`, `concupiscentia`, `providentia` and others are in the Review sheet
-  awaiting human approval. The `label_map` code works now and activates automatically
-  as each sense is approved.
+  awaiting human approval. `context_label` is threaded through the constraint dict and
+  activates automatically as each sense is approved.
 - **`group_id` is a batching artifact, not semantic grouping.** Do not use it for any
   purpose other than Sheet display ordering.
-- **`haberi`, `traduntur`, `tradi`: absent from DB, skip.** One-line passive infinitive
-  rule in the system prompt is sufficient.
+- **`haberi`, `traduntur`, `tradi`: absent from DB, cannot be glossarized.** `habeo`/`trado`
+  are polysemous common verbs — a single SK rendering would be wrong in most uses.
+  The GRAMMAR block in the system prompt plus the Czech-ceiling rule together handle these.
 - **`bonum`, `actus`: absent from DB.** Post-pilot task.
 - **`species`: single approved sense** (`intencionálny obraz`). The categorical `druh`
   sense does not exist. Adding it requires resolver work. Post-pilot.
@@ -347,23 +374,25 @@ Bad labels: `'meaning 1'`, `'see context'`, anything over 8 words.
 
 ## Sequence
 
-1. **Part 1** — remove GRAMMAR section from `translator_system.txt`, keep one-line rule.
-   Text file edit, zero risk, do first.
-2. **Part 2** — add `context_label` to `get_locked_terms` SELECT; thread it through
-   the constraints comprehension and `_build_surface_constraints` (`{**c, "latin_lemma": surface}`);
-   read it directly off `c` in `build_user_turn`. No `label_map`, no new parameters.
-   No schema change needed. Ships now, activates as senses are approved.
+1. **Part 1** — add Czech-ceiling rule to LEGIBILITY in `translator_system.txt`; keep
+   GRAMMAR block unchanged. Three-way pilot confirmed GRAMMAR examples are load-bearing —
+   Czech-ceiling alone regressed identically to no-rule on seg 187. Both together is the
+   correct state.
+2. **Part 2** — add `context_label` to `get_locked_terms` SELECT; include it in the
+   constraints comprehension; update `_build_surface_constraints` to `{**c, "latin_lemma":
+   surface}`; read `c.get("context_label")` directly in `build_user_turn`. No `label_map`,
+   no new parameters, no schema change. Ships now, activates as senses are approved.
 3. **Step 1 SQL** — run 4 Czech→English migration UPDATEs for `concupiscentia` and
-   `providentia` approved senses. Verify row count (should be exactly 1 each) before
-   committing. ✓ Done 2026-06-07.
-4. **Sheet tooling** (can be done in parallel with 1–3):
-   - Add `context_label` column to `export_sheet.py` output (col D; proposed_slovak shifts to E)
-   - Add `context_label` write-back to `import_approvals.py` (no version bump; empty → NULL)
-5. **Human approval pass** — work through Review sheet multi-sense terms, setting
-   `context_label` using the proposed labels table above. Each approved sense immediately
-   activates in the translation pipeline.
-6. **Run debug pilot** (`_DEBUG_LIMIT=10`) after steps 1–3 — verify in JSONL that
-   `concupiscentia` and `providentia` constraint lines show English qualifiers where
-   those terms appear. All other multi-sense qualifiers appear after step 5.
+   `providentia` approved senses. Each anchored with `AND gs.status = 'approved'`.
+   Verify row count (should be exactly 1 each) before committing.
+4. **Sheet tooling** (parallel with 1–3):
+   - `export_sheet.py`: add `context_label` at col D; `proposed_slovak` shifts to E
+   - `import_approvals.py`: read `context_label` from col D; write unconditionally
+     (no version bump; empty string → NULL)
+5. **Human approval pass** — work through Review sheet multi-sense terms using the
+   proposed labels table above. Each approved sense immediately activates in the pipeline.
+6. **Run debug pilot** (`_DEBUG_LIMIT=10`) after steps 1–3 — reset segments to `pending`
+   first. Verify `concupiscentia` and `providentia` constraint lines show English qualifiers.
+   All other multi-sense qualifiers appear after step 5.
 7. **Post-pilot backlog**: `species` second sense, `bonum`/`actus` insertion,
    sense-split workflow documentation.

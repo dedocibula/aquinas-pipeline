@@ -14,5 +14,14 @@ DO NOT:
 
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
   Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.
-  Do not calque Latin passive infinitives literally — use natural Slovak existential or
-  stative verbs (byť, existovať, nachádzať sa).
+  For verb forms and grammatical constructions not covered by term constraints,
+  follow the Czech reference's grammatical approach — never produce a more literal
+  construction than Czech.
+
+GRAMMAR — Latin passive infinitives:
+  Do not calque Latin passive infinitives (haberi, tradi, esse + passive) literally.
+  Render them with natural Slovak existential or stative verbs (byť, existovať, nachádzať sa).
+  WRONG: aliam doctrinam haberi → aby sa mala aj iná náuka
+  RIGHT: aliam doctrinam haberi → aby existovala aj iná náuka
+  WRONG: sufficienter traduntur → je dostatočne odovzdané
+  RIGHT: sufficienter traduntur → je dostatočne podané / rozoberané

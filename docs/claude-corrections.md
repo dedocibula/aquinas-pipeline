@@ -25,3 +25,8 @@ Read this file at the start of every session before doing any work.
 - **Mistake:** Placed `verify.py` at `src/verify.py` (project root of src/) rather than inside the `src/acquire/` package where all production code lives. Tests were added correctly in `tests/` but the production module was outside the package.
 - **Correction:** All production Python modules belong inside `src/acquire/` (the package exposed by hatchling). Thin entry-point wrappers (like `verify_sources.py`) may live at the project root only if they do nothing but delegate to a module inside `src/acquire/`.
 - **Rule:** When creating a new production module, always place it under `src/acquire/`. Never add `.py` files directly under `src/` that are not part of the `acquire` package.
+
+### [Debug pilot: reset translations before re-running for comparison]
+- **Mistake:** Tried to re-run the debug pilot after I.q1 segments were already translated. The pilot only fetches `translation_status = 'pending'` segments, so a previously-translated question produces 0 segments and an empty JSONL — nothing to compare.
+- **Correction:** The correct sequence when re-running to compare output: (1) identify the segment_ids processed in the prior JSONL run, (2) reset them to `pending` in the DB (`UPDATE segment SET translation_status='pending' WHERE segment_id IN (...)`), (3) run `uv run python -m translate.pilot`, (4) compare the new JSONL in `reports/` against the prior one for qualitative analysis.
+- **Rule:** The pilot entry point is `uv run python -m translate.pilot`, not `translate.loop`. Any time you want to re-run the pilot to verify a code or data change, always reset the target segments first. Never compare an empty JSONL against a prior run.
