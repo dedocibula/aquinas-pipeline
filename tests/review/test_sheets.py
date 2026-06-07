@@ -89,23 +89,24 @@ def test_read_existing_rows_from_data_header_only():
 
 def test_read_existing_rows_from_data_returns_map():
     header = HEADER
-    row1 = ["FALSE", "ratio", "term", "", "rozum", "", "", "krystal_single",
+    # 14 cols: A B C D(ctx) E(sk) F G H I J K L(sense_id) M N
+    row1 = ["FALSE", "term", "ratio", "", "rozum", "", "", "", "krystal_single",
             "4400", "I.q1.a1", "101", "1", "1"]
-    row2 = ["FALSE", "anima", "term", "", "duša", "", "", "bahounek_derived",
+    row2 = ["FALSE", "term", "anima", "", "duša", "", "", "", "bahounek_derived",
             "200", "I.q2.a1", "202", "1", "1"]
     result = read_existing_rows_from_data([header, row1, row2])
     assert result == {101: 2, 202: 3}
 
 
 def test_read_existing_rows_from_data_skips_blank_sense_id():
-    row = ["FALSE", "ratio", "term", "", "rozum", "", "", "krystal_single",
+    row = ["FALSE", "term", "ratio", "", "rozum", "", "", "", "krystal_single",
            "4400", "I.q1.a1", "", "1", "1"]
     assert read_existing_rows_from_data([HEADER, row]) == {}
 
 
 def test_read_existing_rows_delegates():
     header = HEADER
-    row = ["FALSE", "ratio", "term", "", "rozum", "", "", "krystal_single",
+    row = ["FALSE", "term", "ratio", "", "rozum", "", "", "", "krystal_single",
            "4400", "I.q1.a1", "77", "1", "1"]
     ws = FakeWorksheet(rows=[header, row])
     assert read_existing_rows(ws) == {77: 2}
@@ -115,8 +116,9 @@ def test_read_existing_rows_delegates():
 
 
 def _make_row(sense_id: int, proposed_slovak: str = "test") -> list:
+    # 14 cols: A(chk) B(cat) C(lemma) D(ctx) E(sk) F(la) G(cs) H(en) I(method) J(freq) K(loc) L(sense_id) M(group) N(ver)
     return [
-        False, "ratio", "term", "", proposed_slovak, "cs_text", "en_text",
+        False, "ratio", "term", "", proposed_slovak, "la_text", "cs_text", "en_text",
         "krystal_single", 100, "I.q1.a1", sense_id, 1, 1,
     ]
 
@@ -141,38 +143,39 @@ def test_batch_write_rows_existing_row_issues_range_updates():
     batch_write_rows(ws, [row], existing_map={101: 2})
     assert len(ws.batch_updates_issued) == 1
     updated_ranges = [u["range"] for u in ws.batch_updates_issued[0]]
-    # Two ranges per row: B:C (category+lemma) and E:M (occurrence cols through version)
-    # Preserved: A (checkbox) and D (proposed_slovak — reviewer editable)
+    # Two ranges per row: B:C (category+lemma) and F:N (occurrences through db_version)
+    # Preserved: A (checkbox), D (context_label), E (proposed_slovak — reviewer editable)
     assert "B2:C2" in updated_ranges
-    assert "E2:M2" in updated_ranges
+    assert "F2:N2" in updated_ranges
     # Preserved columns must NOT appear as update targets
     assert "A2" not in updated_ranges
     assert "D2" not in updated_ranges
+    assert "E2" not in updated_ranges
 
 
-def test_batch_write_rows_preserves_col_a_and_d():
-    """Columns A (checkbox) and D (proposed_slovak) must never appear as update range targets."""
+def test_batch_write_rows_preserves_col_a_d_e():
+    """Columns A (checkbox), D (context_label), E (proposed_slovak) must not be overwritten."""
     ws = FakeWorksheet(rows=[HEADER])
     row = _make_row(sense_id=55)
     batch_write_rows(ws, [row], existing_map={55: 3})
     all_ranges = {u["range"] for u in ws.batch_updates_issued[0]}
     assert "B3:C3" in all_ranges
-    assert "E3:M3" in all_ranges
+    assert "F3:N3" in all_ranges
     assert not any(r.startswith("A") for r in all_ranges)
     assert not any(r.startswith("D") for r in all_ranges)
+    assert not any(r.startswith("E") for r in all_ranges)
 
 
 def test_batch_write_rows_range_values_correct():
-    """B:C range carries cols 1-2 (category, lemma); E:M carries cols 4-12 (occurrences onward)."""
+    """B:C carries cols 1-2 (category, lemma); F:N carries cols 5-13 (occurrences onward)."""
     ws = FakeWorksheet(rows=[HEADER])
-    #                   0      1        2      3         4         5     6     7
-    row = ["chk", "cat", "lemma", "slovak", "la_occ", "cs_occ", "en_occ", "method",
-           42, "loc", 101, 7, 3]
-    #       8      9    10   11  12
+    # 14 cols: 0=chk 1=cat 2=lemma 3=ctx 4=sk 5=la_occ 6=cs_occ 7=en_occ 8=method 9=freq 10=loc 11=sense_id 12=group 13=ver
+    row = ["chk", "cat", "lemma", "ctx", "slovak", "la_occ", "cs_occ", "en_occ",
+           "method", 42, "loc", 101, 7, 3]
     batch_write_rows(ws, [row], existing_map={101: 2})
     updates_by_range = {u["range"]: u["values"][0] for u in ws.batch_updates_issued[0]}
     assert updates_by_range["B2:C2"] == ["cat", "lemma"]
-    assert updates_by_range["E2:M2"] == ["la_occ", "cs_occ", "en_occ", "method", 42, "loc", 101, 7, 3]
+    assert updates_by_range["F2:N2"] == ["la_occ", "cs_occ", "en_occ", "method", 42, "loc", 101, 7, 3]
 
 
 def test_batch_write_rows_mixed_new_and_existing():

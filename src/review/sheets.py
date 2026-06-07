@@ -19,21 +19,22 @@ load_dotenv()
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _SECRETS_PATH = ".secrets/gsheets_service_account.json"
 
-SENSE_ID_COL = 10   # column K (0-based)
+SENSE_ID_COL = 11   # column L (0-based); shifted by context_label insertion at D
 HEADER = [
     "approved",              # A — checkbox; reviewer ticks to approve
     "category",              # B
     "latin_lemma",           # C
-    "proposed_slovak",       # D — editable by reviewer
-    "latin_occurrence",      # E — full Latin segment text
-    "czech_occurrence",      # F — full Czech segment text
-    "english_occurrence",    # G — full English segment text
-    "resolution_method",     # H
-    "frequency",             # I
-    "sample_locator",        # J
-    "sense_id",              # K — hidden
-    "group_id",              # L — hidden
-    "db_version",            # M — hidden
+    "context_label",         # D — editable by reviewer; English, 3-6 words
+    "proposed_slovak",       # E — editable by reviewer
+    "latin_occurrence",      # F — full Latin segment text
+    "czech_occurrence",      # G — full Czech segment text
+    "english_occurrence",    # H — full English segment text
+    "resolution_method",     # I
+    "frequency",             # J
+    "sample_locator",        # K
+    "sense_id",              # L — hidden
+    "group_id",              # M — hidden
+    "db_version",            # N — hidden
 ]
 
 # Sheets API hard limit on ValueRange objects per batchUpdate request.
@@ -66,7 +67,7 @@ def authenticate() -> gspread.Client:
 # ── Worksheet helpers ─────────────────────────────────────────────────────────
 
 
-def get_or_create_worksheet(spreadsheet, title: str, rows: int = 5000, cols: int = 13):
+def get_or_create_worksheet(spreadsheet, title: str, rows: int = 5000, cols: int = 14):
     """Return an existing worksheet by title, or create a new one."""
     for ws in spreadsheet.worksheets():
         if ws.title == title:
@@ -119,13 +120,12 @@ def batch_write_rows(
     db_rows: list[list],
     existing_map: dict[int, int],
 ) -> None:
-    """Idempotent write: update existing rows (preserve cols A+D) and append new rows.
+    """Idempotent write: update existing rows (preserve cols A, D, E) and append new rows.
 
-    For existing rows, columns B-C and E-M are updated (skipping preserved A and D).
-    Updates are issued as two ValueRange objects per row (B:C and E:M), chunked at
+    Preserved on update (reviewer-editable): A (checkbox), D (context_label), E (proposed_slovak).
+    Updated from DB: B-C (category, latin_lemma) and F-N (occurrences through db_version).
+    Updates are issued as two ValueRange objects per row (B:C and F:N), chunked at
     _BATCH_LIMIT ranges per batchUpdate call to stay within the Sheets API limit.
-
-    New rows are appended with False in col A and the DB value in col D.
     """
     updates: list[dict] = []
     inserts: list[list] = []
@@ -134,12 +134,12 @@ def batch_write_rows(
         sense_id = row[SENSE_ID_COL]
         if sense_id in existing_map:
             row_num = existing_map[sense_id]
-            # Two contiguous ranges per row, skipping preserved cols A(0) and D(3).
-            b_to_c = [row[1], row[2]]                                   # B, C
-            e_to_m = [row[4], row[5], row[6], row[7], row[8], row[9],  # E, F, G, H, I, J
-                      row[10], row[11], row[12]]                        # K, L, M
+            # Two contiguous ranges per row, skipping preserved cols A(0), D(3), E(4).
+            b_to_c = [row[1], row[2]]                                    # B, C
+            f_to_n = [row[5], row[6], row[7], row[8], row[9], row[10],  # F, G, H, I, J, K
+                      row[11], row[12], row[13]]                         # L, M, N
             updates.append({"range": f"B{row_num}:C{row_num}", "values": [b_to_c]})
-            updates.append({"range": f"E{row_num}:M{row_num}", "values": [e_to_m]})
+            updates.append({"range": f"F{row_num}:N{row_num}", "values": [f_to_n]})
         else:
             inserts.append(row)
 

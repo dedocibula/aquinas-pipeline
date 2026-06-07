@@ -68,13 +68,15 @@ class FakeWorksheet:
 def _make_sheet_row(
     approved: str = "TRUE",
     latin: str = "ratio",
+    context_label: str = "",
     proposed_slovak: str = "rozum",
     sense_id: int = 101,
     db_version: int = 1,
 ) -> list:
-    row = [""] * 13
+    row = [""] * 14
     row[COLS["approved"]] = approved
     row[COLS["latin_lemma"]] = latin
+    row[COLS["context_label"]] = context_label
     row[COLS["proposed_slovak"]] = proposed_slovak
     row[COLS["sense_id"]] = str(sense_id)
     row[COLS["db_version"]] = str(db_version)
@@ -144,6 +146,18 @@ def test_load_approved_rows_returns_proposed_slovak():
     assert rows[0]["proposed_slovak"] == "milosť"
 
 
+def test_load_approved_rows_returns_context_label():
+    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(context_label="sanctifying grace")])
+    rows = load_approved_rows(ws)
+    assert rows[0]["context_label"] == "sanctifying grace"
+
+
+def test_load_approved_rows_empty_context_label():
+    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(context_label="")])
+    rows = load_approved_rows(ws)
+    assert rows[0]["context_label"] == ""
+
+
 def test_load_approved_rows_empty_sheet():
     ws = FakeWorksheet(rows=[HEADER])
     assert load_approved_rows(ws) == []
@@ -211,10 +225,11 @@ def test_get_model_rendering_fallback_via_order_by():
 # ── process_approval ─────────────────────────────────────────────────────────
 
 
-def _row(sense_id=101, proposed_slovak="rozum", db_version=1, latin_lemma="ratio"):
+def _row(sense_id=101, proposed_slovak="rozum", db_version=1, latin_lemma="ratio", context_label=""):
     return {
         "sense_id": sense_id,
         "proposed_slovak": proposed_slovak,
+        "context_label": context_label,
         "db_version": db_version,
         "latin_lemma": latin_lemma,
     }
@@ -344,3 +359,53 @@ def test_process_approval_idempotent_no_double_bump():
     s2, b2 = process_approval(make_conn(), _row(), human_src_id=6)
     assert s1 == s2 == "OK"
     assert b1 == b2 is False
+
+
+# ── process_approval — context_label write-back ───────────────────────────────
+
+
+def test_process_approval_writes_context_label():
+    """A non-empty context_label in the row is written to glossary_sense."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("rozum",),
+    ])
+    process_approval(conn, _row(context_label="sanctifying grace"), human_src_id=6)
+    label_updates = [
+        e for e in conn.executed
+        if "UPDATE glossary_sense" in e[0] and "context_label" in e[0]
+    ]
+    assert len(label_updates) == 1
+    sql, params = label_updates[0]
+    assert params == ("sanctifying grace", 101)
+
+
+def test_process_approval_empty_context_label_writes_null():
+    """Empty string context_label writes NULL, not empty string."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("rozum",),
+    ])
+    process_approval(conn, _row(context_label=""), human_src_id=6)
+    label_updates = [
+        e for e in conn.executed
+        if "UPDATE glossary_sense" in e[0] and "context_label" in e[0]
+    ]
+    assert len(label_updates) == 1
+    _, params = label_updates[0]
+    assert params[0] is None  # NULL, not ""
+
+
+def test_process_approval_context_label_does_not_bump_version():
+    """Setting context_label alone must not trigger a version bump."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("rozum",),   # same content → no bump
+    ])
+    status, bumped = process_approval(
+        conn, _row(proposed_slovak="rozum", context_label="as rational faculty"), human_src_id=6
+    )
+    assert status == "OK"
+    assert bumped is False
+    bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
+    assert len(bump_calls) == 0

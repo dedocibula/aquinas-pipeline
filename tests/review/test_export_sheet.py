@@ -67,6 +67,7 @@ def _db_row(**overrides) -> dict:
         "sense_id": 101,
         "latin_lemma": "ratio",
         "category": "term",
+        "context_label": None,
         "proposed_slovak": "rozum",
         "latin_occurrence": "Ratio est...",
         "czech_occurrence": "Rozum je...",
@@ -88,7 +89,7 @@ def _db_row(**overrides) -> dict:
 def test_rows_to_sheet_values_length():
     values = rows_to_sheet_values([_db_row()])
     assert len(values) == 1
-    assert len(values[0]) == 13
+    assert len(values[0]) == 14
 
 
 def test_rows_to_sheet_values_approved_is_false():
@@ -97,36 +98,45 @@ def test_rows_to_sheet_values_approved_is_false():
 
 
 def test_rows_to_sheet_values_column_order():
-    row = _db_row()
+    row = _db_row(context_label="as rational faculty")
     values = rows_to_sheet_values([row])[0]
-    assert values[1] == "term"              # B category
-    assert values[2] == "ratio"             # C latin_lemma
-    assert values[3] == "rozum"             # D proposed_slovak
-    assert values[4] == "Ratio est..."      # E latin_occurrence
-    assert values[5] == "Rozum je..."       # F czech_occurrence
-    assert values[6] == "Reason is..."      # G english_occurrence
-    assert values[7] == "krystal_single"    # H resolution_method
-    assert values[8] == 4400                # I frequency
-    assert values[9] == "I.q1.a1.arg1"     # J sample_locator
-    assert values[10] == 101                # K sense_id
-    assert values[11] == 1                  # L group_id
-    assert values[12] == 1                  # M db_version
+    assert values[1] == "term"                  # B category
+    assert values[2] == "ratio"                 # C latin_lemma
+    assert values[3] == "as rational faculty"   # D context_label
+    assert values[4] == "rozum"                 # E proposed_slovak
+    assert values[5] == "Ratio est..."          # F latin_occurrence
+    assert values[6] == "Rozum je..."           # G czech_occurrence
+    assert values[7] == "Reason is..."          # H english_occurrence
+    assert values[8] == "krystal_single"        # I resolution_method
+    assert values[9] == 4400                    # J frequency
+    assert values[10] == "I.q1.a1.arg1"        # K sample_locator
+    assert values[11] == 101                    # L sense_id
+    assert values[12] == 1                      # M group_id
+    assert values[13] == 1                      # N db_version
+
+
+def test_rows_to_sheet_values_null_context_label_is_empty_string():
+    row = _db_row(context_label=None)
+    values = rows_to_sheet_values([row])[0]
+    assert values[3] == ""
 
 
 def test_rows_to_sheet_values_none_to_empty_string():
-    row = _db_row(category=None, proposed_slovak=None,
+    row = _db_row(category=None, context_label=None, proposed_slovak=None,
                   latin_occurrence=None, czech_occurrence=None, english_occurrence=None,
                   resolution_method=None, sample_locator=None,
                   frequency=None, group_id=None, version=None)
     values = rows_to_sheet_values([row])[0]
-    for col in [1, 3, 4, 5, 6, 7, 8, 9, 11, 12]:
+    # cols: 1=category, 3=context_label, 4=proposed_slovak, 5=latin, 6=czech,
+    #       7=english, 8=method, 9=freq, 10=locator, 12=group_id, 13=db_version
+    for col in [1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13]:
         assert values[col] == "", f"col {col} should be empty string, got {values[col]!r}"
 
 
 def test_rows_to_sheet_values_sense_id_preserved():
     row = _db_row(sense_id=999)
     values = rows_to_sheet_values([row])[0]
-    assert values[10] == 999
+    assert values[11] == 999  # col L (was K before context_label insertion)
 
 
 # ── fetch_main_rows / fetch_auto_resolved_rows SQL filtering ─────────────────
@@ -186,9 +196,9 @@ def test_export_tab_creates_worksheet_if_missing():
 
 
 def test_export_tab_existing_rows_not_duplicated():
-    # Sheet already has the header + one data row with sense_id=101
+    # Sheet already has the header + one data row with sense_id=101 (col L = index 11)
     existing_data_row = [
-        "FALSE", "ratio", "term", "", "rozum", "", "", "krystal_single",
+        "FALSE", "term", "ratio", "", "rozum", "", "", "", "krystal_single",
         4400, "I.q1.a1", 101, 1, 1,
     ]
     sp = FakeSpreadsheet()

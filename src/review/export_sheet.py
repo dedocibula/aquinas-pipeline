@@ -3,9 +3,9 @@
 CLI:
     uv run python -m review.export_sheet
 
-Idempotent — safe to re-run. On re-run, reference columns (B-C, E-M) are
-refreshed from DB; column A (checkbox) and column D (proposed_slovak) are
-preserved so reviewer edits survive.
+Idempotent — safe to re-run. On re-run, reference columns (B-C, F-N) are
+refreshed from DB; columns A (checkbox), D (context_label), and E (proposed_slovak)
+are preserved so reviewer edits survive.
 
 Prerequisites:
     - GSHEETS_SPREADSHEET_ID set in environment
@@ -36,6 +36,7 @@ WITH base AS (
         gs.sense_id,
         gt.latin_lemma,
         gt.category,
+        gs.context_label,
         sr_sk.content       AS proposed_slovak,
         st_la.content       AS latin_occurrence,
         st_cs.content       AS czech_occurrence,
@@ -112,23 +113,24 @@ def fetch_auto_resolved_rows(conn) -> list[dict]:
 
 
 def rows_to_sheet_values(rows: list[dict]) -> list[list]:
-    """Convert DB rows to 13-element lists matching the sheet column layout."""
+    """Convert DB rows to 14-element lists matching the sheet column layout."""
     result = []
     for r in rows:
         result.append([
             False,                                                      # A — checkbox
             r["category"] or "",                                        # B
             r["latin_lemma"] or "",                                     # C
-            r["proposed_slovak"] or "",                                 # D
-            r["latin_occurrence"] or "",                                # E
-            r["czech_occurrence"] or "",                                # F
-            r["english_occurrence"] or "",                              # G
-            r["resolution_method"] or "",                               # H
-            r["frequency"] if r["frequency"] is not None else "",       # I
-            r["sample_locator"] or "",                                  # J
-            r["sense_id"],                                              # K — hidden
-            r["group_id"] if r["group_id"] is not None else "",        # L — hidden
-            r["version"] if r["version"] is not None else "",          # M — hidden
+            r["context_label"] or "",                                   # D
+            r["proposed_slovak"] or "",                                 # E
+            r["latin_occurrence"] or "",                                # F
+            r["czech_occurrence"] or "",                                # G
+            r["english_occurrence"] or "",                              # H
+            r["resolution_method"] or "",                               # I
+            r["frequency"] if r["frequency"] is not None else "",       # J
+            r["sample_locator"] or "",                                  # K
+            r["sense_id"],                                              # L — hidden
+            r["group_id"] if r["group_id"] is not None else "",        # M — hidden
+            r["version"] if r["version"] is not None else "",          # N — hidden
         ])
     return result
 

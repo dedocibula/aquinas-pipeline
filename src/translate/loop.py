@@ -71,9 +71,10 @@ def get_locked_terms(conn, segment_id: int) -> list[dict]:
             """
             SELECT DISTINCT ON (gs.sense_id)
                 gt.latin_lemma,
-                sr.content  AS required_slovak,
+                sr.content      AS required_slovak,
                 gs.sense_id,
-                gs.version
+                gs.version,
+                gs.context_label
             FROM term_usage tu
             JOIN glossary_sense gs  ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
             JOIN glossary_term  gt  ON gt.term_id  = gs.term_id
@@ -166,7 +167,7 @@ def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict
         surfaces = sorted(t for t, ls in token_lemmas.items() if stripped in ls)
         if surfaces:
             for surface in surfaces:
-                result.append({"latin_lemma": surface, "required_slovak": c["required_slovak"]})
+                result.append({**c, "latin_lemma": surface})
         else:
             result.append(c)
 
@@ -197,7 +198,11 @@ def translate_segment(
 
     locked_terms = get_locked_terms(conn, segment_id)
     constraints = [
-        {"latin_lemma": t["latin_lemma"], "required_slovak": t["required_slovak"]}
+        {
+            "latin_lemma": t["latin_lemma"],
+            "required_slovak": t["required_slovak"],
+            "context_label": t.get("context_label"),
+        }
         for t in locked_terms
     ]
     # Surface-form constraints for the translator: CLTK maps each approved lemma

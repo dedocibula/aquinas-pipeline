@@ -136,12 +136,13 @@ def build_user_turn(
         parts.append("")
 
     # Hard term constraints
+    parts.append("HARD TERM CONSTRAINTS (verbatim, no exceptions):")
     if constraints:
-        parts.append("HARD TERM CONSTRAINTS (verbatim, no exceptions):")
         for c in constraints:
-            parts.append(f"  {c['latin_lemma']} → {c['required_slovak']}")
+            label = c.get("context_label") or ""
+            qualifier = f" [{label}]" if label else ""
+            parts.append(f"  {c['latin_lemma']}{qualifier} → {c['required_slovak']}")
     else:
-        parts.append("HARD TERM CONSTRAINTS (verbatim, no exceptions):")
         parts.append("  (none)")
     parts.append("")
 

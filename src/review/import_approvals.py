@@ -24,9 +24,10 @@ _REVIEW_TAB = "Review"
 COLS = {
     "approved": 0,          # A
     "latin_lemma": 2,       # C
-    "proposed_slovak": 3,   # D
-    "sense_id": 10,         # K
-    "db_version": 12,       # M
+    "context_label": 3,     # D — new
+    "proposed_slovak": 4,   # E — was D
+    "sense_id": 11,         # L — was K
+    "db_version": 13,       # N — was M
 }
 
 _TRUTHY = {"TRUE", "True", "true", "1", "YES", "yes"}
@@ -55,6 +56,7 @@ def load_approved_rows(worksheet) -> list[dict]:
         result.append({
             "sense_id": sense_id_val,
             "proposed_slovak": raw[COLS["proposed_slovak"]] if len(raw) > COLS["proposed_slovak"] else "",
+            "context_label": raw[COLS["context_label"]] if len(raw) > COLS["context_label"] else "",
             "db_version": db_version,
             "latin_lemma": raw[COLS["latin_lemma"]] if len(raw) > COLS["latin_lemma"] else "",
         })
@@ -128,6 +130,15 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
 
     # Versions match — safe to write.
     write_human_rendering(conn, sense_id_val, new_slovak, human_src_id)
+
+    # Write context_label unconditionally — empty string from sheet becomes NULL.
+    # Does NOT bump version: context_label is metadata, not sense_rendering content.
+    raw_label = (row.get("context_label") or "").strip()
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE glossary_sense SET context_label = %s WHERE sense_id = %s",
+            (raw_label if raw_label else None, sense_id_val),
+        )
 
     reference_text = get_model_rendering(conn, sense_id_val)
     version_bumped = False

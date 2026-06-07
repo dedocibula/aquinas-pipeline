@@ -8,6 +8,7 @@ import pytest
 
 from common.pricing import UsageInfo
 from translate.loop import (
+    _build_surface_constraints,
     get_locked_terms,
     get_segment_with_texts,
     translate_segment,
@@ -69,6 +70,7 @@ def _term_row(**overrides) -> dict:
         "required_slovak": "rozum",
         "sense_id": 42,
         "version": 1,
+        "context_label": None,
     }
     base.update(overrides)
     return base
@@ -137,6 +139,65 @@ def test_get_locked_terms_passes_segment_id():
     get_locked_terms(conn, 5)
     _, params = cur.execute.call_args[0]
     assert params == (5,)
+
+
+def test_get_locked_terms_includes_context_label():
+    rows = [_term_row(context_label="sanctifying grace")]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert result[0]["context_label"] == "sanctifying grace"
+
+
+def test_get_locked_terms_context_label_none_when_absent():
+    rows = [_term_row(context_label=None)]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert result[0]["context_label"] is None
+
+
+# ── _build_surface_constraints — context_label passthrough ───────────────────
+
+_LATIN = "Respondeo dicendum quod gratiam et rationem Deus dat."
+
+
+def test_build_surface_constraints_passes_context_label_through():
+    constraints = [
+        {"latin_lemma": "gratia", "required_slovak": "milosť", "context_label": "sanctifying grace"},
+    ]
+    result = _build_surface_constraints(_LATIN, constraints)
+    for c in result:
+        assert c.get("context_label") == "sanctifying grace"
+
+
+def test_build_surface_constraints_none_label_preserved():
+    constraints = [
+        {"latin_lemma": "ratio", "required_slovak": "rozum", "context_label": None},
+    ]
+    result = _build_surface_constraints(_LATIN, constraints)
+    for c in result:
+        assert "context_label" in c
+        assert c["context_label"] is None
+
+
+def test_build_surface_constraints_multiword_passes_full_dict():
+    constraints = [
+        {"latin_lemma": "actus essendi", "required_slovak": "akt bytia", "context_label": "as act of being"},
+    ]
+    result = _build_surface_constraints(_LATIN, constraints)
+    assert len(result) == 1
+    assert result[0]["context_label"] == "as act of being"
+    assert result[0]["latin_lemma"] == "actus essendi"
+
+
+def test_build_surface_constraints_fallback_passes_full_dict():
+    # Lemma not found in Latin text → fallback, full dict passed through
+    constraints = [
+        {"latin_lemma": "caritas", "required_slovak": "láska", "context_label": "as theological virtue"},
+    ]
+    result = _build_surface_constraints(_LATIN, constraints)
+    assert len(result) == 1
+    assert result[0]["context_label"] == "as theological virtue"
+    assert result[0]["latin_lemma"] == "caritas"
 
 
 # ── write_segment_text ────────────────────────────────────────────────────────
