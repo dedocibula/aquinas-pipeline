@@ -78,6 +78,10 @@ The spine. One row per atomic translatable unit.
 | `locator_path` | ltree NOT NULL | hierarchical coordinate, e.g. 'I.q3.a1.arg2' |
 | `element_type` | text | CHECK IN ('arg','sed_contra','respondeo','reply') |
 | `reply_to` | int NULL | FK→segment_id of the objection this reply answers |
+| `translation_status` | text NOT NULL DEFAULT 'pending' | CHECK IN ('pending','translated','needs_human'); set by M4 translation loop |
+| `reviewer_notes` | jsonb NULL | advisory JSON from R1 reviewer, e.g. `{"iteration":2,"register":"phrase X is colloquial"}`; NULL until translated |
+
+Added by migration 004 (M4). Partial index on `translation_status = 'pending'` for fast pilot batch queries.
 
 Populated by: Latin parser (M1).
 Read by: resolver; translator (M4); reviewer structural check (M4); re-run engine (M4).
@@ -136,7 +140,14 @@ One row per distinct Latin term (lemma).
 | `term_id` | serial PK | |
 | `latin_lemma` | text UNIQUE | dictionary form; the join target after lemmatization |
 | `is_multiword` | bool DEFAULT false | true for 'actus essendi', 'per se', etc. |
+| `category` | text NULL | CHECK IN ('term','name','formula','prose'); set by DeepSeek proposal pass for gap terms only; Krystal-seeded terms keep NULL |
 | `notes` | text | |
+
+`category` is NULL for all ~150 Krystal-seeded terms — they are authoritative regardless of category.
+Only gap terms (lemmas not in Krystal) carry a model-assigned category, set during the M2 DeepSeek proposal pass.
+Drives M3 review ordering; fully overridable by a reviewer.
+
+Added by migration 003 (M2).
 
 Populated by: Krystal preseed (M1). Gap terms appended during resolution.
 Read by: resolver, as the join target after CLTK lemmatizes a Latin surface form.
@@ -320,13 +331,15 @@ CREATE VIEW v_sense AS
 
 ## External config
 
-**`style_profile.yaml`** (version-controlled with code, not in DB).
-Contains Krystal's house rules for the translation prompt and reviewer agent.
-Lives outside the DB because it drives prompt behavior, not lookups.
+**`prompts/translator_system.txt`** and **`prompts/reviewer_system.txt`** (version-controlled with code, not in DB).
+Replaced `style_profile.yaml` in M4. Contain Krystal's house rules split by consumer.
+Live outside the DB because they drive prompt behavior, not lookups.
 
-Contents:
+`prompts/translator_system.txt` contains:
 - Heading templates: sed_contra → "Na druhé straně", respondeo → "Odpověď.",
   replies → "K námitkám"; drop "praeterea"/"ad primum dicendum"; number objections.
+- FORMATTING section: rules for how the Slovak draft is structured.
+- LEGIBILITY positive instruction + GRAMMAR section with passive infinitive WRONG/RIGHT examples.
 - Citation rules: Aristotle by Bekker in footnotes; Fathers by PL/PG;
   Bible by JB abbreviations and ČEP text — EXCEPT translate Thomas's own Bible
   quotations from Thomas's Latin, not from the modern Bible.
@@ -336,3 +349,7 @@ Contents:
 - Orthography: filosofie / teologie / -ismus (not filozofie / theologie / -izmus).
 - Negative constraints for polish pass (M5): do not increase literary quality;
   preserve repetition; preserve scholastic particles; preserve sentence boundaries.
+
+`prompts/reviewer_system.txt` contains:
+- Semantics + legibility evaluation only (Axes 1 & 2 removed in M4 quality fix).
+- `<verdict>` XML tag protocol used by `_parse_verdict` in `reviewer.py`.
