@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from translate.reviewer import call_reviewer_r1, load_reviewer_system_prompt
+from translate.reviewer import (
+    _parse_verdict,
+    _parse_verdict_text,
+    call_reviewer_r1,
+    load_reviewer_system_prompt,
+)
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +73,7 @@ class TestCallReviewerR1:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         with patch("translate.reviewer.requests.post") as mock_post:
             mock_post.return_value = _fake_response("LGTM")
-            with pytest.raises(RuntimeError, match="Unrecognised reviewer verdict"):
+            with pytest.raises(RuntimeError, match="No verdict found"):
                 call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
 
     def test_raises_without_api_key(self, monkeypatch):
@@ -149,3 +154,80 @@ class TestUserTurn:
         user_content = self._capture_user_content(monkeypatch)
         assert "DRAFT:" in user_content
         assert _DRAFT in user_content
+
+
+# ── TestParseVerdict ───────────────────────────────────────────────────────────
+
+class TestParseVerdict:
+    def test_approved_plain(self):
+        result = _parse_verdict("APPROVED")
+        assert result.verdict == "APPROVED"
+        assert result.notes is None
+        assert result.feedback is None
+
+    def test_approved_with_notes(self):
+        result = _parse_verdict("APPROVED_WITH_NOTES: - Consider rephrasing")
+        assert result.verdict == "APPROVED_WITH_NOTES"
+        assert result.notes == {"raw": "- Consider rephrasing"}
+
+    def test_approved_with_notes_multiline(self):
+        content = "APPROVED_WITH_NOTES: - Note one\n- Note two"
+        result = _parse_verdict(content)
+        assert result.verdict == "APPROVED_WITH_NOTES"
+        assert "Note one" in result.notes["raw"]
+        assert "Note two" in result.notes["raw"]
+
+    def test_revision_needed(self):
+        result = _parse_verdict("REVISION_NEEDED: - Fix the modal collapse")
+        assert result.verdict == "REVISION_NEEDED"
+        assert "Fix the modal collapse" in result.feedback
+
+    def test_xml_tags_preferred(self):
+        content = (
+            "Some reasoning here...\n"
+            "<evaluation>Semantics: ok\nLegibility: ok\n</evaluation>\n"
+            "<verdict>\nAPPROVED\n</verdict>"
+        )
+        result = _parse_verdict(content)
+        assert result.verdict == "APPROVED"
+
+    def test_xml_revision_needed(self):
+        content = (
+            "<evaluation>Semantics: bad\n</evaluation>\n"
+            "<verdict>REVISION_NEEDED: argument reversed</verdict>"
+        )
+        result = _parse_verdict(content)
+        assert result.verdict == "REVISION_NEEDED"
+        assert "argument reversed" in result.feedback
+
+    def test_bottom_up_scan_finds_last_verdict(self):
+        # R1 mentions a verdict hypothetically in chain-of-thought, then gives the real one
+        content = (
+            "If the argument were reversed I would say REVISION_NEEDED: hypothetical.\n"
+            "But actually the translation is correct.\n"
+            "APPROVED"
+        )
+        result = _parse_verdict(content)
+        assert result.verdict == "APPROVED"
+
+    def test_no_verdict_raises(self):
+        with pytest.raises(RuntimeError, match="No verdict found"):
+            _parse_verdict("This output has no verdict keyword at all.")
+
+    def test_approved_with_notes_empty_raises(self):
+        with pytest.raises(RuntimeError, match="without note content"):
+            _parse_verdict("APPROVED_WITH_NOTES:")
+
+    def test_approved_not_prefix_of_approved_with_notes(self):
+        # "APPROVED_WITH_NOTES" must NOT parse as plain APPROVED
+        result = _parse_verdict("APPROVED_WITH_NOTES: - Some note")
+        assert result.verdict == "APPROVED_WITH_NOTES"
+
+    def test_parse_verdict_text_returns_none_for_unknown(self):
+        assert _parse_verdict_text("LGTM", "") is None
+
+    def test_revision_needed_multiline_feedback(self):
+        content = "REVISION_NEEDED: - First issue\n- Second issue"
+        result = _parse_verdict(content)
+        assert "First issue" in result.feedback
+        assert "Second issue" in result.feedback

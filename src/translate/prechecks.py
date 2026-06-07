@@ -10,12 +10,15 @@ stderr with a [PRECHECK] prefix so they are easy to grep.
 
 from __future__ import annotations
 
+import re as _re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
 
 import psycopg2.extras
 from dotenv import load_dotenv
+
+from common.lemmatize import lemmatize_slovak
 
 load_dotenv()
 
@@ -140,6 +143,46 @@ def check_structure(seg: dict, draft: str, db_conn) -> CheckResult:
                     file=sys.stderr,
                 )
                 failures.append(reason)
+
+    return CheckResult(ok=len(failures) == 0, failures=failures)
+
+
+# ── check_terminology_lemma ───────────────────────────────────────────────────
+
+def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
+    """Lemma-exact terminology check using MorphoDiTa Slovak model.
+
+    Tokenizes the draft, lemmatizes every token, and checks that each
+    required_slovak lemma appears in the resulting lemma set.
+
+    Zero false negatives on declension (vierou → viera ✓).
+    Zero false positives from substring containment (forma ≠ informácia ✓).
+
+    NOTE: multi-word constraints (e.g. "prvotná matéria") are not supported by
+    the current glossary schema (latin_lemma is always a single token). If that
+    changes, replace the flat-set membership check with issubset over the phrase's
+    individual lemmas — adjacency is not enforced but is an acceptable trade-off
+    for a fast pre-check gate.
+    """
+    if not constraints:
+        return CheckResult(ok=True)
+
+    # Tokenize: split on anything that isn't a Slovak word character.
+    tokens = _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
+
+    # Build lowercase lemma set — MorphoDiTa preserves capitalisation (Boh, nie boh),
+    # so normalise both sides to avoid false negatives on proper nouns in constraints.
+    draft_lemmas: set[str] = set()
+    for token in tokens:
+        draft_lemmas.update(lemma.lower() for lemma in lemmatize_slovak(token))
+
+    failures: list[str] = []
+    for c in constraints:
+        required = c["required_slovak"].lower()
+        if required not in draft_lemmas:
+            msg = f"lemma '{c['required_slovak']}' (for {c['latin_lemma']}) not found in draft"
+            print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
+            failures.append(msg)
 
     return CheckResult(ok=len(failures) == 0, failures=failures)
 

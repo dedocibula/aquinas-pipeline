@@ -1,13 +1,13 @@
 """
-Unit tests for src/ingest/lemmatize.py.
+Unit tests for src/common/lemmatize.py.
 
-Tests are split into two classes:
-  TestLemmatizeLatin  — requires CLTK lat_models_cltk corpus
-  TestLemmatizeCzech  — requires models/czech-morfflex*.dict
+Tests are split into three classes:
+  TestLemmatizeLatin   — requires CLTK lat_models_cltk corpus
+  TestLemmatizeCzech   — requires models/czech-morfflex*.dict
+  TestLemmatizeSlovak  — requires models/slovak-morfflex*.dict
 
-Both classes are skipped (not failed) when the required model is absent,
-so CI without the models doesn't produce false failures. The presence check
-happens at module import time via the _check_ fixtures.
+All classes are skipped (not failed) when the required model is absent,
+so CI without the models doesn't produce false failures.
 """
 
 from __future__ import annotations
@@ -29,6 +29,11 @@ def _cltk_models_present() -> bool:
 def _morphodita_model_present() -> bool:
     models_dir = pathlib.Path(__file__).resolve().parents[2] / "models"
     return any(models_dir.rglob("czech-morfflex*.dict"))
+
+
+def _slovak_model_present() -> bool:
+    models_dir = pathlib.Path(__file__).resolve().parents[2] / "models"
+    return any(models_dir.rglob("slovak-morfflex*.dict"))
 
 
 # ── Latin lemmatizer ─────────────────────────────────────────────────────────
@@ -110,5 +115,45 @@ class TestLemmatizeCzech:
     def test_lemma_suffix_stripped(self):
         # MorphoDiTa raw lemmas contain suffixes like `_:B_` — must be stripped
         result = self.lemmatize("dychtění")
+        for r in result:
+            assert "_" not in r, f"raw MorphoDiTa suffix not stripped: {r!r}"
+
+
+# ── Slovak lemmatizer ─────────────────────────────────────────────────────────
+
+@pytest.mark.skipif(not _slovak_model_present(), reason="slovak-morfflex*.dict not present in models/")
+class TestLemmatizeSlovak:
+    def setup_method(self):
+        from common.lemmatize import lemmatize_slovak
+        self.lemmatize = lemmatize_slovak
+
+    def test_vierou_instrumental(self):
+        result = self.lemmatize("vierou")
+        assert "viera" in result, f"expected 'viera' in {result}"
+
+    def test_rozumu_genitive(self):
+        result = self.lemmatize("rozumu")
+        assert "rozum" in result, f"expected 'rozum' in {result}"
+
+    def test_poznaniu_dative(self):
+        result = self.lemmatize("poznaniu")
+        assert "poznanie" in result, f"expected 'poznanie' in {result}"
+
+    def test_returns_list(self):
+        result = self.lemmatize("viera")
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_no_empty_strings_in_result(self):
+        result = self.lemmatize("rozumu")
+        assert all(r for r in result), f"empty string in result: {result}"
+
+    def test_unknown_word_returns_something(self):
+        result = self.lemmatize("xyzzyneznáme")
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_lemma_suffix_stripped(self):
+        result = self.lemmatize("vierou")
         for r in result:
             assert "_" not in r, f"raw MorphoDiTa suffix not stripped: {r!r}"

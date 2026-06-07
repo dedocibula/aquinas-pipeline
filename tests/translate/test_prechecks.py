@@ -12,6 +12,7 @@ from src.translate.prechecks import (
     _clear_formula_cache,
     check_structure,
     check_terminology,
+    check_terminology_lemma,
 )
 
 # ── Fake DB helpers ────────────────────────────────────────────────────────────
@@ -243,3 +244,83 @@ def test_terminology_multiple_missing_all_reported():
     result = check_terminology(draft, constraints)
     assert result.ok is False
     assert len(result.failures) == 3
+
+
+# ── check_terminology_lemma tests ─────────────────────────────────────────────
+# These tests mock lemmatize_slovak so they run without the MorphoDiTa model.
+
+def _mock_lemmatize(word_to_lemma: dict):
+    """Return a lemmatize_slovak mock that maps surface → [lemma]."""
+    def _fn(surface: str) -> list[str]:
+        return word_to_lemma.get(surface.lower(), [surface.lower()])
+    return _fn
+
+
+def test_terminology_lemma_empty_constraints():
+    """Empty constraints returns ok=True immediately, no lemmatizer called."""
+    result = check_terminology_lemma("Ľubovoľný text.", [])
+    assert result.ok is True
+    assert result.failures == []
+
+
+def test_terminology_lemma_ok_when_lemma_matches(monkeypatch):
+    """Returns ok=True when a declined form lemmatizes to the required term."""
+    lemma_map = {"vierou": ["viera"], "je": ["byť"], "silná": ["silný"]}
+    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+
+    constraints = [{"latin_lemma": "fides", "required_slovak": "viera"}]
+    draft = "Je silná vierou."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is True
+    assert result.failures == []
+
+
+def test_terminology_lemma_fail_when_lemma_missing(monkeypatch):
+    """Returns ok=False when required lemma is absent from the draft."""
+    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize({}))
+
+    constraints = [{"latin_lemma": "fides", "required_slovak": "viera"}]
+    draft = "Tento text neobsahuje požadovaný termín."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is False
+    assert len(result.failures) == 1
+    assert "viera" in result.failures[0]
+    assert "fides" in result.failures[0]
+
+
+def test_terminology_lemma_case_insensitive(monkeypatch):
+    """Comparison is case-insensitive on both sides."""
+    # Lemmatizer returns "boh" (lowercase); constraint is "Boh" (title-case).
+    lemma_map = {"boh": ["boh"], "je": ["byť"], "veľký": ["veľký"]}
+    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+
+    constraints = [{"latin_lemma": "deus", "required_slovak": "Boh"}]
+    draft = "Boh je veľký."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is True
+
+
+def test_terminology_lemma_multiple_constraints_all_reported(monkeypatch):
+    """All missing lemmas are reported, not just the first."""
+    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize({}))
+
+    constraints = [
+        {"latin_lemma": "fides", "required_slovak": "viera"},
+        {"latin_lemma": "ratio", "required_slovak": "rozum"},
+    ]
+    draft = "Toto sú iné slová."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is False
+    assert len(result.failures) == 2
+
+
+def test_terminology_lemma_no_substring_false_positive(monkeypatch):
+    """Lemma check does not match on substring — 'forma' does not match 'informácia'."""
+    # "informácia" lemmatizes to "informácia", not "forma" — only the lemma set is checked
+    lemma_map = {"text": ["text"], "obsahuje": ["obsahovať"], "informácia": ["informácia"]}
+    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+
+    constraints = [{"latin_lemma": "forma", "required_slovak": "forma"}]
+    draft = "Text obsahuje informácia."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is False

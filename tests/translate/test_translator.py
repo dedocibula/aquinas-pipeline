@@ -59,7 +59,7 @@ class TestCallTranslatorV3:
         assert draft == expected
         assert usage.cost_usd > 0
 
-    def test_system_prompt_contains_negative_constraints(self, monkeypatch):
+    def test_system_prompt_contains_do_not_block(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
@@ -69,8 +69,8 @@ class TestCallTranslatorV3:
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
         system_msg = next(m for m in messages if m["role"] == "system")
-        assert "NEGATIVE CONSTRAINTS" in system_msg["content"]
-        assert "Nezvyšovať literárnu kvalitu nad originál." in system_msg["content"]
+        assert "DO NOT:" in system_msg["content"]
+        assert "GRAMMAR" in system_msg["content"]
 
     def test_user_turn_contains_hard_term_constraints(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -157,4 +157,4 @@ class TestLoadTranslatorSystemPrompt:
         result = load_translator_system_prompt()
         assert isinstance(result, str)
         assert len(result) > 0
-        assert "NEGATIVE CONSTRAINTS" in result
+        assert "DO NOT:" in result

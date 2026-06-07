@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re as _re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,28 +126,54 @@ def call_reviewer_r1(
 
 
 def _parse_verdict(content: str) -> ReviewResult:
-    """Parse the model response into a ReviewResult.
+    """Extract verdict from R1 output.
 
-    Raises:
-        RuntimeError: If the first line does not match any known verdict prefix.
+    Strategy (in order):
+    1. Look for <verdict>...</verdict> XML tags (preferred — reviewer prompt uses them).
+    2. Fall back to bottom-up line scan — finds the LAST occurrence of a verdict keyword,
+       which avoids false matches on hypothetical verdict text in R1's chain-of-thought.
     """
-    first_line = content.split("\n")[0].strip()
-    rest = content[len(first_line):].strip()
+    # ── Strategy 1: XML tags ──────────────────────────────────────────────────
+    xml_match = _re.search(r"<verdict>\s*(.*?)\s*</verdict>", content, _re.DOTALL)
+    if xml_match:
+        result = _parse_verdict_text(xml_match.group(1).strip(), "")
+        if result is not None:
+            return result
 
-    if first_line == "APPROVED":
+    # ── Strategy 2: bottom-up line scan ──────────────────────────────────────
+    lines = content.splitlines()
+    for i, line in enumerate(reversed(lines)):
+        line = line.strip()
+        # rest = lines after this one in original order (content below verdict)
+        rest = "\n".join(lines[len(lines) - i:]).strip()
+        result = _parse_verdict_text(line, rest)
+        if result is not None:
+            return result
+
+    raise RuntimeError(f"No verdict found in R1 output: {content[:200]!r}")
+
+
+def _parse_verdict_text(line: str, rest: str) -> ReviewResult | None:
+    """Parse a single candidate verdict line. Returns None if line is not a verdict."""
+    # APPROVED must match as a standalone word — not as a prefix of APPROVED_WITH_NOTES.
+    if _re.search(r"\bAPPROVED\b", line) and "APPROVED_WITH_NOTES" not in line:
         return ReviewResult(verdict="APPROVED", notes=None, feedback=None)
 
-    if first_line.startswith("APPROVED_WITH_NOTES:"):
-        after_colon = first_line[len("APPROVED_WITH_NOTES:"):].strip()
+    if "APPROVED_WITH_NOTES:" in line:
+        after_colon = line.split("APPROVED_WITH_NOTES:", 1)[1].strip()
         notes_text = (after_colon + ("\n" + rest if rest else "")).strip()
+        if not notes_text:
+            raise RuntimeError(
+                "APPROVED_WITH_NOTES emitted without note content — treating as parse failure"
+            )
         return ReviewResult(
             verdict="APPROVED_WITH_NOTES",
             notes={"raw": notes_text},
             feedback=None,
         )
 
-    if first_line.startswith("REVISION_NEEDED:"):
-        after_colon = first_line[len("REVISION_NEEDED:"):].strip()
+    if "REVISION_NEEDED:" in line:
+        after_colon = line.split("REVISION_NEEDED:", 1)[1].strip()
         feedback_text = (after_colon + ("\n" + rest if rest else "")).strip()
         return ReviewResult(
             verdict="REVISION_NEEDED",
@@ -154,7 +181,4 @@ def _parse_verdict(content: str) -> ReviewResult:
             feedback=feedback_text,
         )
 
-    raise RuntimeError(
-        f"Unrecognised reviewer verdict: {first_line!r} — "
-        "segment must be re-reviewed"
-    )
+    return None

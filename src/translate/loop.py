@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from common.db import source_id
 from common.lemmatize import lemmatize_latin
 from common.pricing import UsageInfo
-from translate.prechecks import check_structure
+from translate.prechecks import check_structure, check_terminology_lemma
 from translate.prompt_logger import PromptLogger
 from translate.reviewer import build_reviewer_turn, call_reviewer_r1
 from translate.translator import (
@@ -210,10 +210,10 @@ def translate_segment(
 
     prior_draft: str | None = None
     prior_feedback: str | None = None
-    best_draft: str | None = None            # last draft that cleared pre-checks
-    best_draft_iteration: int | None = None
-    last_draft: str | None = None            # most recent draft regardless of pre-checks
-    last_draft_iteration: int | None = None
+    precheck_passing_draft: str | None = None   # last draft that cleared ALL pre-checks
+    precheck_passing_iter: int | None = None
+    fallback_draft: str | None = None           # any draft produced; absolute last resort
+    fallback_iter: int | None = None
     usages: list[UsageInfo] = []
     locator = seg.get("locator_path", "")
 
@@ -233,14 +233,16 @@ def translate_segment(
             log.error("segment_id=%d iteration=%d translator error: %s", segment_id, iteration, exc)
             break
 
-        last_draft = draft
-        last_draft_iteration = iteration
+        fallback_draft = draft
+        fallback_iter = iteration
 
         structure_result = check_structure(seg, draft, conn)
+        terminology_result = check_terminology_lemma(draft, constraints)
 
-        if not structure_result.ok:
+        if not structure_result.ok or not terminology_result.ok:
+            all_failures = structure_result.failures + terminology_result.failures
             prior_feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
-                f"  - {f}" for f in structure_result.failures
+                f"  - {f}" for f in all_failures
             )
             if prompt_log:
                 prompt_log.log_iteration(
@@ -251,19 +253,16 @@ def translate_segment(
                     user_turn=user_turn,
                     draft=draft,
                     precheck_ok=False,
-                    precheck_failures=structure_result.failures,
+                    precheck_failures=all_failures,
                     reviewer_turn=None,
                     verdict=None,
                     feedback=prior_feedback,
                 )
             prior_draft = draft
-            if best_draft is None:
-                best_draft = draft
-                best_draft_iteration = iteration
             continue  # back to translator; do NOT call R1
 
-        best_draft = draft  # cleared pre-checks — candidate for best
-        best_draft_iteration = iteration
+        precheck_passing_draft = draft
+        precheck_passing_iter = iteration
 
         latin = seg.get("latin")
         if not latin:
@@ -317,9 +316,9 @@ def translate_segment(
         prior_feedback = review.feedback
         prior_draft = draft
 
-    # Exhausted — write best_draft (last to clear pre-checks) or fall back to last_draft
-    final_draft = best_draft if best_draft is not None else last_draft
-    chosen_iter = best_draft_iteration if best_draft_iteration is not None else last_draft_iteration
+    # Exhausted — write precheck_passing_draft (last to clear all pre-checks) or fall back
+    final_draft = precheck_passing_draft if precheck_passing_draft is not None else fallback_draft
+    chosen_iter = precheck_passing_iter if precheck_passing_iter is not None else fallback_iter
     if final_draft is None:
         # No draft was ever produced (e.g., translator raised on iteration 1)
         log.error("segment_id=%d: no draft produced; skipping DB write", segment_id)
