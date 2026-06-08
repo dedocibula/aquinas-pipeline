@@ -150,39 +150,61 @@ def check_structure(seg: dict, draft: str, db_conn) -> CheckResult:
 # ── check_terminology_lemma ───────────────────────────────────────────────────
 
 def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
-    """Lemma-exact terminology check using MorphoDiTa Slovak model.
+    """Lemma-aware terminology check using MorphoDiTa Slovak model.
 
-    Tokenizes the draft, lemmatizes every token, and checks that each
-    required_slovak lemma appears in the resulting lemma set.
+    Dispatches on constraint category:
 
-    Zero false negatives on declension (vierou → viera ✓).
-    Zero false positives from substring containment (forma ≠ informácia ✓).
+    formula — word-boundary regex on normalised text (bypasses the lemmatizer,
+        which cannot handle prepositional phrases like 'o sebe').
+        Word boundaries prevent 'po sebe'/'vo sebe' satisfying 'o sebe'.
 
-    NOTE: multi-word constraints (e.g. "prvotná matéria") are not supported by
-    the current glossary schema (latin_lemma is always a single token). If that
-    changes, replace the flat-set membership check with issubset over the phrase's
-    individual lemmas — adjacency is not enforced but is an acceptable trade-off
-    for a fast pre-check gate.
+    term / name / prose / None (Krystal-seeded) — per-word candidate intersection.
+        Each word in required_slovak is lemmatized; if ANY lemma candidate for
+        that word appears in the draft's lemma set, the word is satisfied.
+        Handles multi-word constraints (e.g. 'intencionálny obraz') and inflected
+        single-word constraints (e.g. 'rozum' satisfied by 'rozumu'/'rozumom').
+        Adjacency of words is not enforced — acceptable for a fast gate.
     """
     if not constraints:
         return CheckResult(ok=True)
 
-    # Tokenize: split on anything that isn't a Slovak word character.
-    tokens = _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
-
-    # Build lowercase lemma set — MorphoDiTa preserves capitalisation (Boh, nie boh),
-    # so normalise both sides to avoid false negatives on proper nouns in constraints.
+    # Only lemmatize draft tokens if at least one constraint uses the term path.
+    # Formula constraints use regex only, so avoid calling the lemmatizer unnecessarily.
+    needs_lemma = any((c.get("category") or "term") != "formula" for c in constraints)
     draft_lemmas: set[str] = set()
-    for token in tokens:
-        draft_lemmas.update(lemma.lower() for lemma in lemmatize_slovak(token))
+    if needs_lemma:
+        tokens = _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
+        for token in tokens:
+            draft_lemmas.update(lm.lower() for lm in lemmatize_slovak(token))
 
     failures: list[str] = []
     for c in constraints:
-        required = c["required_slovak"].lower()
-        if required not in draft_lemmas:
-            msg = f"lemma '{c['required_slovak']}' (for {c['latin_lemma']}) not found in draft"
-            print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
-            failures.append(msg)
+        required = c["required_slovak"]
+        category = c.get("category") or "term"
+
+        if category == "formula":
+            # Fixed phrases: word-boundary regex on normalised text.
+            # \b prevents 'po sebe'/'vo sebe' false-positives for 'o sebe'.
+            req_norm = _normalise(required)
+            draft_norm = _normalise(draft)
+            if not _re.search(rf"\b{_re.escape(req_norm)}\b", draft_norm):
+                msg = f"formula '{required}' (for {c['latin_lemma']}) not found in draft"
+                print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
+                failures.append(msg)
+        else:
+            # term / name / prose: per-word candidate intersection.
+            required_words = _re.findall(r"[^\W\d_]+", required, flags=_re.UNICODE)
+            missing_words = []
+            for word in required_words:
+                candidates = {lm.lower() for lm in lemmatize_slovak(word)}
+                if not candidates:
+                    candidates = {word.lower()}  # OOV fallback: match verbatim form
+                if not candidates.intersection(draft_lemmas):
+                    missing_words.append(word)
+            if missing_words:
+                msg = f"missing components {missing_words} for '{required}' ({c['latin_lemma']})"
+                print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
+                failures.append(msg)
 
     return CheckResult(ok=len(failures) == 0, failures=failures)
 

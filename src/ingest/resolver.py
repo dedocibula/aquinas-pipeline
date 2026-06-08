@@ -51,10 +51,12 @@ from common.deepseek import _api_stats, _api_stats_lock, get_api_stats
 from common.glossary_repo import _load_glossary, _load_segments
 from ingest.gap_terms import (
     _GAP_BATCH_SIZE,
+    _GAP_FREQ_CEILING_PCT,
     _GAP_FREQ_FLOOR,
     _GAP_MAX_WORKERS,
     _GAP_MIN_LEN,
     _load_existing_gap_terms,
+    _load_ignored_lemmas,
     _propose_gap_terms,
     _scan_gap_lemmas,
 )
@@ -71,21 +73,22 @@ def run(
     batch_size: int = _GAP_BATCH_SIZE,
     max_workers: int = _GAP_MAX_WORKERS,
     min_len: int = _GAP_MIN_LEN,
+    freq_ceiling_pct: float = _GAP_FREQ_CEILING_PCT,
 ) -> None:
     """Two-phase resolver.
 
-    Phase 1: scan all segments for gap lemmas (mechanical filter only), then
-             classify/canonicalize/translate them via DeepSeek and pre-write the
-             canonical glossary_term(category) + sense + sk rendering to the DB.
+    Phase 1: scan all segments for gap lemmas, then classify/translate via DeepSeek
+             and pre-write glossary_term(category) + sense + sk rendering to DB.
     Phase 2: main resolution loop — Krystal terms + gap terms (proposals in DB).
-             A gap lemma only becomes a term_usage row if its canonical headword
-             received a Phase-1 proposal (no-stub invariant).
+             A gap lemma only becomes a term_usage row if it received a Phase-1
+             proposal (no-stub invariant).
 
     Knobs:
-      freq_floor  — min segment frequency for a gap lemma (default 10)
-      batch_size  — lemmas per DeepSeek batch call (default 25)
-      max_workers — concurrent batch requests (default 10)
-      min_len     — gap lemma must be longer than this (default 5)
+      freq_floor      — min segment frequency for a gap lemma (default 10)
+      batch_size      — lemmas per DeepSeek batch call (default 50)
+      max_workers     — concurrent batch requests (default 10)
+      min_len         — gap lemma must be longer than this (default 3)
+      freq_ceiling_pct — drop lemmas appearing in >X% of segments (default 0.40)
     """
     # Reset accumulated stats so a single-process multi-step run reports only this run.
     with _api_stats_lock:
@@ -93,22 +96,28 @@ def run(
         _api_stats["input_tokens"] = 0
         _api_stats["output_tokens"] = 0
 
-    print(f"Loading glossary and segments (freq_floor={freq_floor}, min_len={min_len})...")
+    print(f"Loading glossary and segments (freq_floor={freq_floor}, min_len={min_len}, "
+          f"freq_ceiling_pct={freq_ceiling_pct})...")
 
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
         multiword_terms, singleword_terms = _load_glossary(conn)
         segments = _load_segments(conn, wid)
+        ignored_lemmas = _load_ignored_lemmas(conn)
 
     lemma_to_term = {t["latin_lemma"]: t for t in singleword_terms}
     krystal_lemmas = set(lemma_to_term.keys()) | {t["latin_lemma"] for t in multiword_terms}
     print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword Krystal terms")
+    print(f"  Ignored (stopword): {len(ignored_lemmas)}")
     print(f"  Segments: {len(segments)} body segments to resolve")
 
     # ── Phase 1: scan, batch-propose (classify + translate) ─────────────────────
     print("\n[Phase 1] Scanning gap lemmas...")
-    gap_data = _scan_gap_lemmas(segments, krystal_lemmas, freq_floor, min_len)
-    print(f"  {len(gap_data)} gap lemmas qualify (freq≥{freq_floor}, len>{min_len})")
+    gap_data = _scan_gap_lemmas(
+        segments, krystal_lemmas, freq_floor, min_len, freq_ceiling_pct, ignored_lemmas,
+    )
+    print(f"  {len(gap_data)} gap lemmas qualify (freq≥{freq_floor}, len>{min_len}, "
+          f"ceil≤{freq_ceiling_pct*100:.0f}%)")
 
     gap_terms_db: dict[str, dict] = {}
 

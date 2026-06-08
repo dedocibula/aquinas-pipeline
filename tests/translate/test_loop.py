@@ -71,6 +71,7 @@ def _term_row(**overrides) -> dict:
         "sense_id": 42,
         "version": 1,
         "context_label": None,
+        "category": None,
     }
     base.update(overrides)
     return base
@@ -153,6 +154,31 @@ def test_get_locked_terms_context_label_none_when_absent():
     conn, cur = _fake_conn(rows)
     result = get_locked_terms(conn, 1)
     assert result[0]["context_label"] is None
+
+
+def test_get_locked_terms_includes_category():
+    """get_locked_terms must return the 'category' field from glossary_term."""
+    rows = [_term_row(category="term")]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert "category" in result[0]
+    assert result[0]["category"] == "term"
+
+
+def test_get_locked_terms_category_none_for_krystal_terms():
+    """category=None (Krystal-seeded terms) is returned unchanged."""
+    rows = [_term_row(category=None)]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert result[0]["category"] is None
+
+
+def test_get_locked_terms_category_formula():
+    """category='formula' is returned correctly for structural formula terms."""
+    rows = [_term_row(latin_lemma="respondeo", required_slovak="Odpovedám", category="formula")]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert result[0]["category"] == "formula"
 
 
 # ── _build_surface_constraints — context_label passthrough ───────────────────
@@ -683,6 +709,52 @@ def test_translate_segment_always_commits_on_needs_human():
     ):
         translate_segment(1, conn)
     conn.commit.assert_called_once()
+
+
+def test_translate_segment_constraints_include_category():
+    """translate_segment must include 'category' in each constraint dict passed to prechecks."""
+    term = _term_row(category="formula")
+    conn = _make_conn(locked_terms=[term])
+    captured: list[list] = []
+
+    def capture_precheck(draft, constraints):
+        captured.append(list(constraints))
+        return CheckResult(ok=True)
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    assert len(captured) > 0
+    assert "category" in captured[0][0]
+    assert captured[0][0]["category"] == "formula"
+
+
+def test_translate_segment_constraints_default_category_to_term():
+    """When locked term has category=None, constraints dict defaults to 'term'."""
+    term = _term_row(category=None)
+    conn = _make_conn(locked_terms=[term])
+    captured: list[list] = []
+
+    def capture_precheck(draft, constraints):
+        captured.append(list(constraints))
+        return CheckResult(ok=True)
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    assert captured[0][0]["category"] == "term"
 
 
 def test_translate_segment_missing_latin_skips_r1_and_needs_human():

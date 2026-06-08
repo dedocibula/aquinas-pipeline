@@ -78,12 +78,15 @@ def _step_resolve() -> None:
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
     batch_size = int(os.environ.get("GAP_BATCH_SIZE", "50"))
     max_workers = int(os.environ.get("GAP_MAX_WORKERS", "10"))
+    freq_ceiling_pct = float(os.environ.get("GAP_FREQ_CEILING_PCT", "0.40"))
 
     print(
         f"[resolve] Running term resolver "
-        f"(freq_floor={freq_floor}, batch_size={batch_size}, max_workers={max_workers})..."
+        f"(freq_floor={freq_floor}, batch_size={batch_size}, max_workers={max_workers}, "
+        f"freq_ceiling_pct={freq_ceiling_pct})..."
     )
-    run(freq_floor=freq_floor, batch_size=batch_size, max_workers=max_workers)
+    run(freq_floor=freq_floor, batch_size=batch_size, max_workers=max_workers,
+        freq_ceiling_pct=freq_ceiling_pct)
     print("[resolve] Done.")
 
 
@@ -92,22 +95,28 @@ def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
 
     from common.db import get_conn, work_id
     from common.glossary_repo import _load_glossary, _load_segments
-    from ingest.gap_terms import _scan_gap_lemmas, pilot_batch_sizes
+    from ingest.gap_terms import _load_ignored_lemmas, _scan_gap_lemmas, pilot_batch_sizes
 
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
+    freq_ceiling_pct = float(os.environ.get("GAP_FREQ_CEILING_PCT", "0.40"))
 
     print("[pilot] Loading segments and glossary...")
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
         multiword_terms, singleword_terms = _load_glossary(conn)
         segments = _load_segments(conn, wid)
+        ignored_lemmas = _load_ignored_lemmas(conn)
 
     krystal_lemmas = (
         {t["latin_lemma"] for t in singleword_terms}
         | {t["latin_lemma"] for t in multiword_terms}
     )
-    print(f"[pilot] Scanning gap lemmas (freq_floor={freq_floor})...")
-    gap_data = _scan_gap_lemmas(segments, krystal_lemmas, freq_floor=freq_floor)
+    print(f"[pilot] Scanning gap lemmas (freq_floor={freq_floor}, "
+          f"freq_ceiling_pct={freq_ceiling_pct}, ignored={len(ignored_lemmas)})...")
+    gap_data = _scan_gap_lemmas(
+        segments, krystal_lemmas, freq_floor=freq_floor,
+        freq_ceiling_pct=freq_ceiling_pct, ignored_lemmas=ignored_lemmas,
+    )
     print(f"[pilot] {len(gap_data)} qualifying gap lemmas found")
 
     pilot_batch_sizes(gap_data, top_n=top_n, batch_sizes=batch_sizes)

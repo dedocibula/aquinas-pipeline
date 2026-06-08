@@ -6,6 +6,8 @@ import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from cltk.stops.lat import STOPS as _CLTK_STOPS
+
 from common.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
 from common.lemmatize import lemmatize_latin
 
@@ -13,10 +15,12 @@ from common.lemmatize import lemmatize_latin
 # Override via run() parameters or GAP_* env vars read in pipeline.py.
 
 _GAP_FREQ_FLOOR: int = 10
-# Mechanical pre-filter only: a lemma must be longer than this to be sent for
-# proposal (filters most Latin function words). No POS filter, no word lists —
-# precision is handled dynamically by the model's category.
-_GAP_MIN_LEN: int = 5
+# Lower gate lets 4-5 char core Scholastic vocabulary through (actus, esse, bonum).
+# Spurious function words are caught by CLTK stops + freq ceiling + DB stopword list.
+_GAP_MIN_LEN: int = 3
+# Zipf ceiling: lemmas appearing in >40% of segments are structural connectors, not
+# terminology (dico appears in 77% of Q1–Q6 segments). Applied after freq collection.
+_GAP_FREQ_CEILING_PCT: float = 0.40
 _GAP_BATCH_SIZE: int = 50   # lemmas per DeepSeek batch call
 _GAP_MAX_WORKERS: int = 10  # concurrent batch requests
 
@@ -26,22 +30,37 @@ def _strip_lemma_suffix(lemma: str) -> str:
     return re.sub(r"\d+$", "", lemma)
 
 
+def _load_ignored_lemmas(conn) -> frozenset[str]:
+    """Load lemmas with category='stopword' from DB — permanently silenced by reviewers."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT latin_lemma FROM glossary_term WHERE category = 'stopword'")
+        return frozenset(row[0].lower() for row in cur.fetchall() if row[0] is not None)
+
+
 def _scan_gap_lemmas(
     segments: list[dict],
     krystal_lemmas: set[str],
     freq_floor: int,
     min_len: int = _GAP_MIN_LEN,
+    freq_ceiling_pct: float = _GAP_FREQ_CEILING_PCT,
+    ignored_lemmas: frozenset[str] = frozenset(),
 ) -> dict[str, dict]:
     """One read-only pass over all segments to collect gap lemma data.
 
     Returns {lemma: {freq, best_latin, best_czech, best_english}} for lemmas
-    (CLTK lemma with numeric suffix stripped) that appear in ≥ freq_floor segments.
+    (CLTK lemma with numeric suffix stripped) that appear in ≥ freq_floor segments
+    and pass all noise filters.
 
-    Mechanical filters only — no POS tagging, no word lists. Precision is handled
-    downstream by the model's category (term/name/formula/prose). The length gate
-    (`len > min_len`) drops most Latin function words; the model classifies the rest.
+    Noise filters applied in order:
+      1. Length gate (len > min_len) — drops 1-3 char function words
+      2. CLTK STOPS (case-insensitive) — drops Classical Latin stopwords
+      3. DB ignored_lemmas (category='stopword') — drops Scholastic structural words
+         permanently silenced by reviewers
+      4. Freq ceiling (freq ≤ freq_ceiling_pct * total_segments) — drops Zipfian
+         connectors that appear in too many segments to be theological terms
     """
     lemma_data: dict[str, dict] = {}
+    total_segments = len(segments)
 
     for seg in segments:
         latin = seg["latin"] or ""
@@ -59,7 +78,14 @@ def _scan_gap_lemmas(
             if any(c in krystal_lemmas for c in cands):
                 continue
             lemma = _strip_lemma_suffix(cands[0])
-            if len(lemma) <= min_len or lemma in krystal_lemmas or lemma in seen_in_seg:
+            lemma_lower = lemma.lower()
+            if (
+                len(lemma) <= min_len
+                or lemma in krystal_lemmas
+                or lemma_lower in _CLTK_STOPS
+                or lemma_lower in ignored_lemmas
+                or lemma in seen_in_seg
+            ):
                 continue
             seen_in_seg.add(lemma)
 
@@ -78,7 +104,15 @@ def _scan_gap_lemmas(
             if english and not d["best_english"]:
                 d["best_english"] = english[:300]
 
-    return {lemma: d for lemma, d in lemma_data.items() if d["freq"] >= freq_floor}
+    if total_segments == 0:
+        import sys
+        print("[WARN] _scan_gap_lemmas called with 0 segments — returning empty result", file=sys.stderr)
+        return {}
+    freq_ceiling = int(total_segments * freq_ceiling_pct)
+    return {
+        lemma: d for lemma, d in lemma_data.items()
+        if freq_floor <= d["freq"] <= freq_ceiling
+    }
 
 
 def _ensure_glossary_term(conn, lemma: str, category: str | None = None) -> int:

@@ -319,53 +319,114 @@ class TestScanGapLemmas:
             self._seg("virtus bona est", seg_id=1),
             self._seg("virtus magna est", seg_id=2),
         ]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3,
+                                  freq_ceiling_pct=1.0)
         assert "virtus" not in result
 
     def test_includes_above_floor(self):
         segs = [self._seg(f"virtus in segmento {i}", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
-        # virtus should appear (freq=5 >= 3)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3,
+                                  freq_ceiling_pct=1.0)
         assert "virtus" in result
 
     def test_excludes_krystal_lemmas(self):
         segs = [self._seg("essentia divina est", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1)
+        result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1,
+                                  freq_ceiling_pct=1.0)
         assert "essentia" not in result
 
     def test_skips_short_tokens(self):
-        # 'deus' (4 chars) should be filtered by the length gate (len > min_len=5)
+        # len gate: with min_len=5, 'deus' (4 chars) is excluded
         segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1,
+                                  min_len=5, freq_ceiling_pct=1.0)
         assert "deus" not in result
 
-    def test_min_len_is_configurable(self):
-        # With min_len=3, 'deus' (4 chars) now qualifies.
+    def test_default_min_len_accepts_four_char_words(self):
+        # Default min_len=3 → 'deus' (4 chars, not in Krystal) qualifies
         segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1, min_len=3)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1,
+                                  freq_ceiling_pct=1.0)
         assert "deus" in result
 
+    def test_min_len_is_configurable(self):
+        segs = [self._seg("deus bonus", seg_id=i) for i in range(5)]
+        assert "deus" not in _scan_gap_lemmas(segs, set(), freq_floor=1,
+                                              min_len=5, freq_ceiling_pct=1.0)
+        assert "deus" in _scan_gap_lemmas(segs, set(), freq_floor=1,
+                                          min_len=3, freq_ceiling_pct=1.0)
+
+    def test_cltk_stopwords_excluded(self):
+        # CLTK STOPS words are excluded; a non-stop word in the same text still passes.
+        # 'virtus' (6 chars, not a stop word) acts as the positive control.
+        segs = [self._seg("enim virtus magna", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1,
+                                  freq_ceiling_pct=1.0)
+        assert "enim" not in result
+        assert "virtus" in result  # positive control: non-stop word still appears
+
+    def test_ignored_lemmas_excluded(self):
+        # DB-sourced stopwords are silenced; a non-ignored word in the same text still passes.
+        segs = [self._seg("virtus magna", seg_id=i) for i in range(5)]
+        # Confirm 'virtus' appears WITHOUT ignored_lemmas
+        result_without = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1,
+                                          freq_ceiling_pct=1.0)
+        assert "virtus" in result_without
+        # Confirm 'virtus' is suppressed WITH ignored_lemmas={'virtus'}
+        result_with = _scan_gap_lemmas(
+            segs, krystal_lemmas=set(), freq_floor=1,
+            ignored_lemmas=frozenset({"virtus"}),
+            freq_ceiling_pct=1.0,
+        )
+        assert "virtus" not in result_with
+
+    def test_freq_ceiling_excludes_ubiquitous_lemmas(self):
+        # A lemma appearing in 90% of segments should be filtered by freq ceiling
+        segs_with = [self._seg("virtus magna", seg_id=i) for i in range(90)]
+        segs_without = [self._seg("aliquid aliud", seg_id=90 + i) for i in range(10)]
+        result = _scan_gap_lemmas(
+            segs_with + segs_without,
+            krystal_lemmas=set(),
+            freq_floor=1,
+            freq_ceiling_pct=0.40,
+        )
+        assert "virtus" not in result
+
+    def test_freq_ceiling_keeps_moderate_frequency(self):
+        # A lemma at 20% frequency survives a 40% ceiling
+        segs_with = [self._seg("virtus magna", seg_id=i) for i in range(20)]
+        segs_without = [self._seg("aliquid aliud", seg_id=20 + i) for i in range(80)]
+        result = _scan_gap_lemmas(
+            segs_with + segs_without,
+            krystal_lemmas=set(),
+            freq_floor=1,
+            freq_ceiling_pct=0.40,
+        )
+        assert "virtus" in result
+
     def test_no_pos_filter_keeps_verbs(self):
-        # No POS filter any more: any length-qualifying lemma is kept; the model
-        # categorizes later. Verbs like 'dico' are NOT dropped at scan time.
+        # Non-CLTK-stop verbs pass through; model categorizes them later
         segs = [self._seg("dicunt homines verba", seg_id=i) for i in range(12)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10)
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10,
+                                  freq_ceiling_pct=1.0)
         assert len(result) > 0
 
     def test_strips_numeric_suffix_in_key(self):
-        # CLTK may lemmatize 'dicunt' → 'dico2'; the stored key is suffix-stripped.
+        # CLTK may lemmatize 'dicunt' → 'dico2'; the stored key is suffix-stripped
         segs = [self._seg("dicunt multa", seg_id=i) for i in range(12)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10)
-        # No key should carry a trailing digit.
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=10,
+                                  freq_ceiling_pct=1.0)
         for lemma in result:
             assert not lemma[-1].isdigit()
 
     def test_collects_context(self):
-        segs = [self._seg("virtus magna", czech="ctnost", english="virtue", seg_id=i) for i in range(5)]
-        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3)
-        if "virtus" in result:
-            assert result["virtus"]["best_czech"] == "ctnost"
-            assert result["virtus"]["best_english"] == "virtue"
+        segs = [self._seg("virtus magna", czech="ctnost", english="virtue", seg_id=i)
+                for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=3,
+                                  freq_ceiling_pct=1.0)
+        assert "virtus" in result, "virtus must appear — check CLTK lemmatization"
+        assert result["virtus"]["best_czech"] == "ctnost"
+        assert result["virtus"]["best_english"] == "virtue"
 
 
 # ── _propose_gap_terms ────────────────────────────────────────────────────────

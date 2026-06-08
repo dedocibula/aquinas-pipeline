@@ -71,6 +71,7 @@ def get_locked_terms(conn, segment_id: int) -> list[dict]:
             """
             SELECT DISTINCT ON (gs.sense_id)
                 gt.latin_lemma,
+                gt.category,
                 sr.content      AS required_slovak,
                 gs.sense_id,
                 gs.version,
@@ -202,6 +203,7 @@ def translate_segment(
             "latin_lemma": t["latin_lemma"],
             "required_slovak": t["required_slovak"],
             "context_label": t.get("context_label"),
+            "category": t.get("category") or "term",
         }
         for t in locked_terms
     ]
