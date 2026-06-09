@@ -21,6 +21,7 @@ from review.sheets import (
     apply_checkbox_validation,
     authenticate,
     batch_write_rows,
+    delete_stale_rows,
     get_or_create_worksheet,
     get_spreadsheet_id,
     read_existing_rows_from_data,
@@ -163,6 +164,12 @@ def export_tab(
 
     sheet_values = rows_to_sheet_values(db_rows)
     batch_write_rows(ws, sheet_values, existing_map)
+
+    # Remove rows whose sense_id is no longer in the DB (e.g. after glossary trim).
+    db_sense_ids = {r["sense_id"] for r in db_rows}
+    n_deleted = delete_stale_rows(spreadsheet, ws, existing_map, db_sense_ids)
+    if n_deleted:
+        print(f"  Deleted {n_deleted} stale rows from '{title}'.")
 
     total_rows = len(sheet_values)
     if apply_checkbox and total_rows > 0:

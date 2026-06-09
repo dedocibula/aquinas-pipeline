@@ -10,18 +10,21 @@ from __future__ import annotations
 import re
 
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, render_template
+from flask import Flask, abort, jsonify, render_template, request
 
 load_dotenv()
 
 from common.db import get_conn  # noqa: E402 — must come after load_dotenv
 from server.db import (  # noqa: E402
+    approve_segment,
     get_all_questions,
     get_article_segments,
     get_prev_next_article,
     get_question_articles,
+    get_segment_constraints,
     get_structural_formulas,
     get_translation_progress,
+    save_segment_text,
 )
 
 app = Flask(__name__)
@@ -167,10 +170,11 @@ def _question_view(ltree_path: str, st_locator: str):
 def _article_view(ltree_path: str, st_locator: str):
     with get_conn() as conn:
         segments = get_article_segments(conn, ltree_path)
+        if not segments:
+            abort(404)
         nav = get_prev_next_article(conn, ltree_path)
-
-    if not segments:
-        abort(404)
+        segment_ids = [s["segment_id"] for s in segments]
+        constraints = get_segment_constraints(conn, segment_ids)
 
     # Build arg/reply numbering maps.
     # arg_number[segment_id] = sequential 1-based index among args in this article.
@@ -205,6 +209,7 @@ def _article_view(ltree_path: str, st_locator: str):
         reply_number=reply_number,
         nav=nav_urls,
         formulas=_formulas,
+        constraints=constraints,
     )
 
 
@@ -214,6 +219,34 @@ def status():
     with get_conn() as conn:
         progress = get_translation_progress(conn)
     return jsonify(progress)
+
+
+@app.route("/api/approve/<int:segment_id>", methods=["POST"])
+def approve(segment_id: int):
+    """Flip a segment from needs_human → translated.
+
+    Returns {"ok": true} if the status was changed, {"ok": false} if the
+    segment was not in needs_human state (idempotent; never 4xx for that case).
+    """
+    with get_conn() as conn:
+        changed = approve_segment(conn, segment_id)
+    return jsonify({"ok": changed})
+
+
+@app.route("/api/edit/<int:segment_id>", methods=["POST"])
+def edit_segment(segment_id: int):
+    """Save a human-edited Slovak translation.
+
+    Body: {"text": "..."}. Returns {"ok": true} on success, 400 on empty text.
+    Always sets translation_status=translated.
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "empty text"}), 400
+    with get_conn() as conn:
+        save_segment_text(conn, segment_id, text)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

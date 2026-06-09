@@ -132,6 +132,9 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
 # ── Term lookup ───────────────────────────────────────────────────────────────
 
 _SUFFIX_RE = re.compile(r"\d+$")
+_PREAMBLE_RE = re.compile(
+    r"^(Ok|Dobre|Rozumiem|Sure|Here|Certainly|Respondeo)[,\s]", re.IGNORECASE
+)
 
 
 def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict]:
@@ -243,6 +246,31 @@ def translate_segment(
         fallback_draft = draft
         fallback_iter = iteration
 
+        # ── Preamble guard (cheapest check; runs before structure/terminology) ──
+        if _PREAMBLE_RE.match(draft):
+            log.warning("[PREAMBLE] segment_id=%d stripped preamble opener", segment_id)
+            prior_feedback = (
+                "Your draft began with a conversational opener. "
+                "Translate directly — no introductory phrases."
+            )
+            if prompt_log:
+                prompt_log.log_iteration(
+                    segment_id=segment_id,
+                    locator_path=locator,
+                    iteration=iteration,
+                    system_prompt=system_prompt,
+                    user_turn=user_turn,
+                    draft=draft,
+                    precheck_ok=False,
+                    precheck_failures=["Preamble opener detected"],
+                    reviewer_turn=None,
+                    verdict=None,
+                    notes=None,
+                    feedback=prior_feedback,
+                )
+            prior_draft = draft
+            continue  # back to translator; do NOT call R1
+
         structure_result = check_structure(seg, draft, conn)
         terminology_result = check_terminology_lemma(draft, constraints)
 
@@ -343,6 +371,11 @@ def translate_segment(
 
     write_segment_text(conn, segment_id, "sk", src_model, final_draft)
     update_translation_status(conn, segment_id, "needs_human")
+    notes_payload: dict = {}
+    if prior_feedback:
+        notes_payload["last_feedback"] = prior_feedback
+    if notes_payload:
+        write_reviewer_notes(conn, segment_id, notes_payload, chosen_iter or MAX_ITERATIONS)
     for term in locked_terms:
         update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
     conn.commit()

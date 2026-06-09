@@ -115,6 +115,47 @@ def write_header(worksheet, existing_values: list[list] | None = None) -> bool:
     return False
 
 
+def delete_stale_rows(
+    spreadsheet,
+    worksheet,
+    existing_map: dict[int, int],
+    db_sense_ids: set[int],
+) -> int:
+    """Delete sheet rows whose sense_id is no longer present in the DB.
+
+    Uses a single batchUpdate with deleteDimension requests (reverse-sorted so
+    that deleting a row doesn't shift the indices of later rows).
+    Returns the number of rows deleted.
+    """
+    stale_row_nums = sorted(
+        (row_num for sense_id, row_num in existing_map.items() if sense_id not in db_sense_ids),
+        reverse=True,
+    )
+    if not stale_row_nums:
+        return 0
+
+    sheet_id = worksheet.id
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": row_num - 1,   # 0-based inclusive
+                    "endIndex":   row_num,        # 0-based exclusive
+                }
+            }
+        }
+        for row_num in stale_row_nums
+    ]
+    # All requests must be sent in a single batchUpdate — the reverse-sort only
+    # keeps indices stable within one atomic call. Splitting across multiple calls
+    # would make each subsequent call's indices wrong after prior deletions shifted rows.
+    spreadsheet.batch_update({"requests": requests})
+
+    return len(stale_row_nums)
+
+
 def batch_write_rows(
     worksheet,
     db_rows: list[list],

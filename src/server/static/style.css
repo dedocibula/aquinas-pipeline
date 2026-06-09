@@ -259,3 +259,196 @@ main {
   background: #e2e3e5;
   color: #666;
 }
+
+/* --- needs_human row prominence --- */
+.row-needs-human td {
+  background: #fff8e1 !important;
+}
+
+/* --- Approve button --- */
+.btn-approve {
+  display: block;
+  margin-top: 0.4rem;
+  padding: 0.2em 0.6em;
+  font-size: 0.8rem;
+  font-family: sans-serif;
+  color: #2d6a35;
+  background: #d4edda;
+  border: 1px solid #a8d5b0;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-approve:hover:not(:disabled) {
+  background: #b8dfc2;
+}
+
+.btn-approve:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* --- Detail toggle button --- */
+.detail-toggle {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.1em 0.5em;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  color: #5a3e1b;
+  background: transparent;
+  border: 1px solid #c8bfa8;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.detail-toggle:hover {
+  background: #f0ebe0;
+}
+
+/* --- Detail panel --- */
+.detail-panel {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: #fafaf6;
+  border: 1px solid #d4c9b0;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: sans-serif;
+  line-height: 1.5;
+}
+
+.detail-section {
+  margin-bottom: 0.6rem;
+}
+
+.detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.detail-label {
+  display: block;
+  font-weight: bold;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin-bottom: 0.25rem;
+}
+
+.detail-none {
+  color: #aaa;
+  font-style: italic;
+}
+
+.term-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.term-list li {
+  margin-bottom: 0.15rem;
+}
+
+.term-list code {
+  font-size: 0.85em;
+  background: #f0ebe0;
+  padding: 0.05em 0.3em;
+  border-radius: 2px;
+}
+
+.term-context {
+  color: #888;
+  font-size: 0.82em;
+}
+
+.term-slovak {
+  color: #2c1a0e;
+}
+
+.detail-meta {
+  color: #555;
+}
+
+.detail-failure {
+  color: #856404;
+  margin-top: 0.2rem;
+}
+
+.detail-approved-notes {
+  color: #2d6a35;
+  margin-top: 0.2rem;
+  font-style: italic;
+}
+
+/* ── Edit / Save / Cancel ─────────────────────────────────────────────────── */
+
+.btn-edit {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  margin-top: 6px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #f5f5f5;
+  cursor: pointer;
+  color: #555;
+}
+
+.btn-edit:hover {
+  background: #e8e8e8;
+  border-color: #999;
+}
+
+.slovak-edit {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: inherit;
+  margin-top: 4px;
+  padding: 6px;
+  border: 1px solid #aac;
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.btn-save {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border: 1px solid #2e7d32;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  cursor: pointer;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #c8e6c9;
+}
+
+.btn-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-cancel {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #f5f5f5;
+  color: #555;
+  cursor: pointer;
+}
+
+.btn-cancel:hover {
+  background: #e8e8e8;
+}

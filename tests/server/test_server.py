@@ -216,3 +216,118 @@ def test_status_endpoint_returns_progress_keys(client):
     assert "pending"     in data
     assert "translated"  in data
     assert "needs_human" in data
+
+
+# ---------------------------------------------------------------------------
+# server.db unit tests: save_segment_text and approve_segment
+# ---------------------------------------------------------------------------
+
+
+def _make_db_conn(fetchone_side_effect=None, rowcount=1):
+    """Return a mock psycopg2 connection with a cursor stub."""
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.__enter__ = MagicMock(return_value=cursor)
+    cursor.__exit__ = MagicMock(return_value=False)
+    cursor.rowcount = rowcount
+    if fetchone_side_effect is not None:
+        cursor.fetchone.side_effect = fetchone_side_effect
+    else:
+        cursor.fetchone.return_value = (42,)  # default human source_id = 42
+    conn.cursor.return_value = cursor
+    return conn, cursor
+
+
+def test_save_segment_text_upserts_and_updates_status():
+    """save_segment_text inserts into segment_text and updates translation_status."""
+    from server.db import save_segment_text
+
+    conn, cursor = _make_db_conn()
+    # First fetchone: segment existence check returns a row (segment exists, not pending)
+    cursor.fetchone.side_effect = [(1,), None]
+    with patch("server.db.source_id", return_value=42):
+        result = save_segment_text(conn, segment_id=7, text="Preložený text.")
+
+    assert result is True
+    calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
+    assert any("INSERT INTO segment_text" in c for c in calls)
+    assert any("UPDATE segment SET translation_status" in c for c in calls)
+    # Does NOT call conn.commit() — caller's context manager handles it
+    conn.commit.assert_not_called()
+
+
+def test_save_segment_text_returns_false_for_nonexistent_or_pending_segment():
+    """save_segment_text returns False when segment is missing or pending."""
+    from server.db import save_segment_text
+
+    conn, cursor = _make_db_conn()
+    # Existence check returns None → segment not found or pending
+    cursor.fetchone.return_value = None
+    result = save_segment_text(conn, segment_id=999, text="text")
+    assert result is False
+
+
+def test_save_segment_text_raises_when_human_source_missing():
+    """save_segment_text raises RuntimeError when 'human' source is absent."""
+    from server.db import save_segment_text
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchone.return_value = (1,)  # segment exists
+    with patch("server.db.source_id", side_effect=RuntimeError("Source 'human' not found")):
+        with pytest.raises(RuntimeError, match="Source 'human' not found"):
+            save_segment_text(conn, segment_id=7, text="text")
+
+
+def test_approve_segment_returns_true_when_updated():
+    """approve_segment returns True when rowcount > 0."""
+    from server.db import approve_segment
+
+    conn, cursor = _make_db_conn(rowcount=1)
+    result = approve_segment(conn, segment_id=5)
+
+    assert result is True
+    conn.commit.assert_not_called()  # commit handled by get_conn() context manager
+
+
+def test_approve_segment_returns_false_when_not_needs_human():
+    """approve_segment returns False when segment is not in needs_human state."""
+    from server.db import approve_segment
+
+    conn, cursor = _make_db_conn(rowcount=0)
+    result = approve_segment(conn, segment_id=5)
+
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# /api/edit endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_edit_segment_returns_ok(client):
+    """POST /api/edit/<id> with valid text returns {"ok": true}."""
+    with patch("server.app.save_segment_text", return_value=True) as mock_save:
+        resp = client.post(
+            "/api/edit/42",
+            json={"text": "Opravený text."},
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    mock_save.assert_called_once()
+    _, seg_id, text = mock_save.call_args[0]
+    assert seg_id == 42
+    assert text == "Opravený text."
+
+
+def test_edit_segment_rejects_empty_text(client):
+    """POST /api/edit/<id> with empty text returns 400."""
+    resp = client.post("/api/edit/42", json={"text": "   "}, content_type="application/json")
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_edit_segment_rejects_missing_body(client):
+    """POST /api/edit/<id> with no body returns 400."""
+    resp = client.post("/api/edit/42", content_type="application/json")
+    assert resp.status_code == 400

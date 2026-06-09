@@ -11,6 +11,8 @@ from __future__ import annotations
 import psycopg2
 import psycopg2.extras
 
+from common.db import source_id
+
 
 def get_all_questions(conn: psycopg2.extensions.connection) -> list[dict]:
     """Return distinct question-level locator paths (depth 2, e.g. 'I.q1').
@@ -168,6 +170,113 @@ def get_translation_progress(conn: psycopg2.extensions.connection) -> dict:
         "translated":  int(row[1]),
         "needs_human": int(row[2]),
     }
+
+
+def get_segment_constraints(
+    conn: psycopg2.extensions.connection,
+    segment_ids: list[int],
+) -> dict[int, list[dict]]:
+    """Return approved term constraints used for each segment.
+
+    Joins term_usage → glossary_sense (status='approved') → sense_rendering (lang='sk')
+    → glossary_term to surface the Latin lemma and optional context_label.
+
+    Returns a dict keyed by segment_id; each value is a list of dicts with keys
+    ``latin_lemma``, ``slovak``, ``context_label``.
+    Missing segment_ids are not included (caller treats absence as empty list).
+    """
+    if not segment_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(segment_ids))
+    sql = f"""
+        SELECT DISTINCT ON (tu.segment_id, gs.sense_id)
+            tu.segment_id,
+            gt.latin_lemma,
+            sr.content        AS slovak,
+            gs.context_label
+        FROM term_usage tu
+        JOIN glossary_sense  gs ON gs.sense_id  = tu.sense_id
+        JOIN glossary_term   gt ON gt.term_id   = gs.term_id
+        JOIN sense_rendering sr ON sr.sense_id  = gs.sense_id
+        JOIN source           s ON s.source_id  = sr.source_id
+        WHERE tu.segment_id IN ({placeholders})
+          AND gs.status = 'approved'
+          AND sr.lang   = 'sk'
+        ORDER BY tu.segment_id, gs.sense_id, s.authority_rank
+    """
+    result: dict[int, list[dict]] = {}
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, segment_ids)
+        for row in cur.fetchall():
+            sid = row["segment_id"]
+            result.setdefault(sid, []).append(
+                {
+                    "latin_lemma":   row["latin_lemma"],
+                    "slovak":        row["slovak"],
+                    "context_label": row["context_label"],
+                }
+            )
+    return result
+
+
+def approve_segment(
+    conn: psycopg2.extensions.connection,
+    segment_id: int,
+) -> bool:
+    """Flip translation_status from 'needs_human' to 'translated'.
+
+    Returns True if the row was updated, False if it was not in needs_human state
+    (idempotent; no error raised for other statuses).
+    """
+    sql = """
+        UPDATE segment
+        SET translation_status = 'translated'
+        WHERE segment_id = %s
+          AND translation_status = 'needs_human'
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (segment_id,))
+        updated = cur.rowcount
+    return updated > 0
+
+
+def save_segment_text(
+    conn: psycopg2.extensions.connection,
+    segment_id: int,
+    text: str,
+) -> bool:
+    """Upsert Slovak segment text from the human source; set status=translated.
+
+    Returns True always. Does NOT commit — caller's get_conn() handles commit.
+    Raises RuntimeError if the 'human' source row is missing.
+    """
+    with conn.cursor() as cur:
+        # Verify the segment exists before touching segment_text.
+        cur.execute(
+            "SELECT 1 FROM segment WHERE segment_id = %s AND translation_status != 'pending'",
+            (segment_id,),
+        )
+        if cur.fetchone() is None:
+            # Covers both non-existent segment_id and pending segments (no UI path
+            # renders the Edit button for pending rows, so this is an API misuse).
+            return False
+
+        human_src_id = source_id(conn, "human")
+        cur.execute(
+            """
+            INSERT INTO segment_text (segment_id, lang, content, source_id)
+            VALUES (%s, 'sk', %s, %s)
+            ON CONFLICT (segment_id, lang, source_id) DO UPDATE
+                SET content = EXCLUDED.content
+            """,
+            (segment_id, text, human_src_id),
+        )
+        cur.execute(
+            "UPDATE segment SET translation_status = 'translated' WHERE segment_id = %s",
+            (segment_id,),
+        )
+    return True
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:

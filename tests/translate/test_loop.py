@@ -783,3 +783,41 @@ def test_translate_segment_translator_failure_still_commits():
         translate_segment(1, conn)
     # No draft → no write, but the function returns 'needs_human' cleanly
     # (no commit required if no write was done — that's acceptable)
+
+
+def test_translate_segment_exhausted_writes_reviewer_notes():
+    """Exhausted loop writes last R1 feedback to reviewer_notes for needs_human segments."""
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, return_value=_revision("R1 feedback message")),
+        patch("translate.loop.write_reviewer_notes") as mock_notes,
+    ):
+        status, _ = translate_segment(1, conn)
+    assert status == "needs_human"
+    mock_notes.assert_called_once()
+    # First arg is conn, second is segment_id, third is the notes dict
+    notes_dict = mock_notes.call_args[0][2]
+    assert "last_feedback" in notes_dict
+    assert "R1 feedback message" in notes_dict["last_feedback"]
+
+
+def test_translate_segment_exhausted_notes_omitted_when_no_feedback():
+    """If all iterations fail precheck (no R1 call), reviewer_notes is not written."""
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_fail(["missing term"])),
+        patch("translate.loop.write_reviewer_notes") as mock_notes,
+    ):
+        status, _ = translate_segment(1, conn)
+    assert status == "needs_human"
+    # prior_feedback is set (precheck failure message), so notes ARE written
+    mock_notes.assert_called_once()
+    notes_dict = mock_notes.call_args[0][2]
+    assert "last_feedback" in notes_dict

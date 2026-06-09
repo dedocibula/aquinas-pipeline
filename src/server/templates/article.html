@@ -74,23 +74,55 @@
         {% set label = etype %}
       {% endif %}
 
-      {# Status badge #}
+      {# Translation status #}
       {% set ts = seg.translation_status %}
+      {% set needs_human = (ts == 'needs_human') %}
+
+      {# Status badge #}
       {% if ts == 'translated' %}
-        {% set badge_html = '<span class="badge badge-ok" title="translated">&#10003;</span>' %}
-      {% elif ts == 'needs_human' %}
-        {% set badge_html = '<span class="badge badge-warn" title="needs review">&#9888;</span>' %}
+        {% set badge_class = 'badge-ok' %}
+        {% set badge_char  = '&#10003;' %}
+        {% set badge_title = 'translated' %}
+      {% elif needs_human %}
+        {% set badge_class = 'badge-warn' %}
+        {% set badge_char  = '&#9888;' %}
+        {% set badge_title = 'needs review' %}
       {% else %}
-        {% set badge_html = '<span class="badge badge-pending" title="pending">&#8230;</span>' %}
+        {% set badge_class = 'badge-pending' %}
+        {% set badge_char  = '&#8230;' %}
+        {% set badge_title = 'pending' %}
       {% endif %}
 
-      <tr class="row-{{ etype }}">
+      {# Parse reviewer_notes safely #}
+      {# reviewer_notes is JSONB — may be a dict, a list, or None #}
+      {% set notes = seg.reviewer_notes %}
+      {% set iter_count = None %}
+      {% set failure_reason = None %}
+      {% set approved_with_notes = None %}
+      {# reviewer_notes schema: {"iteration": N, "raw": "..."} for APPROVED_WITH_NOTES;
+         {"iteration": N, "last_feedback": "..."} for needs_human exhausted path #}
+      {% if notes is mapping %}
+        {% if 'iteration' in notes %}
+          {% set iter_count = notes['iteration'] %}
+        {% endif %}
+        {% if 'raw' in notes and notes['raw'] %}
+          {% set approved_with_notes = notes['raw'] %}
+        {% endif %}
+        {% if 'last_feedback' in notes and notes['last_feedback'] %}
+          {% set failure_reason = notes['last_feedback'] %}
+        {% endif %}
+      {% endif %}
+
+      {# Segment constraints #}
+      {% set seg_constraints = constraints.get(seg.segment_id, []) %}
+
+      {# Detail panel ID — unique per segment #}
+      {% set panel_id = 'detail-' ~ seg.segment_id %}
+
+      <tr class="row-{{ etype }}{% if needs_human %} row-needs-human{% endif %}"
+          data-segment-id="{{ seg.segment_id }}">
         <td class="col-label">
-          {% if seg.reviewer_notes %}
-            <abbr title="{{ seg.reviewer_notes }}">{{ label }} &#8505;</abbr>
-          {% else %}
-            {{ label }}
-          {% endif %}
+          {{ label }}
         </td>
         <td class="col-latin">
           <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
@@ -99,12 +131,84 @@
         </td>
         <td class="col-slovak slovak">
           {% if seg.slovak %}
-            {{ seg.slovak }}
+            <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
+            <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}"
+                      style="display:none" rows="5">{{ seg.slovak }}</textarea>
+            <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
+              <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
+              <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+            </div>
           {% else %}
             <em class="awaiting">— awaiting translation —</em>
           {% endif %}
+
+          {# Detail panel — shown for translated and needs_human segments #}
+          {% if seg.slovak and ts in ('translated', 'needs_human') %}
+          <button class="btn-edit" data-segment-id="{{ seg.segment_id }}"
+                  title="Edit translation">&#9998; Edit</button>
+          {% endif %}
+          {% if ts in ('translated', 'needs_human') %}
+            <button class="detail-toggle"
+                    data-target="{{ panel_id }}"
+                    aria-expanded="{{ 'true' if needs_human else 'false' }}"
+                    aria-controls="{{ panel_id }}">
+              &#9654; details
+            </button>
+            <div class="detail-panel" id="{{ panel_id }}"
+                 {% if not needs_human %}style="display:none"{% endif %}>
+
+              <div class="detail-section">
+                <span class="detail-label">Locked terms</span>
+                {% if seg_constraints %}
+                  <ul class="term-list">
+                    {% for c in seg_constraints %}
+                      <li>
+                        <code>{{ c.latin_lemma }}</code>
+                        {% if c.context_label %}
+                          <span class="term-context">({{ c.context_label }})</span>
+                        {% endif %}
+                        &rarr; <span class="term-slovak">{{ c.slovak }}</span>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <span class="detail-none">no term constraints</span>
+                {% endif %}
+              </div>
+
+              <div class="detail-section">
+                <span class="detail-label">Precheck / review notes</span>
+                {% if iter_count is not none %}
+                  <div class="detail-meta">Iterations: {{ iter_count }}</div>
+                {% endif %}
+                {% if needs_human and failure_reason %}
+                  <div class="detail-failure">Failure: {{ failure_reason }}</div>
+                {% endif %}
+                {% if approved_with_notes %}
+                  <div class="detail-approved-notes">{{ approved_with_notes }}</div>
+                {% endif %}
+                {% if iter_count is none and not failure_reason and not approved_with_notes %}
+                  {% if needs_human %}
+          <span class="detail-none">No feedback recorded — check pilot log</span>
+        {% else %}
+          <span class="detail-none">no notes</span>
+        {% endif %}
+                {% endif %}
+              </div>
+
+            </div>
+          {% endif %}
         </td>
-        <td class="col-status">{{ badge_html | safe }}</td>
+        <td class="col-status">
+          <span class="badge {{ badge_class }}"
+                data-badge="{{ seg.segment_id }}"
+                title="{{ badge_title }}">{{ badge_char | safe }}</span>
+          {% if needs_human %}
+            <button class="btn-approve"
+                    data-segment-id="{{ seg.segment_id }}"
+                    title="Approve this segment">&#10003; Approve</button>
+          {% endif %}
+        </td>
       </tr>
     {% else %}
       <tr>
@@ -115,10 +219,154 @@
 </table>
 
 <script>
+// ---------------------------------------------------------------------------
+// Reference language switcher
+// ---------------------------------------------------------------------------
 document.getElementById('ref-lang-select').addEventListener('change', function () {
   var lang = this.value;
   document.querySelectorAll('.ref-text').forEach(function (el) {
     el.style.display = el.dataset.lang === lang ? '' : 'none';
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Detail panel toggles
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.detail-toggle').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var targetId = btn.dataset.target;
+    var panel    = document.getElementById(targetId);
+    if (!panel) return;
+    var open = panel.style.display !== 'none';
+    if (open) {
+      panel.style.display = 'none';
+      btn.setAttribute('aria-expanded', 'false');
+      btn.innerHTML = '&#9654; details';
+    } else {
+      panel.style.display = '';
+      btn.setAttribute('aria-expanded', 'true');
+      btn.innerHTML = '&#9660; details';
+    }
+  });
+
+  // Sync initial button label for panels that start open (needs_human)
+  var targetId = btn.dataset.target;
+  var panel    = document.getElementById(targetId);
+  if (panel && panel.style.display !== 'none') {
+    btn.innerHTML = '&#9660; details';
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Approve button
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.btn-approve').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var segId = btn.dataset.segmentId;
+    btn.disabled = true;
+    btn.textContent = 'Approving…';
+
+    fetch('/api/approve/' + segId, { method: 'POST' })
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          // Update badge
+          var badge = document.querySelector('[data-badge="' + segId + '"]');
+          if (badge) {
+            badge.className = 'badge badge-ok';
+            badge.innerHTML = '&#10003;';
+            badge.title     = 'translated';
+          }
+          // Remove amber background from the row
+          var row = btn.closest('tr');
+          if (row) {
+            row.classList.remove('row-needs-human');
+          }
+          // Remove the approve button itself
+          btn.remove();
+        } else {
+          btn.disabled    = false;
+          btn.textContent = '✓ Approve';
+          alert('Could not approve segment ' + segId + ' (not in needs_human state).');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled    = false;
+        btn.textContent = '✓ Approve';
+        alert('Approve failed — server error. Check console for details.');
+        console.error('Approve error:', err);
+      });
+  });
+});
+
+// Edit / Save / Cancel
+document.querySelectorAll('.btn-edit').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var segId = btn.dataset.segmentId;
+    document.getElementById('text-' + segId).style.display    = 'none';
+    document.getElementById('edit-' + segId).style.display    = '';
+    document.getElementById('editbtn-' + segId).style.display = '';
+    btn.style.display = 'none';
+  });
+});
+
+document.querySelectorAll('.btn-cancel').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var segId = btn.dataset.segmentId;
+    document.getElementById('text-' + segId).style.display    = '';
+    document.getElementById('edit-' + segId).style.display    = 'none';
+    document.getElementById('editbtn-' + segId).style.display = 'none';
+    var editBtn = document.querySelector('.btn-edit[data-segment-id="' + segId + '"]');
+    if (editBtn) editBtn.style.display = '';
+  });
+});
+
+document.querySelectorAll('.btn-save').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var segId    = btn.dataset.segmentId;
+    var textarea = document.getElementById('edit-' + segId);
+    var text     = textarea.value.trim();
+    if (!text) return;
+    btn.disabled    = true;
+    btn.textContent = 'Saving…';
+    fetch('/api/edit/' + segId, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: text}),
+    })
+    .then(function (resp) { return resp.json(); })
+    .then(function (data) {
+      if (data.ok) {
+        var textSpan = document.getElementById('text-' + segId);
+        textSpan.textContent = text;
+        textSpan.style.display = '';
+        textarea.style.display = 'none';
+        document.getElementById('editbtn-' + segId).style.display = 'none';
+        var editBtn = document.querySelector('.btn-edit[data-segment-id="' + segId + '"]');
+        if (editBtn) editBtn.style.display = '';
+        // If row was needs_human, flip badge and remove amber
+        var badge = document.querySelector('[data-badge="' + segId + '"]');
+        if (badge && badge.classList.contains('badge-warn')) {
+          badge.className  = 'badge badge-ok';
+          badge.innerHTML  = '&#10003;';
+          badge.title      = 'translated';
+          var row = btn.closest('tr');
+          if (row) row.classList.remove('row-needs-human');
+          var approveBtn = document.querySelector('.btn-approve[data-segment-id="' + segId + '"]');
+          if (approveBtn) approveBtn.remove();
+        }
+      } else {
+        alert('Save failed: ' + (data.error || 'unknown error'));
+      }
+      btn.disabled    = false;
+      btn.textContent = 'Save';
+    })
+    .catch(function (err) {
+      alert('Save failed — server error. Check console for details.');
+      console.error('Edit error:', err);
+      btn.disabled    = false;
+      btn.textContent = 'Save';
+    });
   });
 });
 </script>
