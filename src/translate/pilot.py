@@ -425,7 +425,7 @@ def _write_report(
     # ── Report lines ────────────────────────────────────────────────────────
     mode_label = "TITLES RUN SUMMARY" if titles_mode else "PILOT RUN SUMMARY"
     scope_line = (
-        f"  Scope:             all question_title + article_title (full corpus)"
+        "  Scope:             all question_title + article_title (full corpus)"
         if titles_mode
         else f"  Pilot questions:   {', '.join(_PILOT_QUESTIONS)}"
     )

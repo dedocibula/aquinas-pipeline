@@ -9,7 +9,6 @@ import io
 from unittest.mock import MagicMock
 
 import pytest
-
 from bs4 import BeautifulSoup
 
 from ingest.parser_bahounek import (
