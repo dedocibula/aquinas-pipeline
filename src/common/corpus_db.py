@@ -23,7 +23,7 @@ def get_all_article_locators(
             FROM segment
             WHERE work_id = %s
               AND nlevel(locator_path) >= 3
-            ORDER BY subpath(locator_path, 0, 3)
+            ORDER BY prefix
             """,
             (work_id,),
         )
