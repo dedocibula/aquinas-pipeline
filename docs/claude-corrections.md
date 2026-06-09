@@ -1,6 +1,11 @@
 # Claude Corrections Log
 Read this file at the start of every session before doing any work.
 
+### [Pilot translation: always run with parallel workers]
+- **Mistake:** Ran `uv run python -m translate.pilot` without setting `PILOT_WORKERS`, defaulting to 1 worker — extremely slow for batches of 40–80 segments.
+- **Correction:** Always set `PILOT_WORKERS=10` (or higher) when running the pilot. Example: `PILOT_FULL=1 PILOT_WORKERS=10 uv run python -m translate.pilot`
+- **Rule:** Never run the pilot with the default single worker. Always pass `PILOT_WORKERS=8` at minimum.
+
 ### [Parallel subagent dispatch for independent steps]
 - **Approach:** When a milestone has multiple independent steps (e.g., Steps 2/3/6 after schema migration, or Steps 4/5 after the Latin parser), dispatch them as concurrent subagents rather than running sequentially.
 - **Why:** Independent steps share no data dependencies — running them in parallel saves wall-clock time and keeps context windows focused.

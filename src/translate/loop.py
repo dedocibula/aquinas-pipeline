@@ -20,9 +20,8 @@ from translate.prechecks import check_structure, check_terminology_lemma
 from translate.prompt_logger import PromptLogger
 from translate.reviewer import build_reviewer_turn, call_reviewer_r1
 from translate.translator import (
-    build_user_turn,
+    build_initial_messages,
     call_translator_v3,
-    load_translator_system_prompt,
 )
 
 load_dotenv()
@@ -218,8 +217,12 @@ def translate_segment(
 
     src_model = source_id(conn, "model")
 
-    prior_draft: str | None = None
-    prior_feedback: str | None = None
+    # Multi-turn message history.  Starts as [system, user]; on each retry the
+    # caller appends [assistant: prior_draft, user: feedback] so the model sees
+    # its own output as a real assistant turn and the correction as a real user turn.
+    messages: list[dict] = build_initial_messages(seg, translator_constraints)
+
+    last_feedback: str | None = None            # most-recent feedback; for reviewer_notes on exhausted path
     precheck_passing_draft: str | None = None   # last draft that cleared ALL pre-checks
     precheck_passing_iter: int | None = None
     fallback_draft: str | None = None           # any draft produced; absolute last resort
@@ -228,28 +231,22 @@ def translate_segment(
     locator = seg.get("locator_path", "")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
-        # Build prompts for logging. load_translator_system_prompt returns a cached string;
-        # build_user_turn is deterministic given the same arguments. call_translator_v3
-        # calls them again internally, so the logged strings match what is sent.
-        system_prompt = load_translator_system_prompt() if prompt_log else ""
-        user_turn = build_user_turn(seg, translator_constraints, prior_draft, prior_feedback) if prompt_log else ""
+        # For logging: the system prompt is always messages[0]; the user turn is
+        # always the last message (initial request on iter 1, feedback on retries).
+        system_prompt = messages[0]["content"] if prompt_log else ""
+        user_turn = messages[-1]["content"] if prompt_log else ""
 
         try:
-            draft, t_usage = call_translator_v3(
-                seg, translator_constraints, prior_draft, prior_feedback
-            )
+            draft, t_usage = call_translator_v3(messages)
             usages.append(t_usage)
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d translator error: %s", segment_id, iteration, exc)
             break
 
-        fallback_draft = draft
-        fallback_iter = iteration
-
         # ── Preamble guard (cheapest check; runs before structure/terminology) ──
         if _PREAMBLE_RE.match(draft):
             log.warning("[PREAMBLE] segment_id=%d stripped preamble opener", segment_id)
-            prior_feedback = (
+            feedback = (
                 "Your draft began with a conversational opener. "
                 "Translate directly — no introductory phrases."
             )
@@ -266,17 +263,23 @@ def translate_segment(
                     reviewer_turn=None,
                     verdict=None,
                     notes=None,
-                    feedback=prior_feedback,
+                    feedback=feedback,
                 )
-            prior_draft = draft
+            last_feedback = feedback
+            messages.append({"role": "assistant", "content": draft})
+            messages.append({"role": "user", "content": feedback})
             continue  # back to translator; do NOT call R1
+
+        # Preamble-free draft is eligible as fallback (written on exhausted path)
+        fallback_draft = draft
+        fallback_iter = iteration
 
         structure_result = check_structure(seg, draft, conn)
         terminology_result = check_terminology_lemma(draft, constraints)
 
         if not structure_result.ok or not terminology_result.ok:
             all_failures = structure_result.failures + terminology_result.failures
-            prior_feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
+            feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
                 f"  - {f}" for f in all_failures
             )
             if prompt_log:
@@ -292,9 +295,11 @@ def translate_segment(
                     reviewer_turn=None,
                     verdict=None,
                     notes=None,
-                    feedback=prior_feedback,
+                    feedback=feedback,
                 )
-            prior_draft = draft
+            last_feedback = feedback
+            messages.append({"role": "assistant", "content": draft})
+            messages.append({"role": "user", "content": feedback})
             continue  # back to translator; do NOT call R1
 
         precheck_passing_draft = draft
@@ -350,8 +355,9 @@ def translate_segment(
                 )
             return "translated", usages
 
-        prior_feedback = review.feedback
-        prior_draft = draft
+        last_feedback = review.feedback or ""
+        messages.append({"role": "assistant", "content": draft})
+        messages.append({"role": "user", "content": last_feedback})
 
     # Exhausted — write precheck_passing_draft (last to clear all pre-checks) or fall back
     final_draft = precheck_passing_draft if precheck_passing_draft is not None else fallback_draft
@@ -372,8 +378,8 @@ def translate_segment(
     write_segment_text(conn, segment_id, "sk", src_model, final_draft)
     update_translation_status(conn, segment_id, "needs_human")
     notes_payload: dict = {}
-    if prior_feedback:
-        notes_payload["last_feedback"] = prior_feedback
+    if last_feedback:
+        notes_payload["last_feedback"] = last_feedback
     if notes_payload:
         write_reviewer_notes(conn, segment_id, notes_payload, chosen_iter or MAX_ITERATIONS)
     for term in locked_terms:

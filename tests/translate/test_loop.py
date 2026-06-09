@@ -515,10 +515,13 @@ def test_translate_segment_precheck_failure_includes_failures_in_feedback():
     ):
         translate_segment(1, conn)
 
-    # Second call should have prior_feedback containing the failure text
+    # Second call: messages list ends with a user feedback turn
     assert len(translator_calls) == 2
-    _, _, prior_draft_arg, prior_feedback_arg = translator_calls[1]
-    assert "missing formula" in prior_feedback_arg
+    (messages,) = translator_calls[1]
+    last_user_content = next(
+        m["content"] for m in reversed(messages) if m["role"] == "user"
+    )
+    assert "missing formula" in last_user_content
 
 
 def test_translate_segment_terminology_failure_included_in_feedback():
@@ -540,8 +543,11 @@ def test_translate_segment_terminology_failure_included_in_feedback():
         translate_segment(1, conn)
 
     assert len(translator_calls) == 2
-    _, _, _, prior_feedback_arg = translator_calls[1]
-    assert "viera" in prior_feedback_arg
+    (messages,) = translator_calls[1]
+    last_user_content = next(
+        m["content"] for m in reversed(messages) if m["role"] == "user"
+    )
+    assert "viera" in last_user_content
 
 
 # ── translate_segment — REVISION_NEEDED path ─────────────────────────────────
@@ -610,8 +616,11 @@ def test_translate_segment_revision_feedback_passed_to_translator():
         translate_segment(1, conn)
 
     assert len(translator_calls) == 2
-    _, _, _, prior_feedback_arg = translator_calls[1]
-    assert "fix semantics" in prior_feedback_arg
+    (messages,) = translator_calls[1]
+    last_user_content = next(
+        m["content"] for m in reversed(messages) if m["role"] == "user"
+    )
+    assert "fix semantics" in last_user_content
 
 
 # ── translate_segment — translator error ─────────────────────────────────────

@@ -50,6 +50,11 @@ _CONSTRAINTS_WITH_LABEL = [
 ]
 
 
+def _initial_messages(seg=None, constraints=None):
+    from translate.translator import build_initial_messages
+    return build_initial_messages(seg or _MINIMAL_SEG, constraints or _CONSTRAINTS)
+
+
 # ── TestCallTranslatorV3 ───────────────────────────────────────────────────────
 
 class TestCallTranslatorV3:
@@ -59,7 +64,7 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response(expected)
             from translate.translator import call_translator_v3
-            draft, usage = call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None)
+            draft, usage = call_translator_v3(_initial_messages())
         assert isinstance(draft, str)
         assert draft == expected
         assert usage.cost_usd > 0
@@ -69,7 +74,7 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, [], None, None)
+            call_translator_v3(_initial_messages(_MINIMAL_SEG, []))
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
@@ -83,7 +88,7 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, _CONSTRAINTS, None, None)
+            call_translator_v3(_initial_messages())
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
@@ -97,37 +102,38 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(_MINIMAL_SEG, [], None, None)
+            call_translator_v3(_initial_messages(_MINIMAL_SEG, []))
 
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
         user_msg = next(m for m in messages if m["role"] == "user")
         assert _MINIMAL_SEG["latin"] in user_msg["content"]
 
-    def test_revision_user_turn_contains_prior_draft_and_feedback(self, monkeypatch):
+    def test_multi_turn_retry_has_assistant_and_user_turns(self, monkeypatch):
+        """On retry, the messages list must contain assistant + new user feedback turns."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         prior_draft = "Zdá sa, že Boh nejestvuje."
         prior_feedback = "Použite 'existovať' namiesto 'jestvovať'."
+        msgs = _initial_messages()
+        msgs.append({"role": "assistant", "content": prior_draft})
+        msgs.append({"role": "user", "content": prior_feedback})
         with patch("translate.translator.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Revidovaný preklad.")
             from translate.translator import call_translator_v3
-            call_translator_v3(
-                _MINIMAL_SEG, [], prior_draft, prior_feedback
-            )
+            call_translator_v3(msgs)
 
         call_args = mock_post.call_args
-        messages = call_args.kwargs["json"]["messages"]
-        user_msg = next(m for m in messages if m["role"] == "user")
-        assert "PRIOR DRAFT:" in user_msg["content"]
-        assert prior_draft in user_msg["content"]
-        assert "REVIEWER FEEDBACK" in user_msg["content"]
-        assert prior_feedback in user_msg["content"]
+        sent_messages = call_args.kwargs["json"]["messages"]
+        roles = [m["role"] for m in sent_messages]
+        assert roles == ["system", "user", "assistant", "user"]
+        assert sent_messages[2]["content"] == prior_draft
+        assert sent_messages[3]["content"] == prior_feedback
 
     def test_raises_runtime_error_when_api_key_missing(self, monkeypatch):
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         from translate.translator import call_translator_v3
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
-            call_translator_v3(_MINIMAL_SEG, [], None, None)
+            call_translator_v3(_initial_messages())
 
     def test_raises_runtime_error_on_http_401(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "bad-key")
@@ -135,7 +141,7 @@ class TestCallTranslatorV3:
             mock_post.return_value = _fake_response("", status_code=401)
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="401"):
-                call_translator_v3(_MINIMAL_SEG, [], None, None)
+                call_translator_v3(_initial_messages())
 
     def test_raises_runtime_error_on_empty_choices(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -145,40 +151,40 @@ class TestCallTranslatorV3:
         with patch("translate.translator.requests.post", return_value=empty_choices):
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="no choices"):
-                call_translator_v3(_MINIMAL_SEG, [], None, None)
+                call_translator_v3(_initial_messages())
 
 
-# ── TestBuildUserTurn — context_label qualifier ───────────────────────────────
+# ── TestBuildInitialUserTurn — context_label qualifier ───────────────────────
 
-class TestBuildUserTurnContextLabel:
+class TestBuildInitialUserTurnContextLabel:
     def test_no_context_label_emits_plain_constraint(self):
-        from translate.translator import build_user_turn
-        turn = build_user_turn(_MINIMAL_SEG, _CONSTRAINTS, None, None)
+        from translate.translator import build_initial_user_turn
+        turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS)
         assert "Deus → Boh" in turn
         assert "[" not in turn.split("HARD TERM CONSTRAINTS")[1].split("CZECH")[0]
 
     def test_context_label_emits_qualifier(self):
-        from translate.translator import build_user_turn
-        turn = build_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL, None, None)
+        from translate.translator import build_initial_user_turn
+        turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL)
         assert "gratiam [sanctifying grace] → milosť" in turn
 
     def test_none_context_label_no_qualifier(self):
-        from translate.translator import build_user_turn
-        turn = build_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL, None, None)
+        from translate.translator import build_initial_user_turn
+        turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL)
         assert "rationem → rozum" in turn
         assert "rationem [" not in turn
 
     def test_empty_string_context_label_no_qualifier(self):
-        from translate.translator import build_user_turn
+        from translate.translator import build_initial_user_turn
         constraints = [{"latin_lemma": "ratio", "required_slovak": "rozum", "context_label": ""}]
-        turn = build_user_turn(_MINIMAL_SEG, constraints, None, None)
+        turn = build_initial_user_turn(_MINIMAL_SEG, constraints)
         assert "ratio → rozum" in turn
         assert "ratio [" not in turn
 
     def test_missing_context_label_key_no_qualifier(self):
-        from translate.translator import build_user_turn
+        from translate.translator import build_initial_user_turn
         constraints = [{"latin_lemma": "ratio", "required_slovak": "rozum"}]
-        turn = build_user_turn(_MINIMAL_SEG, constraints, None, None)
+        turn = build_initial_user_turn(_MINIMAL_SEG, constraints)
         assert "ratio → rozum" in turn
 
 

@@ -1,8 +1,10 @@
 """DeepSeek V3 translator for Aquinas Summa Theologiae segments.
 
-Builds a two-message prompt (stable system + per-segment user turn) so that the
-system message is eligible for DeepSeek prompt caching.  Returns the Slovak draft
-text; raises RuntimeError loudly on all failure modes.
+Builds a multi-message prompt so the system message is eligible for DeepSeek
+prompt caching on iteration 1.  On retry iterations the caller appends
+[assistant, user] turns to the messages list before calling again — the model
+now sees its own prior draft as a real assistant turn and the feedback as a
+real user correction, rather than both flattened into one big user message.
 """
 
 from __future__ import annotations
@@ -43,25 +45,16 @@ def load_translator_system_prompt() -> str:
 
 
 def call_translator_v3(
-    seg: dict,
-    constraints: list[dict],
-    prior_draft: str | None,
-    prior_feedback: str | None,
+    messages: list[dict],
 ) -> tuple[str, UsageInfo]:
-    """Call DeepSeek V3 to produce a Slovak translation draft for one segment.
+    """Call DeepSeek V3 with the given messages list and return (draft, usage).
 
-    Args:
-        seg: Row from v_segment view — must contain keys: segment_id, locator_path,
-             element_type, latin, czech, english.
-        constraints: List of {latin_lemma, required_slovak} dicts — hard term constraints.
-        prior_draft: Previous Slovak draft, or None for first-pass translation.
-        prior_feedback: Reviewer feedback addressing the prior draft, or None.
-
-    Returns:
-        Tuple of (non-empty Slovak draft string, UsageInfo with token counts and cost).
+    The caller is responsible for building the messages list.  For a first-pass
+    translation use build_initial_messages(); for retries append
+    [{"role": "assistant", ...}, {"role": "user", ...}] to the same list.
 
     Raises:
-        RuntimeError: On missing API key, 4xx/5xx HTTP errors, empty response.
+        RuntimeError: On missing API key, 4xx/5xx HTTP errors, or empty response.
     """
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
@@ -69,9 +62,6 @@ def call_translator_v3(
             "DEEPSEEK_API_KEY is not set. "
             "Export it or add it to .env before running the translator."
         )
-
-    system_content = load_translator_system_prompt()
-    user_content = build_user_turn(seg, constraints, prior_draft, prior_feedback)
 
     try:
         resp = requests.post(
@@ -82,10 +72,7 @@ def call_translator_v3(
             },
             json={
                 "model": _DEEPSEEK_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": user_content},
-                ],
+                "messages": messages,
                 "temperature": 0.3,
                 "max_tokens": 2048,
             },
@@ -95,45 +82,33 @@ def call_translator_v3(
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else None
         raise RuntimeError(
-            f"DeepSeek translator HTTP {status} for segment_id={seg.get('segment_id')}."
+            f"DeepSeek translator HTTP {status}."
         ) from exc
 
     data = resp.json()
     choices = data.get("choices") or []
     if not choices:
-        raise RuntimeError(
-            f"DeepSeek translator returned no choices for segment_id={seg.get('segment_id')}."
-        )
+        raise RuntimeError("DeepSeek translator returned no choices.")
     draft = choices[0]["message"]["content"].strip()
     if not draft:
-        raise RuntimeError(
-            f"DeepSeek translator returned empty content for segment_id={seg.get('segment_id')}."
-        )
+        raise RuntimeError("DeepSeek translator returned empty content.")
     usage = extract_usage(_DEEPSEEK_MODEL, data)
     return draft, usage
 
 
-# ── Prompt builder ────────────────────────────────────────────────────────────
+# ── Prompt builders ───────────────────────────────────────────────────────────
 
-def build_user_turn(
+def build_initial_user_turn(
     seg: dict,
     constraints: list[dict],
-    prior_draft: str | None,
-    prior_feedback: str | None,
 ) -> str:
-    """Build the per-segment user turn (not cached)."""
-    parts: list[str] = []
+    """Build the first user message for a translation request.
 
-    # Revision block — prepended when a prior draft exists
-    if prior_draft is not None:
-        parts.append("PRIOR DRAFT:")
-        parts.append(prior_draft)
-        parts.append("")
-        parts.append("REVIEWER FEEDBACK — address each point:")
-        parts.append(prior_feedback or "")
-        parts.append("")
-        parts.append("---")
-        parts.append("")
+    Contains hard term constraints, Czech/English references, and the Latin
+    source.  Does not include prior drafts or feedback — those become
+    separate assistant/user turns in the messages list on retries.
+    """
+    parts: list[str] = []
 
     # Hard term constraints
     parts.append("HARD TERM CONSTRAINTS (verbatim, no exceptions):")
@@ -163,3 +138,11 @@ def build_user_turn(
     parts.append(seg.get("latin", ""))
 
     return "\n".join(parts)
+
+
+def build_initial_messages(seg: dict, constraints: list[dict]) -> list[dict]:
+    """Build the initial [system, user] messages list for a first-pass translation."""
+    return [
+        {"role": "system", "content": load_translator_system_prompt()},
+        {"role": "user", "content": build_initial_user_turn(seg, constraints)},
+    ]
