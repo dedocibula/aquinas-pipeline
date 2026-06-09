@@ -21,6 +21,7 @@ from server.db import (  # noqa: E402
     get_article_segments,
     get_prev_next_article,
     get_question_articles,
+    get_question_title_segment,
     get_segment_constraints,
     get_structural_formulas,
     get_translation_progress,
@@ -150,6 +151,11 @@ def text_view(st_locator: str):
 def _question_view(ltree_path: str, st_locator: str):
     with get_conn() as conn:
         articles = get_question_articles(conn, ltree_path)
+        title_seg = get_question_title_segment(conn, ltree_path)
+        title_constraints = (
+            get_segment_constraints(conn, [title_seg["segment_id"]])
+            if title_seg else {}
+        )
 
     if not articles:
         abort(404)
@@ -164,6 +170,8 @@ def _question_view(ltree_path: str, st_locator: str):
         question_title=_locator_to_title(ltree_path),
         st_locator=st_locator,
         articles=articles,
+        title_seg=title_seg,
+        title_constraints=title_constraints,
     )
 
 

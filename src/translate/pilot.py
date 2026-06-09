@@ -61,8 +61,8 @@ class SegmentStats:
 def fetch_pilot_segments(conn) -> list[dict]:
     """Return pending segments in Q1–Q6 that have Latin text, ordered by locator_path.
 
-    Structural segments (article_title, question_title) have no Latin text and
-    are excluded — they are not translatable content.
+    article_title segments have English only (no Latin) and are included via the
+    English fallback condition.
     """
     sql = f"""
         SELECT s.segment_id, s.locator_path::text, s.translation_status
@@ -71,7 +71,7 @@ def fetch_pilot_segments(conn) -> list[dict]:
           AND s.translation_status = 'pending'
           AND EXISTS (
               SELECT 1 FROM segment_text st
-              WHERE st.segment_id = s.segment_id AND st.lang = 'la'
+              WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
           )
         ORDER BY s.locator_path
     """
@@ -112,6 +112,29 @@ def fetch_all_pilot_segments(conn) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(sql, _PILOT_QUESTIONS)
         return [{"segment_id": r[0], "status": r[1]} for r in cur.fetchall()]
+
+
+def fetch_title_segments(conn) -> list[dict]:
+    """Return all pending question_title and article_title segments across the full corpus.
+
+    These have English text only (no Latin) so R1 review is skipped — one
+    translator call each, no reviewer cost.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT s.segment_id, s.locator_path::text, s.translation_status
+            FROM segment s
+            WHERE s.element_type IN ('question_title', 'article_title')
+              AND s.translation_status = 'pending'
+              AND EXISTS (
+                  SELECT 1 FROM segment_text st
+                  WHERE st.segment_id = s.segment_id AND st.lang = 'en'
+              )
+            ORDER BY s.locator_path
+            """
+        )
+        return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
 
 
 def fetch_segment_text_lengths(conn, segment_id: int) -> dict[str, int]:
@@ -175,11 +198,23 @@ def run_pilot() -> None:
     start = time.time()
     debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
     full_mode = os.environ.get("PILOT_FULL", "").strip() == "1"
+    titles_mode = os.environ.get("PILOT_TITLES", "").strip() == "1"
 
     with get_conn() as conn:
-        pending = fetch_pilot_segments(conn) if full_mode else fetch_debug_segments(conn)
+        if titles_mode:
+            pending = fetch_title_segments(conn)
+        elif full_mode:
+            pending = fetch_pilot_segments(conn)
+        else:
+            pending = fetch_debug_segments(conn)
 
-    if full_mode:
+    if titles_mode:
+        log.info(
+            "Titles mode: %d pending title segments (full corpus). Prompt log → %s",
+            len(pending),
+            debug_log_path,
+        )
+    elif full_mode:
         log.info(
             "Full pilot: %d pending segments across %s. Prompt log → %s",
             len(pending),
@@ -280,6 +315,7 @@ def run_pilot() -> None:
 
     elapsed = time.time() - start
     total_run = len(pending)
+    report_name = "m4_titles.txt" if titles_mode else "m4_pilot.txt"
     _write_report(
         total_segments=total_run,
         translated=translated_count,
@@ -287,6 +323,8 @@ def run_pilot() -> None:
         iterations_list=iterations_list,
         stats_list=stats_list,
         elapsed=elapsed,
+        report_name=report_name,
+        titles_mode=titles_mode,
     )
 
     avg_iters = sum(iterations_list) / total_run if iterations_list else 0.0
@@ -322,6 +360,8 @@ def _write_report(
     iterations_list: list[int],
     stats_list: list[SegmentStats],
     elapsed: float,
+    report_name: str = "m4_pilot.txt",
+    titles_mode: bool = False,
 ) -> None:
     total_run = translated + needs_human
 
@@ -383,9 +423,15 @@ def _write_report(
     avg_cost_per_seg = total_cost / total_run if total_run else 0.0
 
     # ── Report lines ────────────────────────────────────────────────────────
+    mode_label = "TITLES RUN SUMMARY" if titles_mode else "PILOT RUN SUMMARY"
+    scope_line = (
+        f"  Scope:             all question_title + article_title (full corpus)"
+        if titles_mode
+        else f"  Pilot questions:   {', '.join(_PILOT_QUESTIONS)}"
+    )
     lines = [
-        "PILOT RUN SUMMARY",
-        f"  Pilot questions:   {', '.join(_PILOT_QUESTIONS)}",
+        mode_label,
+        scope_line,
         f"  Total segments:    {total_segments}",
         f"  Translated:        {translated}  ({pct(translated)})",
         f"  Needs human:       {needs_human}  ({pct(needs_human)})",
@@ -422,7 +468,7 @@ def _write_report(
     ]
 
     _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = _REPORTS_DIR / "m4_pilot.txt"
+    report_path = _REPORTS_DIR / report_name
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("Report written: %s", report_path)
 

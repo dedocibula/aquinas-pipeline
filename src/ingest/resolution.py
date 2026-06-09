@@ -12,8 +12,10 @@ from ingest.gap_terms import _GAP_MIN_LEN, _strip_lemma_suffix
 # Authority rank threshold for a "strong" signal (Krystal=10, Bahounek=20)
 _STRONG_RANK_THRESHOLD = 20
 
-# Element types to run the resolver on (skip title/preamble segments)
-_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply"}
+# Element types to run the resolver on.
+# Titles have no Latin text and resolve to zero terms, but are included so the
+# resolver produces a clean (empty) result for them.
+_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "article_title", "question_title"}
 
 
 def _source_rank(conn, code: str) -> int:

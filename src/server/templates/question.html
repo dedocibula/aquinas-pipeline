@@ -3,11 +3,94 @@
 {% block title %}{{ question_title }} — Aquinas Pipeline{% endblock %}
 
 {% block breadcrumb %}
-  &rsaquo; <a href="/la/sk/~{{ st_locator }}">{{ question_title }}</a>
+&rsaquo; <a href="/la/sk/~{{ st_locator }}">{{ question_title }}</a>
 {% endblock %}
 
 {% block content %}
 <h1>{{ question_title }}</h1>
+
+{% if title_seg %}
+{% set seg = title_seg %}
+{% set ts = seg.translation_status %}
+{% set needs_human = (ts == 'needs_human') %}
+{% set panel_id = 'detail-' ~ seg.segment_id %}
+<table class="parallel-text">
+  <thead>
+    <tr>
+      <th class="col-label">Element</th>
+      <th class="col-latin">
+        <select id="ref-lang-select">
+          <option value="la">Latin</option>
+          <option value="cs">Czech</option>
+          <option value="en">English</option>
+        </select>
+      </th>
+      <th class="col-slovak">Slovak</th>
+      <th class="col-status">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="row-question_title{% if needs_human %} row-needs-human{% endif %}"
+      data-segment-id="{{ seg.segment_id }}">
+      <td class="col-label">Nadpis</td>
+      <td class="col-latin">
+        <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
+        <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
+        <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
+      </td>
+      <td class="col-slovak slovak">
+        {% if seg.slovak %}
+        <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
+        <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}" style="display:none"
+          rows="3">{{ seg.slovak }}</textarea>
+        <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
+          <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
+          <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+        </div>
+        {% else %}
+        <em class="awaiting">— awaiting translation —</em>
+        {% endif %}
+        {% if seg.slovak and ts in ('translated', 'needs_human') %}
+        <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
+        {% endif %}
+        {% if ts in ('translated', 'needs_human') %}
+        <button class="detail-toggle" data-target="{{ panel_id }}"
+          aria-expanded="{{ 'true' if needs_human else 'false' }}" aria-controls="{{ panel_id }}">&#9654;
+          details</button>
+        <div class="detail-panel" id="{{ panel_id }}" {% if not needs_human %}style="display:none" {% endif %}>
+          <div class="detail-section">
+            <span class="detail-label">Locked terms</span>
+            {% if title_constraints %}
+            <ul class="term-list">
+              {% for c in title_constraints %}
+              <li>
+                <code>{{ c.latin_lemma }}</code>
+                {% if c.context_label %}<span class="term-context">({{ c.context_label }})</span>{% endif %}
+                &rarr; <span class="term-slovak">{{ c.slovak }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <span class="detail-none">no term constraints</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </td>
+      <td class="col-status">
+        {% if ts == 'translated' %}
+        <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
+        {% elif needs_human %}
+        <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+        <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
+        {% else %}
+        <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
+        {% endif %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+{% endif %}
 
 <table class="article-list">
   <thead>
@@ -20,15 +103,114 @@
   </thead>
   <tbody>
     {% for a in articles %}
-      <tr>
-        <td>{{ a.title }}</td>
-        <td>{{ a.translated_count }}</td>
-        <td>{{ a.total_count }}</td>
-        <td><a href="/la/sk/~{{ a.url_locator }}">View &rarr;</a></td>
-      </tr>
+    <tr>
+      <td>{{ a.title }}</td>
+      <td>{{ a.translated_count }}</td>
+      <td>{{ a.total_count }}</td>
+      <td><a href="/la/sk/~{{ a.url_locator }}">View &rarr;</a></td>
+    </tr>
     {% else %}
-      <tr><td colspan="4">No articles found.</td></tr>
+    <tr>
+      <td colspan="4">No articles found.</td>
+    </tr>
     {% endfor %}
   </tbody>
 </table>
+{% endblock %}
+
+{% block scripts %}
+{% if title_seg %}
+<script>
+  (function () {
+    var sel = document.getElementById('ref-lang-select-title');
+    if (sel) sel.addEventListener('change', function () {
+      var lang = this.value;
+      document.querySelectorAll('.row-question_title .ref-text').forEach(function (el) {
+        el.style.display = el.dataset.lang === lang ? '' : 'none';
+      });
+    });
+
+    document.querySelectorAll('.detail-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var panel = document.getElementById(btn.dataset.target);
+        if (!panel) return;
+        var open = panel.style.display !== 'none';
+        panel.style.display = open ? 'none' : '';
+        btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+        btn.innerHTML = open ? '&#9654; details' : '&#9660; details';
+      });
+    });
+
+    document.querySelectorAll('.btn-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.segmentId;
+        document.getElementById('text-' + id).style.display = 'none';
+        document.getElementById('edit-' + id).style.display = '';
+        document.getElementById('editbtn-' + id).style.display = '';
+        btn.style.display = 'none';
+      });
+    });
+
+    document.querySelectorAll('.btn-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.segmentId;
+        document.getElementById('text-' + id).style.display = '';
+        document.getElementById('edit-' + id).style.display = 'none';
+        document.getElementById('editbtn-' + id).style.display = 'none';
+        var eb = document.querySelector('.btn-edit[data-segment-id="' + id + '"]');
+        if (eb) eb.style.display = '';
+      });
+    });
+
+    document.querySelectorAll('.btn-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.segmentId;
+        var text = document.getElementById('edit-' + id).value.trim();
+        if (!text) return;
+        btn.disabled = true; btn.textContent = 'Saving…';
+        fetch('/api/edit/' + id, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              document.getElementById('text-' + id).textContent = text;
+              document.getElementById('text-' + id).style.display = '';
+              document.getElementById('edit-' + id).style.display = 'none';
+              document.getElementById('editbtn-' + id).style.display = 'none';
+              var eb = document.querySelector('.btn-edit[data-segment-id="' + id + '"]');
+              if (eb) eb.style.display = '';
+              var badge = document.querySelector('[data-badge="' + id + '"]');
+              if (badge && badge.classList.contains('badge-warn')) {
+                badge.className = 'badge badge-ok'; badge.innerHTML = '&#10003;'; badge.title = 'translated';
+                var row = btn.closest('tr'); if (row) row.classList.remove('row-needs-human');
+                var ab = document.querySelector('.btn-approve[data-segment-id="' + id + '"]');
+                if (ab) ab.remove();
+              }
+            } else { alert('Save failed: ' + (data.error || 'unknown')); }
+            btn.disabled = false; btn.textContent = 'Save';
+          });
+      });
+    });
+
+    document.querySelectorAll('.btn-approve').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.segmentId;
+        btn.disabled = true; btn.textContent = 'Approving…';
+        fetch('/api/approve/' + id, { method: 'POST' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              var badge = document.querySelector('[data-badge="' + id + '"]');
+              if (badge) { badge.className = 'badge badge-ok'; badge.innerHTML = '&#10003;'; badge.title = 'translated'; }
+              var row = btn.closest('tr'); if (row) row.classList.remove('row-needs-human');
+              btn.remove();
+            } else { btn.disabled = false; btn.textContent = '✓ Approve'; }
+          });
+      });
+    });
+  }());
+</script>
+{% endif %}
 {% endblock %}

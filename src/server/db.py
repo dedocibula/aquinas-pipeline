@@ -49,6 +49,7 @@ def get_question_articles(
         FROM segment
         WHERE locator_path <@ %s::ltree
           AND nlevel(locator_path) >= 3
+
         GROUP BY article_path, subpath(locator_path, 0, 3)
         ORDER BY subpath(locator_path, 0, 3)
     """
@@ -80,7 +81,7 @@ def get_article_segments(
             english.content AS english,
             slovak.content  AS slovak
         FROM segment s
-        JOIN segment_text latin
+        LEFT JOIN segment_text latin
             ON  latin.segment_id = s.segment_id
             AND latin.lang = 'la'
         LEFT JOIN LATERAL (
@@ -111,6 +112,7 @@ def get_article_segments(
             LIMIT 1
         ) slovak ON true
         WHERE s.locator_path <@ %s::ltree
+          AND (latin.content IS NOT NULL OR s.element_type = 'article_title')
         ORDER BY s.locator_path
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -170,6 +172,68 @@ def get_translation_progress(conn: psycopg2.extensions.connection) -> dict:
         "translated":  int(row[1]),
         "needs_human": int(row[2]),
     }
+
+
+def get_question_title_segment(
+    conn: psycopg2.extensions.connection,
+    question_path: str,
+) -> dict | None:
+    """Return the question_title segment for a question, or None if absent.
+
+    Returns the same shape as a row from ``get_article_segments``:
+    segment_id, locator_path, element_type, reply_to,
+    translation_status, reviewer_notes, latin, czech, english, slovak.
+    """
+    sql = """
+        SELECT
+            s.segment_id,
+            s.locator_path::text,
+            s.element_type,
+            s.reply_to,
+            s.translation_status,
+            s.reviewer_notes,
+            latin.content   AS latin,
+            czech.content   AS czech,
+            english.content AS english,
+            slovak.content  AS slovak
+        FROM segment s
+        LEFT JOIN segment_text latin
+            ON  latin.segment_id = s.segment_id
+            AND latin.lang = 'la'
+        LEFT JOIN LATERAL (
+            SELECT st3.content
+            FROM segment_text st3
+            JOIN source src3 ON src3.source_id = st3.source_id
+            WHERE st3.segment_id = s.segment_id
+              AND st3.lang = 'cs'
+            ORDER BY src3.authority_rank ASC
+            LIMIT 1
+        ) czech ON true
+        LEFT JOIN LATERAL (
+            SELECT st4.content
+            FROM segment_text st4
+            JOIN source src4 ON src4.source_id = st4.source_id
+            WHERE st4.segment_id = s.segment_id
+              AND st4.lang = 'en'
+            ORDER BY src4.authority_rank ASC
+            LIMIT 1
+        ) english ON true
+        LEFT JOIN LATERAL (
+            SELECT st2.content
+            FROM segment_text st2
+            JOIN source src ON src.source_id = st2.source_id
+            WHERE st2.segment_id = s.segment_id
+              AND st2.lang = 'sk'
+            ORDER BY (src.code = 'human') DESC
+            LIMIT 1
+        ) slovak ON true
+        WHERE s.locator_path = %s::ltree
+          AND s.element_type = 'question_title'
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, (question_path,))
+        row = cur.fetchone()
+    return dict(row) if row else None
 
 
 def get_segment_constraints(

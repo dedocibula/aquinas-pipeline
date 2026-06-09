@@ -16,7 +16,9 @@ import psycopg2.extras
 
 # Element types to run the resolver on (skip title/preamble segments).
 # Duplicated from resolution.py to avoid a circular import.
-_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply"}
+# Titles resolve to zero terms (no Latin text) but must be included so the
+# resolver processes them and leaves an auditable empty result.
+_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "article_title", "question_title"}
 
 
 def _load_glossary(conn) -> tuple[list[dict], list[dict]]:

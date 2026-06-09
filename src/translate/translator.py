@@ -133,9 +133,14 @@ def build_initial_user_turn(
     parts.append(f"  {english}")
     parts.append("")
 
-    # Latin source
-    parts.append("Translate this Latin segment:")
-    parts.append(seg.get("latin", ""))
+    # Source text — use Latin when available, fall back to English for title segments
+    latin = seg.get("latin") or ""
+    if latin:
+        parts.append("Translate this Latin segment:")
+        parts.append(latin)
+    else:
+        parts.append("Translate this English title to Slovak (no Latin source available):")
+        parts.append(seg.get("english") or "")
 
     return "\n".join(parts)
 

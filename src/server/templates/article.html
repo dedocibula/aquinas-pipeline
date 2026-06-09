@@ -58,7 +58,9 @@
     {% for seg in segments %}
       {# Determine element label #}
       {% set etype = seg.element_type %}
-      {% if etype == 'arg' %}
+      {% if etype == 'article_title' %}
+        {% set label = 'Nadpis' %}
+      {% elif etype == 'arg' %}
         {% set label = 'Námietka ' + arg_number[seg.segment_id] | string + '.' %}
       {% elif etype == 'sed_contra' %}
         {% set label = formulas.get('sed_contra', 'Na druhej strane:') %}

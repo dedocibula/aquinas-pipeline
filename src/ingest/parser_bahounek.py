@@ -48,6 +48,11 @@ _PARS_FILE: dict[str, str] = {
     "III": "pars_III.html",
 }
 
+# Derive pars ltree code from filename for question-title extraction.
+_FILE_PARS_LTREE: dict[str, str] = {
+    filename: _PARS_CODE[raw] for raw, filename in _PARS_FILE.items()
+}
+
 # ── Coordinate parsing ────────────────────────────────────────────────────────
 
 # Matches any Bahounek coordinate tag at the start of a text node.
@@ -102,12 +107,59 @@ def _parse_coord(raw: str) -> str | None:
 
 # ── HTML parsing ──────────────────────────────────────────────────────────────
 
+
+def _extract_question_titles(soup: BeautifulSoup, pars_ltree: str) -> list[BahouněkElement]:
+    """Extract Czech question title text from Bahounek pars HTML.
+
+    Bahounek marks question titles as ``<p><span>N. TITLE TEXT<br/>...</span></p>``.
+    The question number N is extracted and mapped to ``{pars_ltree}.qN.question_title``.
+    """
+    results: list[BahouněkElement] = []
+    for p in soup.find_all("p"):
+        span = p.find("span")
+        if span is None or span.find("br") is None:
+            continue
+        # Collect text nodes that precede the first <br> child.
+        title_parts: list[str] = []
+        for child in span.children:
+            if getattr(child, "name", None) == "br":
+                break
+            text = child.get_text() if hasattr(child, "get_text") else str(child)
+            text = text.strip()
+            if text:
+                title_parts.append(text)
+        raw = " ".join(title_parts).strip()
+        m = re.match(r"^(\d+)\.\s+(.+)$", raw)
+        if not m:
+            continue
+        q_num = m.group(1)
+        title_text = m.group(2).strip()
+        # Bahounek question headings are ALL CAPS; skip mixed-case lines which
+        # are article body text accidentally matching the N. text pattern.
+        alpha = [c for c in title_text if c.isalpha()]
+        if not alpha or sum(1 for c in alpha if c.isupper()) / len(alpha) < 0.8:
+            continue
+        # The question_title segment lives at the question locator itself (e.g. I.q1),
+        # not at a sub-locator — matching the schema set by parser_latin.
+        results.append(BahouněkElement(f"{pars_ltree}.q{q_num}", title_text))
+    return results
+
+
 def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
-    """Extract all coordinate-tagged elements from one Bahounek HTML file."""
+    """Extract all elements from one Bahounek HTML file.
+
+    Returns question_title elements (from titled question headings) followed by
+    body elements (coordinate-tagged paragraphs).
+    """
     content = html_path.read_text(encoding="utf-8", errors="replace")
     soup = BeautifulSoup(content, "lxml")
 
+    pars_ltree = _FILE_PARS_LTREE.get(html_path.name, "")
     elements: list[BahouněkElement] = []
+
+    if pars_ltree:
+        elements.extend(_extract_question_titles(soup, pars_ltree))
+
     full_text = soup.get_text(separator="\n")
     lines = full_text.splitlines()
 
@@ -136,7 +188,10 @@ def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
 
 
 def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkElement]:
-    """Parse Bahounek HTML for the given article locators and return matched elements."""
+    """Parse Bahounek HTML for the given article locators and return matched elements.
+
+    Includes question_title elements for the parent question of each requested article.
+    """
     # Determine which pars files are needed
     pars_needed: set[str] = set()
     for loc in article_locators:
@@ -160,8 +215,16 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkEl
         for elem in file_elements:
             all_elements[elem.locator] = elem
 
-    # Filter to requested articles + their sub-elements
     result: list[BahouněkElement] = []
+
+    # Include Czech question titles for parent questions of requested articles.
+    # These are stored at the question locator (e.g. I.q3), not a sub-locator.
+    parent_q_locs = {".".join(loc.split(".")[:2]) for loc in article_locators}
+    for q_loc in sorted(parent_q_locs):
+        if q_loc in all_elements:
+            result.append(all_elements[q_loc])
+
+    # Body segments for each requested article
     for art_loc in article_locators:
         article_prefix = art_loc + "."
         for loc, elem in sorted(all_elements.items()):
@@ -324,8 +387,12 @@ def run(articles: list[str] | None = None, gap_log_path: Path | None = None) -> 
 
 
 if __name__ == "__main__":
+    # Full-corpus runs hit Latin-source gaps (segments Bahounek has but Latin
+    # parser never created).  Log those and continue rather than hard-failing.
+    _gap_log = ROOT / "reports" / "bahounek_gaps.log"
+    _gap_log.parent.mkdir(parents=True, exist_ok=True)
     try:
-        run()
+        run(gap_log_path=_gap_log)
     except RuntimeError as exc:
         print(f"\n{exc}", file=sys.stderr)
         sys.exit(1)

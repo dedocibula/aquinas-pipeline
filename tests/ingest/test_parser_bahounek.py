@@ -10,8 +10,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bs4 import BeautifulSoup
+
 from ingest.parser_bahounek import (
     BahouněkElement,
+    _extract_question_titles,
     _parse_coord,
     insert_bahounek_texts,
     write_bahounek_coverage,
@@ -162,3 +165,45 @@ class TestWriteBahouněkCoverage:
         write_bahounek_coverage(conn, gap_log)
         gap_log.seek(0)
         assert "MISSING_CZECH" not in gap_log.read()
+
+
+class TestExtractQuestionTitles:
+    def _soup(self, html: str) -> BeautifulSoup:
+        return BeautifulSoup(html, "lxml")
+
+    def test_extracts_single_title(self):
+        html = "<p><span>1. CO JE POSVÁTNÁ NAUKA<br/>Předmluva</span></p>"
+        results = _extract_question_titles(self._soup(html), "I")
+        assert len(results) == 1
+        assert results[0].locator == "I.q1"
+        assert results[0].czech_text == "CO JE POSVÁTNÁ NAUKA"
+
+    def test_extracts_multiple_titles(self):
+        html = """
+        <p><span>1. PRVNÍ OTÁZKA<br/>Předmluva</span></p>
+        <p><span>2. DRUHÁ OTÁZKA<br/>Předmluva</span></p>
+        """
+        results = _extract_question_titles(self._soup(html), "I")
+        assert len(results) == 2
+        assert results[0].locator == "I.q1"
+        assert results[0].czech_text == "PRVNÍ OTÁZKA"
+        assert results[1].locator == "I.q2"
+        assert results[1].czech_text == "DRUHÁ OTÁZKA"
+
+    def test_ignores_span_without_br(self):
+        html = "<p><span>1. SOME TITLE</span></p>"
+        assert _extract_question_titles(self._soup(html), "I") == []
+
+    def test_ignores_span_not_matching_number_pattern(self):
+        html = "<p><span>Not a title<br/>something</span></p>"
+        assert _extract_question_titles(self._soup(html), "I") == []
+
+    def test_uses_pars_ltree_prefix(self):
+        html = "<p><span>1. OTÁZKA<br/>Předmluva</span></p>"
+        results = _extract_question_titles(self._soup(html), "I_II")
+        assert results[0].locator == "I_II.q1"
+
+    def test_does_not_match_coordinate_line(self):
+        # Coordinate tags like "I ot. 1 čl. 1 arg. 1" should not produce a title
+        html = "<p><span>I ot. 1 čl. 1 arg. 1<br/>some text</span></p>"
+        assert _extract_question_titles(self._soup(html), "I") == []

@@ -830,3 +830,43 @@ def test_translate_segment_exhausted_notes_omitted_when_no_feedback():
     mock_notes.assert_called_once()
     notes_dict = mock_notes.call_args[0][2]
     assert "last_feedback" in notes_dict
+
+
+def test_translate_segment_article_title_no_latin_translates_directly():
+    """article_title segment with English but no Latin should be marked translated, not needs_human."""
+    conn = _make_conn(seg=_seg_row(
+        element_type="article_title",
+        latin=None,
+        english="Whether sacred doctrine is a science?",
+    ))
+    reviewer_mock = MagicMock()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Či je posvätná náuka vedou?")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, reviewer_mock),
+    ):
+        status, _ = translate_segment(1, conn)
+    reviewer_mock.assert_not_called()
+    assert status == "translated"
+
+
+def test_translate_segment_question_title_no_latin_translates_directly():
+    """question_title segment with English but no Latin should be marked translated, not needs_human."""
+    conn = _make_conn(seg=_seg_row(
+        element_type="question_title",
+        latin=None,
+        english="The nature and extent of sacred doctrine",
+    ))
+    reviewer_mock = MagicMock()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Povaha a rozsah posvätnej náuky")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, reviewer_mock),
+    ):
+        status, _ = translate_segment(1, conn)
+    reviewer_mock.assert_not_called()
+    assert status == "translated"

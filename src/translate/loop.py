@@ -190,7 +190,8 @@ def translate_segment(
     seg = get_segment_with_texts(conn, segment_id)
     if seg is None:
         raise RuntimeError(f"segment_id={segment_id} not found in DB")
-    if not seg.get("latin"):
+    _title_types = ("article_title", "question_title")
+    if not seg.get("latin") and not (seg.get("element_type") in _title_types and seg.get("english")):
         log.error("segment_id=%d: no Latin text in DB; flagging needs_human", segment_id)
         update_translation_status(conn, segment_id, "needs_human")
         conn.commit()
@@ -275,8 +276,15 @@ def translate_segment(
         precheck_passing_draft = draft
         precheck_passing_iter = iteration
 
-        latin = seg.get("latin")
+        latin = seg.get("latin") or ""
         if not latin:
+            if seg.get("element_type") in _title_types and precheck_passing_draft is not None:
+                # Title segments have no Latin — accept the precheck-passing draft directly.
+                write_segment_text(conn, segment_id, "sk", src_model, precheck_passing_draft)
+                update_translation_status(conn, segment_id, "translated")
+                conn.commit()
+                log.info("segment_id=%d title translated (reviewer skipped — no Latin)", segment_id)
+                return "translated", usages
             log.error("segment_id=%d iteration=%d: missing Latin text; skipping R1", segment_id, iteration)
             break
 
