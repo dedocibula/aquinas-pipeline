@@ -131,9 +131,6 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
 # ── Term lookup ───────────────────────────────────────────────────────────────
 
 _SUFFIX_RE = re.compile(r"\d+$")
-_PREAMBLE_RE = re.compile(
-    r"^(Ok|Dobre|Rozumiem|Sure|Here|Certainly|Respondeo)[,\s]", re.IGNORECASE
-)
 
 
 def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict]:
@@ -243,34 +240,7 @@ def translate_segment(
             log.error("segment_id=%d iteration=%d translator error: %s", segment_id, iteration, exc)
             break
 
-        # ── Preamble guard (cheapest check; runs before structure/terminology) ──
-        if _PREAMBLE_RE.match(draft):
-            log.warning("[PREAMBLE] segment_id=%d stripped preamble opener", segment_id)
-            feedback = (
-                "Your draft began with a conversational opener. "
-                "Translate directly — no introductory phrases."
-            )
-            if prompt_log:
-                prompt_log.log_iteration(
-                    segment_id=segment_id,
-                    locator_path=locator,
-                    iteration=iteration,
-                    system_prompt=system_prompt,
-                    user_turn=user_turn,
-                    draft=draft,
-                    precheck_ok=False,
-                    precheck_failures=["Preamble opener detected"],
-                    reviewer_turn=None,
-                    verdict=None,
-                    notes=None,
-                    feedback=feedback,
-                )
-            last_feedback = feedback
-            messages.append({"role": "assistant", "content": draft})
-            messages.append({"role": "user", "content": feedback})
-            continue  # back to translator; do NOT call R1
-
-        # Preamble-free draft is eligible as fallback (written on exhausted path)
+        # Draft is eligible as fallback (written on exhausted path)
         fallback_draft = draft
         fallback_iter = iteration
 
@@ -310,10 +280,12 @@ def translate_segment(
             log.error("segment_id=%d iteration=%d: missing Latin text; skipping R1", segment_id, iteration)
             break
 
-        reviewer_turn = build_reviewer_turn(latin, draft, constraints) if prompt_log else ""
+        czech = seg.get("czech")
+        english = seg.get("english")
+        reviewer_turn = build_reviewer_turn(latin, draft, constraints, czech=czech, english=english) if prompt_log else ""
 
         try:
-            review = call_reviewer_r1(latin, draft, constraints)
+            review = call_reviewer_r1(latin, draft, constraints, czech=czech, english=english)
             if review.usage is not None:
                 usages.append(review.usage)
         except RuntimeError as exc:

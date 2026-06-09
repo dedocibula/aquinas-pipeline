@@ -43,23 +43,33 @@ class ReviewResult:
     usage: UsageInfo | None = None  # token counts and cost for this R1 call
 
 
-def build_reviewer_turn(latin: str, draft: str, constraints: list[dict]) -> str:
+def build_reviewer_turn(
+    latin: str,
+    draft: str,
+    constraints: list[dict],
+    czech: str | None = None,
+    english: str | None = None,
+) -> str:
     """Build the per-segment user turn sent to the R1 reviewer."""
     term_lines = "\n".join(
         f"  {c['latin_lemma']} → {c['required_slovak']}"
         for c in constraints
     )
-    return (
-        f"REQUIRED TERMS:\n{term_lines}\n\n"
-        f"LATIN:\n{latin}\n\n"
-        f"DRAFT:\n{draft}"
-    )
+    parts = [f"REQUIRED TERMS:\n{term_lines}", f"LATIN:\n{latin}"]
+    if czech:
+        parts.append(f"CZECH REFERENCE:\n{czech}")
+    if english:
+        parts.append(f"ENGLISH REFERENCE:\n{english}")
+    parts.append(f"DRAFT:\n{draft}")
+    return "\n\n".join(parts)
 
 
 def call_reviewer_r1(
     latin: str,
     draft: str,
-    constraints: list[dict],    # [{latin_lemma, required_slovak}]
+    constraints: list[dict],
+    czech: str | None = None,
+    english: str | None = None,    # [{latin_lemma, required_slovak}]
 ) -> ReviewResult:
     """Call DeepSeek R1 to review a Slovak translation draft.
 
@@ -83,7 +93,7 @@ def call_reviewer_r1(
             "Export it before running the reviewer."
         )
 
-    user_content = build_reviewer_turn(latin, draft, constraints)
+    user_content = build_reviewer_turn(latin, draft, constraints, czech=czech, english=english)
 
     try:
         resp = requests.post(

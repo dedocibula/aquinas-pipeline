@@ -11,8 +11,10 @@ DO NOT:
   - Vary vocabulary for stylistic effect — if Aquinas repeats a word, repeat it
   - Modernise scholastic connectives (totiž, teda, avšak, lebo, preto must be preserved)
   - Split or merge sentences — one Latin sentence produces exactly one Slovak sentence
-  - Preface your translation with any acknowledgment, comment, or meta-text —
-    output only the Slovak translation
+  - Preface your translation with any acknowledgment, comment, or meta-text
+    (e.g. "Ok", "Dobre", "Rozumiem", "Sure", "Here is the translation", or any opener) —
+    output only the Slovak translation, beginning immediately with the first word
+  - Reproduce the Latin source text in your output — the entire response must be in Slovak
 
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
   Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.

@@ -85,10 +85,26 @@ produces a synonym because the feedback is just another paragraph in a long user
 - **`ratio` 2nd sense**: `context_label='as aspect/notion'`, `sk='hľadisko'`
 - **intellego/similis senses downgraded**: cannot converge on CLTK verb/adjective keys
 
+## Latest Pilot Results (post prompt-fix run — 294 total, 254 with Latin)
+254 segments | **245 translated (96.5%) | 9 needs_human (3.5%)**
+Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
+
+| Seg | Path | Failure |
+|---|---|---|
+| 199 | I.q1.a10.reply1 | `toto niečo` — permanent/accept |
+| 233 | I.q1.a6.sed_contra | `principium` 2nd sense (začiatok) |
+| 242 | I.q1.a7.respondeo | `čnosť` precheck all 3 iters |
+| 1912 | I.q2.a3.respondeo | `rozum` precheck all 3 iters |
+| 2408 | I.q3.a7.respondeo | `rozum` precheck all 3 iters |
+| 3419 | I.q5.a3.reply3 | Latin output — reviewer correctly flagged |
+| 3429 | I.q5.a4.reply3 | Semantic error: final cause → efficient cause |
+| 3436 | I.q5.a5.sed_contra | `prirodzenosť`/`rozum` + formula |
+| 3852 | I.q6.a3.arg1 | `habitus` precheck all 3 iters |
+
 ## Known Gaps / Next Actions
-1. **Multi-turn architecture** — convert `call_translator_v3` to accept `messages` list;
-   build conversation history in `loop.py`. Fixes both preamble and terminology failures.
+1. **Multi-turn + prompt fixes** — ✅ DONE. Removed `_PREAMBLE_RE` loop hack; translator prompt explicitly forbids preambles and Latin output; reviewer CRITICAL block catches Latin output and routes to needs_human; Czech/English passed to reviewer as cross-check.
 2. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
 3. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
-4. **3 REVISION_NEEDED cases** (segs 242, 2375, 3852) — semantic issues; inspect drafts manually
-5. **Gate 1 human review**: inspect translated output at `http://localhost:5000`
+4. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; needs glossary or prompt-level fix
+5. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection
+6. **Gate 1 human review**: inspect translated output at `http://localhost:5000`
