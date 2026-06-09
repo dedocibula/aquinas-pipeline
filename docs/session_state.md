@@ -103,8 +103,9 @@ Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
 
 ## Known Gaps / Next Actions
 1. **Multi-turn + prompt fixes** — ✅ DONE. Removed `_PREAMBLE_RE` loop hack; translator prompt explicitly forbids preambles and Latin output; reviewer CRITICAL block catches Latin output and routes to needs_human; Czech/English passed to reviewer as cross-check.
-2. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-3. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
-4. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; needs glossary or prompt-level fix
-5. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection
-6. **Gate 1 human review**: inspect translated output at `http://localhost:5000`
+2. **DB audit + reviewer hardening** — ✅ DONE (this session). Found 26 pre-fix-era corrupted segments in DB (19 preambles/Latin, 7 stubborn repeats). Reviewer CRITICAL block extended: (a) Slovak preamble check added; (b) Latin-prefix pattern fixed ("whether prefix, suffix, or standalone"). All 245 translated segments now clean.
+3. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
+4. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
+5. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; needs glossary or prompt-level fix
+6. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection
+7. **Gate 1 human review**: inspect translated output at `http://localhost:5000`
