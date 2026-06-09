@@ -327,7 +327,10 @@ def translate_segment(
                 )
             return "translated", usages
 
-        last_feedback = review.feedback or ""
+        last_feedback = review.feedback
+        if not last_feedback:
+            log.warning("segment_id=%d iter=%d: REVISION_NEEDED with empty feedback; breaking", segment_id, iteration)
+            break
         messages.append({"role": "assistant", "content": draft})
         messages.append({"role": "user", "content": last_feedback})
 

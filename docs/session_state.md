@@ -101,11 +101,22 @@ Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
 | 3436 | I.q5.a5.sed_contra | `prirodzenosť`/`rozum` + formula |
 | 3852 | I.q6.a3.arg1 | `habitus` precheck all 3 iters |
 
+## This Session (2026-06-09)
+
+### Code review findings addressed
+- **`/api/edit` silent 200 bug fixed** (`server/app.py`): now returns 404 when `save_segment_text` returns `False` (missing or pending segment).
+- **Empty REVISION_NEEDED feedback bug fixed** (`loop.py`): `None`/empty feedback no longer appended as zero-length user message to DeepSeek conversation; loop breaks with a warning instead.
+
+### M4 completion verified
+- All core deliverables done. `concupiscentia` context_labels migrated to English in DB. `providentia` has no approved senses yet (no migration needed). LEGIBILITY rule confirmed complete (Czech text already in user turn).
+- **M4 status: DONE. Ready for M5.**
+
 ## Known Gaps / Next Actions
 1. **Multi-turn + prompt fixes** — ✅ DONE. Removed `_PREAMBLE_RE` loop hack; translator prompt explicitly forbids preambles and Latin output; reviewer CRITICAL block catches Latin output and routes to needs_human; Czech/English passed to reviewer as cross-check.
-2. **DB audit + reviewer hardening** — ✅ DONE (this session). Found 26 pre-fix-era corrupted segments in DB (19 preambles/Latin, 7 stubborn repeats). Reviewer CRITICAL block extended: (a) Slovak preamble check added; (b) Latin-prefix pattern fixed ("whether prefix, suffix, or standalone"). All 245 translated segments now clean.
-3. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-4. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
-5. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; needs glossary or prompt-level fix
-6. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection
-7. **Gate 1 human review**: inspect translated output at `http://localhost:5000`
+2. **DB audit + reviewer hardening** — ✅ DONE. Found 26 pre-fix-era corrupted segments in DB (19 preambles/Latin, 7 stubborn repeats). Reviewer CRITICAL block extended: (a) Slovak preamble check added; (b) Latin-prefix pattern fixed ("whether prefix, suffix, or standalone"). All 245 translated segments now clean.
+3. **Two critical server/loop bugs** — ✅ DONE (this session). See above.
+4. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
+5. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
+6. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; M5 task.
+7. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
+8. **Next milestone: M5** — polish + orchestration + consistency.

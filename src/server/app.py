@@ -245,7 +245,9 @@ def edit_segment(segment_id: int):
     if not text:
         return jsonify({"ok": False, "error": "empty text"}), 400
     with get_conn() as conn:
-        save_segment_text(conn, segment_id, text)
+        updated = save_segment_text(conn, segment_id, text)
+    if not updated:
+        return jsonify({"ok": False, "error": "segment not found or not editable"}), 404
     return jsonify({"ok": True})
 
 
