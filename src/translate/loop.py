@@ -346,8 +346,11 @@ def translate_segment(
     final_draft = precheck_passing_draft if precheck_passing_draft is not None else fallback_draft
     chosen_iter = precheck_passing_iter if precheck_passing_iter is not None else fallback_iter
     if final_draft is None:
-        # No draft was ever produced (e.g., translator raised on iteration 1)
-        log.error("segment_id=%d: no draft produced; skipping DB write", segment_id)
+        # No draft was ever produced (e.g., translator raised on every iteration).
+        # Still mark needs_human so the segment doesn't stay stuck as 'pending'.
+        log.error("segment_id=%d: no draft produced; marking needs_human", segment_id)
+        update_translation_status(conn, segment_id, "needs_human")
+        conn.commit()
         if prompt_log:
             prompt_log.log_final(
                 segment_id=segment_id,

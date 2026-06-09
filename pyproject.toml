@@ -16,6 +16,7 @@ dependencies = [
     "google-auth>=2.0",
     "python-dotenv>=1.0",
     "flask>=3.0",
+    "prefect>=3.0",
 ]
 
 [project.optional-dependencies]

@@ -1,8 +1,7 @@
 # Session State
 
 ## Current Milestone
-M4 — **IN PROGRESS** — Gate 1 cleared. Glossary trim (1,858 senses) + retranslation (250 segs) complete.
-Preview server fully operational with editable translations and approve endpoint.
+M5 — **Step 1 IN PROGRESS** — Prefect orchestration built. Full corpus run not yet executed.
 
 ## M4 Deliverables (status)
 - `migrations/004_translation_status.sql` — **applied**; `translation_status` + `reviewer_notes` columns live
@@ -111,12 +110,18 @@ Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
 - All core deliverables done. `concupiscentia` context_labels migrated to English in DB. `providentia` has no approved senses yet (no migration needed). LEGIBILITY rule confirmed complete (Czech text already in user turn).
 - **M4 status: DONE. Ready for M5.**
 
+## M5 Step 1 Deliverables (status)
+- `src/common/corpus_db.py` — **DONE**. 5 corpus-wide DB helpers: `get_all_article_locators`, `get_pending_segment_ids_for_article`, `has_pending_segments`, `get_stale_segments`, `reset_translation_status`
+- `src/translate/run.py` — **DONE**. Prefect 3.7 flows: `translate_corpus` (ThreadPoolTaskRunner, MAX_WORKERS env), `rerun_stale`; report writers for `m5_production.txt` + `m5_needs_human.txt`
+- `pyproject.toml` — **DONE**. `prefect>=3.0` added.
+- `tests/common/test_corpus_db.py` — 10 tests, all passing
+- `tests/translate/test_run.py` — 12 tests, all passing
+
 ## Known Gaps / Next Actions
-1. **Multi-turn + prompt fixes** — ✅ DONE. Removed `_PREAMBLE_RE` loop hack; translator prompt explicitly forbids preambles and Latin output; reviewer CRITICAL block catches Latin output and routes to needs_human; Czech/English passed to reviewer as cross-check.
-2. **DB audit + reviewer hardening** — ✅ DONE. Found 26 pre-fix-era corrupted segments in DB (19 preambles/Latin, 7 stubborn repeats). Reviewer CRITICAL block extended: (a) Slovak preamble check added; (b) Latin-prefix pattern fixed ("whether prefix, suffix, or standalone"). All 245 translated segments now clean.
-3. **Two critical server/loop bugs** — ✅ DONE (this session). See above.
-4. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-5. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
-6. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; M5 task.
-7. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
-8. **Next milestone: M5** — polish + orchestration + consistency.
+1. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
+2. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
+3. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; M5 task.
+4. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
+5. **Pre-run checklist before corpus run** — import_approvals, rerun_stale, confirm DeepSeek credits, review MAX_WORKERS setting, estimated cost ~$60–90.
+6. **M5 Step 1 acceptance** — after full run: verify all segments in ('translated','needs_human'), test crash recovery + rerun_stale end-to-end.
+7. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — build AFTER Step 1 output reviewed in preview server.
