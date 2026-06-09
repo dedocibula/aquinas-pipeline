@@ -10,6 +10,7 @@ from translate.run import (
     _avg_iterations,
     _cache_hit_rate,
     _fetch_needs_human_rows,
+    _filter_locators,
     _total_cost,
     _write_needs_human_report,
     _write_production_report,
@@ -37,6 +38,33 @@ def _result(locator: str, translated: int = 1, needs_human: int = 0, usages=None
         needs_human=needs_human,
         usages=usages or [],
     )
+
+
+# ── _filter_locators ──────────────────────────────────────────────────────────
+
+
+def test_filter_locators_no_filter_returns_all():
+    locs = ["I.q1.a1", "I.q21.a1", "I_II.q5.a2"]
+    assert _filter_locators(locs, None, None) == locs
+
+
+def test_filter_locators_pars_only():
+    locs = ["I.q1.a1", "I_II.q1.a1", "II_II.q1.a1", "III.q1.a1"]
+    result = _filter_locators(locs, ["I", "III"], None)
+    assert result == ["I.q1.a1", "III.q1.a1"]
+
+
+def test_filter_locators_max_question_only():
+    locs = ["I.q20.a1", "I.q21.a1", "I.q100.a1"]
+    assert _filter_locators(locs, None, 20) == ["I.q20.a1"]
+
+
+def test_filter_locators_pars_and_max_question():
+    locs = ["I.q1.a1", "I.q20.a1", "I.q21.a1", "I_II.q1.a1", "II_II.q1.a1", "III.q1.a1"]
+    result = _filter_locators(locs, ["I", "I_II", "II_II", "III"], 20)
+    assert "I.q21.a1" not in result
+    assert "I.q1.a1" in result
+    assert "I_II.q1.a1" in result
 
 
 # ── ArticleResult ─────────────────────────────────────────────────────────────

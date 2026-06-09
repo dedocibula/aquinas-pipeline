@@ -5,12 +5,16 @@ Usage
 # Full corpus (new segments):
     MAX_WORKERS=10 uv run python -m translate.run
 
+# Subset run — first 20 questions of selected pars:
+    MAX_WORKERS=10 uv run python -m translate.run --pars I I_II II_II III --max-questions 20
+
 # After bumping glossary sense versions (re-translate stale segments):
     MAX_WORKERS=10 uv run python -m translate.run --flow rerun_stale
 
 # Run a specific flow with args (Python API):
     from translate.run import translate_corpus, rerun_stale
     translate_corpus(work_id=1)
+    translate_corpus(work_id=1, pars=["I", "I_II", "II_II", "III"], max_question=20)
 """
 
 from __future__ import annotations
@@ -41,6 +45,34 @@ log = logging.getLogger(__name__)
 _REPORTS_DIR = Path("reports")
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
+
+
+def _filter_locators(
+    locators: list[str],
+    pars_filter: list[str] | None,
+    max_question: int | None,
+) -> list[str]:
+    """Filter article locators to a pars/question subset.
+
+    locators are of the form 'I.q1.a1' or 'I.q1.question_title'.
+    pars_filter: keep only these pars (e.g. ['I', 'I_II', 'II_II', 'III']).
+    max_question: keep only questions whose number <= max_question.
+    """
+    if pars_filter is None and max_question is None:
+        return locators
+    result = []
+    for loc in locators:
+        parts = loc.split(".")
+        pars = parts[0]
+        if pars_filter and pars not in pars_filter:
+            continue
+        if max_question is not None:
+            q_part = parts[1] if len(parts) > 1 else ""
+            if q_part.startswith("q") and q_part[1:].isdigit():
+                if int(q_part[1:]) > max_question:
+                    continue
+        result.append(loc)
+    return result
 
 
 # ── Dataclass ─────────────────────────────────────────────────────────────────
@@ -89,19 +121,31 @@ def translate_article_task(locator_prefix: str, work_id: int = 1) -> ArticleResu
     name="translate-corpus",
     task_runner=ThreadPoolTaskRunner(max_workers=MAX_WORKERS),
 )
-def translate_corpus(work_id: int = 1) -> None:
-    """Translate all pending segments in the corpus.
+def translate_corpus(
+    work_id: int = 1,
+    pars: list[str] | None = None,
+    max_question: int | None = None,
+) -> None:
+    """Translate all pending segments in the corpus (or a filtered subset).
 
-    Submits one Prefect task per article, run concurrently via ThreadPool.
+    pars: restrict to these pars (e.g. ['I', 'I_II', 'II_II', 'III']).
+    max_question: restrict to question numbers <= this value.
     Safe to re-run: already-translated segments are skipped (status != 'pending').
     """
     t_start = time.monotonic()
 
     with get_conn() as conn:
         article_locators = get_all_article_locators(conn, work_id)
+        article_locators = _filter_locators(article_locators, pars, max_question)
         pending = [a for a in article_locators if has_pending_segments(conn, a, work_id)]
 
-    log.info("Articles to translate: %d of %d total", len(pending), len(article_locators))
+    log.info(
+        "Articles to translate: %d of %d (filtered) — pars=%s max_q=%s",
+        len(pending),
+        len(article_locators),
+        pars,
+        max_question,
+    )
 
     futures = [translate_article_task.submit(loc, work_id) for loc in pending]
     results: list[ArticleResult] = [f.result() for f in futures]
@@ -171,8 +215,12 @@ def _write_production_report(results: list[ArticleResult], elapsed: float) -> No
     lines = [
         "FULL CORPUS RUN SUMMARY",
         f"  Total segments:    {total}",
-        f"  Translated:        {translated}  ({translated / total * 100:.1f}%)" if total else "  Translated:        0",
-        f"  Needs human:       {needs_human}  ({needs_human / total * 100:.1f}%)" if total else "  Needs human:       0",
+        f"  Translated:        {translated}  ({translated / total * 100:.1f}%)"
+        if total
+        else "  Translated:        0",
+        f"  Needs human:       {needs_human}  ({needs_human / total * 100:.1f}%)"
+        if total
+        else "  Needs human:       0",
         f"  Avg iterations:    {avg_iters:.2f}",
         f"  Cache hit rate:    {hit_rate * 100:.1f}%",
         f"  API cost:          ~${cost:.2f}",
@@ -256,9 +304,25 @@ if __name__ == "__main__":
         help="Which flow to run (default: translate_corpus)",
     )
     parser.add_argument("--work-id", type=int, default=1)
+    parser.add_argument(
+        "--pars",
+        nargs="+",
+        metavar="PARS",
+        help="Restrict to these pars (e.g. --pars I I_II II_II III)",
+    )
+    parser.add_argument(
+        "--max-questions",
+        type=int,
+        metavar="N",
+        help="Restrict to first N questions per pars",
+    )
     args = parser.parse_args()
 
     if args.flow == "rerun_stale":
         rerun_stale(work_id=args.work_id)
     else:
-        translate_corpus(work_id=args.work_id)
+        translate_corpus(
+            work_id=args.work_id,
+            pars=args.pars,
+            max_question=args.max_questions,
+        )
