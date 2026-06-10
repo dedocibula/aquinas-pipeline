@@ -117,11 +117,39 @@ Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
 - `tests/common/test_corpus_db.py` — 10 tests, all passing
 - `tests/translate/test_run.py` — 12 tests, all passing
 
+## This Session (2026-06-10)
+
+### q1–q20 subset run (4 pars, MAX_WORKERS=10)
+- Added `--pars` / `--max-questions` filter to `translate_corpus` (committed f0d3bec).
+- Fixed `ORDER BY` alias bug in `get_all_article_locators` (committed ad28f99).
+- Run launched on I, I_II, II_II, III q1–q20 (3,803 pending segments). **Check final
+  status in `reports/m5_production.txt` / `m5_needs_human.txt`.**
+
+### needs_human root-cause analysis (79 segs mid-run)
+~74% are pipeline gaps, not model failures:
+- `ratio→rozum` forced where ratio means concept/aspect/reason (~24 segs) — missing senses.
+- `čnosť`/`habitus` precheck false-fails — MorfFlex SK dict lacks these lemmas (has `cnosť`);
+  precheck lemmatizes draft tokens (open vocab) instead of generating forms (closed vocab).
+- `habitum est` (perfect passive of habere) mislemmatized to noun `habitus` → bogus constraint (3 segs).
+- Preamble injection (4), Latin output (4), genuine semantic errors (~10), permanent-accept (1).
+
+### APPROVED PLAN: `docs/plans/m5_glossary_and_term_flow_plan.md`
+Four parts, all decisions user-confirmed:
+1. **Glossary sense mining (Option B)**: mine existing cs/en aligned corpus (91%/99% coverage)
+   for multi-rendering Latin lemmas; DeepSeek labels candidates only (~$1–3). NOT full-draft mining.
+2. **Term-flow fixes (all four)**: generation-based precheck (morpho.generate verified working,
+   OOV stem fallback), terminology micro-edit retry, prompt wording ("verbatim"→"inflect as needed"),
+   habitum-est filter.
+3. **Run analytics**: migration 005 (`translation_run` + `run_segment`, failure_classes jsonb);
+   failure classification in loop; `run_compare.py` tool. DDL needs human review before apply.
+4. **Term-overwrite policy**: automate rerun_stale; failure tail → preview server; NEW guard —
+   stale segments with human SK row are flagged needs_human, never auto-reset.
+
+Implementation order: migration 005 → Part 2 fixes → Part 3 wiring → Part 4 guard → Part 1 mining → review cycle.
+
 ## Known Gaps / Next Actions
-1. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-2. **`principium` 2nd sense** (seg 233) — "in principio X" = "at the beginning" → `začiatok`
-3. **Persistent terminology failures** (segs 242, 1912, 2408, 3436, 3852) — `rozum/čnosť/habitus/prirodzenosť` model avoids these; M5 task.
-4. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
-5. **Pre-run checklist before corpus run** — import_approvals, rerun_stale, confirm DeepSeek credits, review MAX_WORKERS setting, estimated cost ~$60–90.
-6. **M5 Step 1 acceptance** — after full run: verify all segments in ('translated','needs_human'), test crash recovery + rerun_stale end-to-end.
-7. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — build AFTER Step 1 output reviewed in preview server.
+1. **Execute the approved plan** (above) — start with migration 005 DDL draft for human review.
+2. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
+3. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
+4. **M5 Step 1 acceptance** — after subset run: verify statuses, test crash recovery + rerun_stale.
+5. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER Step 1 review.
