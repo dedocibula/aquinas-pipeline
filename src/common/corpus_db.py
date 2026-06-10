@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import psycopg2.extensions
+import psycopg2.extras
 
 
 def get_all_article_locators(
@@ -100,6 +101,52 @@ def get_stale_segments(conn: psycopg2.extensions.connection, work_id: int = 1) -
             (work_id,),
         )
         return [row[0] for row in cur.fetchall()]
+
+
+def get_human_edited_segments(
+    conn: psycopg2.extensions.connection, segment_ids: list[int]
+) -> list[int]:
+    """Return the subset of segment_ids that have a human-edited Slovak text row.
+
+    A segment_text(sk) row from the 'human' source means a reviewer already
+    touched this segment's final text. rerun_stale must never reset such
+    segments to pending — re-translation would overwrite reviewed work.
+    """
+    if not segment_ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT st.segment_id
+            FROM segment_text st
+            JOIN source s ON s.source_id = st.source_id
+            WHERE st.segment_id = ANY(%s)
+              AND st.lang = 'sk'
+              AND s.code = 'human'
+            ORDER BY st.segment_id
+            """,
+            (segment_ids,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def flag_needs_human(
+    conn: psycopg2.extensions.connection, segment_ids: list[int], note: str
+) -> None:
+    """Set translation_status='needs_human' with a reviewer note, no re-translation.
+
+    The note lands in reviewer_notes.last_feedback so it shows up in the
+    needs-human triage report and the preview server detail panel.
+    """
+    if not segment_ids:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE segment "
+            "SET translation_status = 'needs_human', reviewer_notes = %s "
+            "WHERE segment_id = ANY(%s)",
+            (psycopg2.extras.Json({"last_feedback": note}), segment_ids),
+        )
 
 
 def reset_translation_status(

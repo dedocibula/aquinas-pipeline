@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from common.corpus_db import (
+    flag_needs_human,
     get_all_article_locators,
+    get_human_edited_segments,
     get_pending_segment_ids_for_article,
     get_stale_segments,
     has_pending_segments,
@@ -119,4 +121,44 @@ def test_reset_translation_status_executes_update():
 def test_reset_translation_status_no_op_on_empty_list():
     conn, cur = _make_conn([])
     reset_translation_status(conn, [])
+    cur.execute.assert_not_called()
+
+
+# ── get_human_edited_segments ────────────────────────────────────────────────
+
+
+def test_get_human_edited_segments_returns_subset():
+    conn, cur = _make_conn([(2,), (5,)])
+    result = get_human_edited_segments(conn, [1, 2, 5, 9])
+    assert result == [2, 5]
+    sql, params = cur.execute.call_args.args
+    assert "'human'" in sql
+    assert "lang = 'sk'" in sql
+    assert params == ([1, 2, 5, 9],)
+
+
+def test_get_human_edited_segments_no_op_on_empty_list():
+    conn, cur = _make_conn([])
+    assert get_human_edited_segments(conn, []) == []
+    cur.execute.assert_not_called()
+
+
+# ── flag_needs_human ─────────────────────────────────────────────────────────
+
+
+def test_flag_needs_human_executes_update_with_note():
+    conn, cur = _make_conn([])
+    flag_needs_human(conn, [3, 4], "term updated after human edit — verify")
+    cur.execute.assert_called_once()
+    sql, params = cur.execute.call_args.args
+    assert "'needs_human'" in sql
+    assert "reviewer_notes" in sql
+    note_json, ids = params
+    assert ids == [3, 4]
+    assert "term updated" in str(note_json.adapted)
+
+
+def test_flag_needs_human_no_op_on_empty_list():
+    conn, cur = _make_conn([])
+    flag_needs_human(conn, [], "note")
     cur.execute.assert_not_called()
