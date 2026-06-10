@@ -91,6 +91,7 @@ def fetch_minable_terms(conn, min_segments: int = _MIN_TERM_SEGMENTS) -> list[di
             FROM glossary_term gt
             JOIN glossary_sense gs USING (term_id)
             JOIN term_usage tu ON tu.sense_id = gs.sense_id
+            WHERE gs.status = 'approved'
             GROUP BY gt.term_id, gt.latin_lemma
             HAVING count(DISTINCT tu.segment_id) >= %s
             ORDER BY gt.latin_lemma
@@ -204,7 +205,12 @@ def mine_renderings(
         rate = k / n_term
         if k < min_df or rate < min_rate:
             continue
-        corpus_rate = (baseline_df.get(lemma, 0) or 0.5) / max(n_corpus, 1)
+        # Exclude the term's own segments from the baseline to avoid deflating lift
+        # for high-frequency terms (their segments inflate the corpus rate for their
+        # dominant renderings, reducing apparent lift and masking polysemy candidates).
+        n_exclusive = max(n_corpus - n_term, 1)
+        corpus_exclusive = max(baseline_df.get(lemma, 0) - k, 0)
+        corpus_rate = (corpus_exclusive or 0.5) / n_exclusive
         lift = rate / corpus_rate
         if lift < min_lift:
             continue
@@ -349,9 +355,8 @@ def fetch_cluster_contexts(conn, clusters: list[dict]) -> dict[str, list[str]]:
     }
 
 
-def label_term(conn, term: dict, clusters: list[dict], segments: list[dict]) -> list[dict]:
+def label_term(term: dict, clusters: list[dict], contexts: dict[str, list[str]], segments: list[dict]) -> list[dict]:
     """Label one candidate term's clusters via DeepSeek; returns sense dicts."""
-    contexts = fetch_cluster_contexts(conn, clusters)
     en_cues = mine_english_cues(segments)
     user = _build_label_user_turn(term["latin_lemma"], clusters, contexts, en_cues)
     result = call_deepseek_label(_LABEL_SYSTEM, user)
@@ -401,8 +406,7 @@ def write_proposed_senses(conn, term_id: int, senses: list[dict], src_model: int
                     """
                     INSERT INTO sense_rendering (sense_id, lang, lemma, content, source_id)
                     VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (sense_id, lang, source_id)
-                    DO UPDATE SET lemma = EXCLUDED.lemma, content = EXCLUDED.content
+                    ON CONFLICT (sense_id, lang, source_id) DO NOTHING
                     """,
                     (sense_id, lang, lemma, content, src_model),
                 )
@@ -476,10 +480,16 @@ def run(
         src_model = source_id(conn, "model") if do_write else None
         print(f"\nLabeling {len(candidates)} candidates via DeepSeek "
               f"({_LABEL_MAX_WORKERS} concurrent)...", flush=True)
+
+        # Pre-fetch all cluster contexts in the main thread — psycopg2 connections
+        # are not thread-safe; fetch before handing work to the pool.
+        for r in candidates:
+            r["contexts"] = fetch_cluster_contexts(conn, r["clusters"])
+
         total_written = 0
         with ThreadPoolExecutor(max_workers=_LABEL_MAX_WORKERS) as pool:
             futures = {
-                pool.submit(label_term, conn, r["term"], r["clusters"], r["segments"]): r
+                pool.submit(label_term, r["term"], r["clusters"], r["contexts"], r["segments"]): r
                 for r in candidates
             }
             for future in as_completed(futures):

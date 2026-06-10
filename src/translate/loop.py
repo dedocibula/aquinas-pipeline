@@ -385,6 +385,8 @@ def translate_segment(
                 # Title segments have no Latin — accept the precheck-passing draft directly.
                 write_segment_text(conn, segment_id, "sk", src_model, precheck_passing_draft)
                 update_translation_status(conn, segment_id, "translated")
+                for term in locked_terms:
+                    update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
                 conn.commit()
                 log.info("segment_id=%d title translated (reviewer skipped — no Latin)", segment_id)
                 outcome.chosen_iteration = iteration

@@ -14,8 +14,8 @@
 -- time (no post-hoc log parsing), e.g.
 --   [{"iter": 1, "class": "precheck_terminology", "term": "rozum"},
 --    {"iter": 2, "class": "reviewer_revision"}]
--- Known classes: precheck_terminology, precheck_structure, reviewer_revision,
--- preamble, latin_output, translator_error, reviewer_error. Not CHECK-enforced:
+-- Emitted classes: precheck_terminology, precheck_structure, reviewer_revision,
+-- no_source_text, translator_error, reviewer_error. Not CHECK-enforced:
 -- classes are produced by one writer (loop.py) and new classes must not require
 -- a migration.
 

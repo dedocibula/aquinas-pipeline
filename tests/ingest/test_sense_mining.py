@@ -324,6 +324,34 @@ def test_write_proposed_senses_partial_skip():
     assert cur.execute.call_count == 4
 
 
+def test_write_proposed_senses_does_not_overwrite_approved_rendering():
+    """ON CONFLICT DO NOTHING: a second mining run must not clobber approved renderings.
+
+    Even if the dedup guard somehow allows insertion of a new glossary_sense row
+    whose sense_rendering rows would conflict, the DO NOTHING clause ensures the
+    approved content is untouched.  We verify the SQL contains DO NOTHING (not DO UPDATE).
+    """
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = lambda s: s
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = (99,)
+    conn.cursor.return_value = cur
+
+    senses = [_sense("pojem", "as concept")]
+    with patch("ingest.sense_mining.fetch_existing_senses", return_value=[]):
+        write_proposed_senses(conn, term_id=2, senses=senses, src_model=7)
+
+    # Collect all SQL strings passed to execute
+    sql_calls = [call.args[0] for call in cur.execute.call_args_list if call.args]
+    rendering_inserts = [s for s in sql_calls if "sense_rendering" in s.lower()]
+    for sql in rendering_inserts:
+        assert "DO NOTHING" in sql.upper(), (
+            f"sense_rendering insert must use DO NOTHING to avoid overwriting approved data:\n{sql}"
+        )
+        assert "DO UPDATE" not in sql.upper()
+
+
 # ── label_term validation ─────────────────────────────────────────────────────
 
 
@@ -345,14 +373,12 @@ def test_label_term_rejects_invented_renderings():
         ]
     }
     term = {"term_id": 1, "latin_lemma": "ratio", "n_segments": 100}
-    conn = _conn([])
 
     with (
-        patch("ingest.sense_mining.fetch_cluster_contexts", return_value={}),
         patch("ingest.sense_mining.mine_english_cues", return_value=[]),
         patch("ingest.sense_mining.call_deepseek_label", return_value=invented_response),
     ):
-        result = label_term(conn, term, clusters, [])
+        result = label_term(term, clusters, {}, [])
 
     assert result == []
 
@@ -380,14 +406,12 @@ def test_label_term_accepts_valid_cluster_label():
         ]
     }
     term = {"term_id": 1, "latin_lemma": "ratio", "n_segments": 100}
-    conn = _conn([])
 
     with (
-        patch("ingest.sense_mining.fetch_cluster_contexts", return_value={}),
         patch("ingest.sense_mining.mine_english_cues", return_value=[]),
         patch("ingest.sense_mining.call_deepseek_label", return_value=valid_response),
     ):
-        result = label_term(conn, term, clusters, [])
+        result = label_term(term, clusters, {}, [])
 
     assert len(result) == 1
     assert result[0]["cs_lemma"] == "rozum"
@@ -411,14 +435,12 @@ def test_label_term_drops_incomplete_sense():
         ]
     }
     term = {"term_id": 1, "latin_lemma": "ratio", "n_segments": 50}
-    conn = _conn([])
 
     with (
-        patch("ingest.sense_mining.fetch_cluster_contexts", return_value={}),
         patch("ingest.sense_mining.mine_english_cues", return_value=[]),
         patch("ingest.sense_mining.call_deepseek_label", return_value=incomplete),
     ):
-        result = label_term(conn, term, clusters, [])
+        result = label_term(term, clusters, {}, [])
 
     assert result == []
 

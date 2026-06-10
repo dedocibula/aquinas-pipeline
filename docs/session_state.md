@@ -147,9 +147,33 @@ Four parts, all decisions user-confirmed:
 
 Implementation order: migration 005 → Part 2 fixes → Part 3 wiring → Part 4 guard → Part 1 mining → review cycle.
 
+## M5 Plan Implementation Progress (session 2026-06-10, continued)
+
+All five implementation steps complete and committed:
+
+| Step | Commit | Status |
+|---|---|---|
+| Migration 005 (`translation_run` + `run_segment`) | applied | DONE |
+| Part 2: generation-based precheck + OOV fallback | committed | DONE |
+| Part 2: habitum-est filter (TEMPORARY) | committed | DONE |
+| Part 2: micro-edit retry + prompt wording | committed | DONE |
+| Part 3: run analytics wiring (`run.py`, `run_compare.py`) | committed | DONE |
+| Part 4: human-edit guard in `rerun_stale` | committed | DONE |
+| Part 1: `sense_mining.py` + 21 tests | 5a71db5 | DONE |
+
+### Dry-run on known polysemes (`--terms ratio species principium`)
+- **principium** → CANDIDATE: `původ` 54% lift=16, `počátek` 23% lift=15, `začátek` 18% lift=14 ✓
+- **species** → CANDIDATE: `druh` 73% lift=13, `podoba` 20% lift=8 ✓
+- **ratio** → single/none — Bahounek consistently uses one Czech rendering; polysemy invisible to cs mining (English evidence needed for `ratio`)
+
+### Pending cleanup
+- `_drop_habere_ppp_constraints` in `loop.py` is TEMPORARY — delete after POS-aware resolver fix + term_usage purge (scheduled as Part 1 re-resolution).
+
 ## Known Gaps / Next Actions
-1. **Execute the approved plan** (above) — start with migration 005 DDL draft for human review.
-2. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-3. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
-4. **M5 Step 1 acceptance** — after subset run: verify statuses, test crash recovery + rerun_stale.
-5. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER Step 1 review.
+1. **Export polysemy candidates to Sheets** — run `sense_mining --all --label --write`, then `export_sheet.py` for proposed senses → human review → `import_approvals` → `rerun_stale`.
+2. **`ratio` sense coverage** — cs mining blind to it; needs English-cue path or manual sense entry.
+3. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
+4. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
+5. **POS-aware resolver fix** — use `pos_tag_latin` to prevent PPP + esse from mapping to noun; purge bogus `habitus` term_usage rows; then delete `_drop_habere_ppp_constraints`.
+6. **Restart partial run** — I/I_II/III pars q1–q20 still have ~2,268 pending; II_II q1–q20 already done.
+7. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER review cycle.
