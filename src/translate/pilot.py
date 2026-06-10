@@ -259,7 +259,7 @@ def run_pilot() -> None:
     ) -> tuple[dict, str, list, dict | None, dict]:
         """Translate one segment in its own DB connection."""
         with get_conn() as wconn:
-            status, usages = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
+            status, usages, _outcome = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
             notes = fetch_reviewer_notes(wconn, seg["segment_id"])
             lengths = fetch_segment_text_lengths(wconn, seg["segment_id"])
         return seg, status, usages, notes, lengths

@@ -16,6 +16,10 @@ DO NOT:
     output only the Slovak translation, beginning immediately with the first word
   - Reproduce the Latin source text in your output — the entire response must be in Slovak
 
+TERMINOLOGY: The HARD TERM CONSTRAINTS in the request map Latin terms to required Slovak
+  lemmas. Use each required Slovak word for its Latin term, inflected as the grammar of
+  your sentence requires. Never substitute a synonym for a required term.
+
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
   Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.
 

@@ -9,6 +9,8 @@ import pytest
 from common.pricing import UsageInfo
 from translate.loop import (
     _build_surface_constraints,
+    _build_terminology_microedit,
+    _drop_habere_ppp_constraints,
     get_locked_terms,
     get_segment_with_texts,
     translate_segment,
@@ -226,6 +228,53 @@ def test_build_surface_constraints_fallback_passes_full_dict():
     assert result[0]["latin_lemma"] == "caritas"
 
 
+# ── _drop_habere_ppp_constraints — 'habitum est' false-constraint filter ──────
+
+_HABITUS_CONSTRAINT = {"latin_lemma": "habitus", "required_slovak": "habitus", "category": "term"}
+
+
+def test_drop_habere_ppp_only_evidence_dropped():
+    """'habitum est' as the sole evidence → bogus habitus constraint removed."""
+    latin = "Sicut habitum est in praecedenti quaestione."
+    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
+    assert result == []
+
+
+def test_drop_habere_ppp_habita_sunt_variant_dropped():
+    """Plural 'habita sunt' is also perfect-passive habere."""
+    latin = "Quae habita sunt in superioribus."
+    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
+    assert result == []
+
+
+def test_drop_habere_ppp_kept_with_genuine_evidence():
+    """A real habitus token elsewhere keeps the constraint despite 'habitum est'."""
+    latin = "Sicut habitum est, habitus virtutis manet in anima."
+    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
+    assert len(result) == 1
+    assert result[0]["latin_lemma"] == "habitus"
+
+
+def test_drop_habere_ppp_no_construction_unchanged():
+    """'habitus est' (noun + copula) is NOT the participle construction — untouched."""
+    latin = "Habitus est qualitas de difficili mobilis."
+    constraints = [dict(_HABITUS_CONSTRAINT)]
+    result = _drop_habere_ppp_constraints(latin, constraints)
+    assert result == constraints
+
+
+def test_drop_habere_ppp_other_constraints_untouched():
+    """Non-habitus constraints pass through even when the construction is present."""
+    latin = "Sicut habitum est, gratiam Deus dat."
+    constraints = [
+        dict(_HABITUS_CONSTRAINT),
+        {"latin_lemma": "gratia", "required_slovak": "milosť", "category": "term"},
+    ]
+    result = _drop_habere_ppp_constraints(latin, constraints)
+    assert len(result) == 1
+    assert result[0]["latin_lemma"] == "gratia"
+
+
 # ── write_segment_text ────────────────────────────────────────────────────────
 
 
@@ -371,7 +420,7 @@ def test_translate_segment_approved_returns_translated():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
-        status, usages = translate_segment(1, conn)
+        status, usages, _ = translate_segment(1, conn)
     assert status == "translated"
 
 
@@ -398,7 +447,7 @@ def test_translate_segment_approved_with_notes_writes_notes():
         patch(_PATCH_REVIEWER, return_value=_approved_notes()),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "translated"
     mock_notes.assert_called_once()
 
@@ -446,7 +495,7 @@ def test_translate_segment_updates_sense_version_on_needs_human():
         patch(_PATCH_REVIEWER, return_value=_revision()),
         patch("translate.loop.update_sense_version_used") as mock_vsn,
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     mock_vsn.assert_called_once_with(conn, 1, 88, 2)
 
@@ -493,7 +542,7 @@ def test_translate_segment_precheck_failure_retries_translator():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert translator_mock.call_count == 2
     assert status == "translated"
 
@@ -550,6 +599,69 @@ def test_translate_segment_terminology_failure_included_in_feedback():
     assert "viera" in last_user_content
 
 
+def test_translate_segment_terminology_only_failure_sends_microedit():
+    """Structure ok + terminology fail → targeted micro-edit turn, not full retry."""
+    conn = _make_conn()
+    translator_calls: list[tuple] = []
+
+    def capture_translator(*args, **kwargs):
+        translator_calls.append(args)
+        return _t("Draft.")
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, side_effect=[_fail("lemma 'viera' not found"), _ok()]),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    (messages,) = translator_calls[1]
+    last_user_content = next(
+        m["content"] for m in reversed(messages) if m["role"] == "user"
+    )
+    assert "Terminology fix only" in last_user_content
+    assert "Pre-check failures" not in last_user_content
+
+
+def test_translate_segment_structure_failure_uses_full_retry_feedback():
+    """Any structure failure keeps the full retry framing, even with terminology fails."""
+    conn = _make_conn()
+    translator_calls: list[tuple] = []
+
+    def capture_translator(*args, **kwargs):
+        translator_calls.append(args)
+        return _t("Draft.")
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
+        patch(_PATCH_STRUCTURE, side_effect=[_fail("missing formula"), _ok()]),
+        patch(_PATCH_TERMINOLOGY, side_effect=[_fail("lemma 'viera' not found"), _ok()]),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    (messages,) = translator_calls[1]
+    last_user_content = next(
+        m["content"] for m in reversed(messages) if m["role"] == "user"
+    )
+    assert "Pre-check failures" in last_user_content
+    assert "missing formula" in last_user_content
+    assert "viera" in last_user_content
+    assert "Terminology fix only" not in last_user_content
+
+
+def test_build_terminology_microedit_content():
+    """Micro-edit turn lists failures and forbids any other change."""
+    msg = _build_terminology_microedit(["missing components ['rozum'] for 'rozum' (ratio)"])
+    assert "rozum" in msg
+    assert "Terminology fix only" in msg
+    assert "inflected" in msg
+    assert "Do not reword" in msg
+
+
 # ── translate_segment — REVISION_NEEDED path ─────────────────────────────────
 
 
@@ -564,7 +676,7 @@ def test_translate_segment_revision_needed_retries():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert translator_mock.call_count == 2
     assert status == "translated"
 
@@ -578,7 +690,7 @@ def test_translate_segment_max_iterations_needs_human():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
 
 
@@ -632,7 +744,7 @@ def test_translate_segment_translator_error_on_first_returns_needs_human():
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=RuntimeError("API down")),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
 
 
@@ -659,7 +771,7 @@ def test_translate_segment_reviewer_error_eventually_needs_human():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, side_effect=RuntimeError("R1 down")),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
 
 
@@ -697,7 +809,7 @@ def test_translate_segment_all_precheck_fail_writes_last_draft():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch("translate.loop.write_segment_text") as mock_write,
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     mock_write.assert_called_once()
     _, _, _, _, content = mock_write.call_args[0]
@@ -777,7 +889,7 @@ def test_translate_segment_missing_latin_skips_r1_and_needs_human():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     reviewer_mock.assert_not_called()
     assert status == "needs_human"
 
@@ -805,7 +917,7 @@ def test_translate_segment_exhausted_writes_reviewer_notes():
         patch(_PATCH_REVIEWER, return_value=_revision("R1 feedback message")),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     mock_notes.assert_called_once()
     # First arg is conn, second is segment_id, third is the notes dict
@@ -824,7 +936,7 @@ def test_translate_segment_exhausted_notes_omitted_when_no_feedback():
         patch(_PATCH_TERMINOLOGY, return_value=_fail(["missing term"])),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     # prior_feedback is set (precheck failure message), so notes ARE written
     mock_notes.assert_called_once()
@@ -847,7 +959,7 @@ def test_translate_segment_article_title_no_latin_translates_directly():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     reviewer_mock.assert_not_called()
     assert status == "translated"
 
@@ -867,6 +979,98 @@ def test_translate_segment_question_title_no_latin_translates_directly():
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
-        status, _ = translate_segment(1, conn)
+        status, _, _ = translate_segment(1, conn)
     reviewer_mock.assert_not_called()
     assert status == "translated"
+
+
+# ── SegmentOutcome analytics (run_segment record) ─────────────────────────────
+
+
+def test_translate_segment_outcome_clean_pass():
+    """Approved on iteration 1: chosen_iteration set, no failure classes."""
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Preložený text.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        status, _, outcome = translate_segment(1, conn)
+    assert status == "translated"
+    assert outcome.segment_id == 1
+    assert outcome.iterations_used == 1
+    assert outcome.chosen_iteration == 1
+    assert outcome.failure_classes == []
+    assert outcome.last_feedback is None
+
+
+def test_translate_segment_outcome_records_terminology_failure_with_term():
+    """Terminology precheck failure records class + the unmet term per iteration."""
+    conn = _make_conn()
+    term_fail = CheckResult(
+        ok=False,
+        failures=["missing components ['rozum'] for 'rozum' (ratio)"],
+        failed_terms=["rozum"],
+    )
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, side_effect=[term_fail, _ok()]),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        status, _, outcome = translate_segment(1, conn)
+    assert status == "translated"
+    assert outcome.iterations_used == 2
+    assert outcome.chosen_iteration == 2
+    assert outcome.failure_classes == [
+        {"iter": 1, "class": "precheck_terminology", "term": "rozum"}
+    ]
+
+
+def test_translate_segment_outcome_records_structure_failure():
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, side_effect=[_fail("missing formula"), _ok()]),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        _, _, outcome = translate_segment(1, conn)
+    assert {"iter": 1, "class": "precheck_structure"} in outcome.failure_classes
+
+
+def test_translate_segment_outcome_records_reviewer_revisions():
+    """Exhausted on REVISION_NEEDED: one reviewer_revision per iteration + last_feedback."""
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, return_value=_revision("semantic drift")),
+    ):
+        status, _, outcome = translate_segment(1, conn)
+    assert status == "needs_human"
+    assert outcome.iterations_used == 3
+    assert [f["class"] for f in outcome.failure_classes] == ["reviewer_revision"] * 3
+    assert outcome.last_feedback == "semantic drift"
+
+
+def test_translate_segment_outcome_translator_error():
+    """Translator raising on iteration 1: no draft, error class recorded."""
+    conn = _make_conn()
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, side_effect=RuntimeError("HTTP 500")),
+        patch(_PATCH_STRUCTURE, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        status, _, outcome = translate_segment(1, conn)
+    assert status == "needs_human"
+    assert outcome.failure_classes == [{"iter": 1, "class": "translator_error"}]
+    assert outcome.chosen_iteration is None

@@ -14,6 +14,7 @@ from translate.run import (
     _total_cost,
     _write_needs_human_report,
     _write_production_report,
+    rerun_stale,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -203,3 +204,164 @@ def test_write_needs_human_report_creates_file(tmp_path, monkeypatch):
     assert "NEEDS HUMAN TRIAGE" in report
     assert "I.q1.a1.respondeo" in report
     assert "Terminology miss" in report
+
+
+# ── rerun_stale human-edit guard ──────────────────────────────────────────────
+# rerun_stale.fn bypasses the Prefect engine so the flow body runs as plain Python.
+
+
+def test_rerun_stale_guards_human_edited_segments():
+    """Human-edited stale segments are flagged, the rest reset and re-translated."""
+    with (
+        patch("translate.run.get_conn"),
+        patch("translate.run.get_stale_segments", return_value=[1, 2, 3]),
+        patch("translate.run.get_human_edited_segments", return_value=[2]),
+        patch("translate.run.flag_needs_human") as mock_flag,
+        patch("translate.run.reset_translation_status") as mock_reset,
+        patch("translate.run.translate_corpus") as mock_translate,
+    ):
+        rerun_stale.fn(work_id=1)
+
+    flagged_ids = mock_flag.call_args.args[1]
+    assert flagged_ids == [2]
+    assert "human edit" in mock_flag.call_args.args[2]
+    reset_ids = mock_reset.call_args.args[1]
+    assert reset_ids == [1, 3]
+    mock_translate.assert_called_once_with(1, flow_name="rerun_stale")
+
+
+def test_rerun_stale_all_human_edited_skips_translation():
+    """When every stale segment is human-edited, nothing is reset or re-translated."""
+    with (
+        patch("translate.run.get_conn"),
+        patch("translate.run.get_stale_segments", return_value=[2]),
+        patch("translate.run.get_human_edited_segments", return_value=[2]),
+        patch("translate.run.flag_needs_human") as mock_flag,
+        patch("translate.run.reset_translation_status") as mock_reset,
+        patch("translate.run.translate_corpus") as mock_translate,
+    ):
+        rerun_stale.fn(work_id=1)
+
+    mock_flag.assert_called_once()
+    mock_reset.assert_not_called()
+    mock_translate.assert_not_called()
+
+
+def test_rerun_stale_no_stale_segments_noop():
+    """No stale segments: no flagging, no reset, no translation."""
+    with (
+        patch("translate.run.get_conn"),
+        patch("translate.run.get_stale_segments", return_value=[]),
+        patch("translate.run.flag_needs_human") as mock_flag,
+        patch("translate.run.reset_translation_status") as mock_reset,
+        patch("translate.run.translate_corpus") as mock_translate,
+    ):
+        rerun_stale.fn(work_id=1)
+
+    mock_flag.assert_not_called()
+    mock_reset.assert_not_called()
+    mock_translate.assert_not_called()
+
+
+# ── run analytics: _open_run / _close_run / segment records ───────────────────
+
+
+def test_prompt_hash_deterministic_and_sensitive(tmp_path, monkeypatch):
+    (tmp_path / "translator_system.txt").write_text("A")
+    (tmp_path / "reviewer_system.txt").write_text("B")
+    monkeypatch.setattr("translate.run._PROMPTS_DIR", tmp_path)
+    from translate.run import _prompt_hash
+
+    h1 = _prompt_hash()
+    assert h1 == _prompt_hash()
+    (tmp_path / "translator_system.txt").write_text("A changed")
+    assert _prompt_hash() != h1
+
+
+def test_open_run_inserts_row_and_returns_id():
+    from translate.run import _open_run
+
+    with (
+        patch("translate.run.get_conn") as mock_gc,
+        patch("translate.run._git_sha", return_value="abc1234"),
+        patch("translate.run._prompt_hash", return_value="deadbeef"),
+        patch("translate.run._glossary_snapshot", return_value={"approved_senses": 10}),
+    ):
+        conn = mock_gc.return_value.__enter__.return_value
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = (7,)
+        run_id = _open_run("translate_corpus", ["I"], 20, max_workers=10)
+
+    assert run_id == 7
+    sql, params = cur.execute.call_args.args
+    assert "INSERT INTO translation_run" in sql
+    assert params[0] == "translate_corpus"
+    assert params[1] == "abc1234"
+
+
+def test_close_run_bulk_inserts_segments_and_totals():
+    from translate.run import _close_run
+
+    record = {
+        "segment_id": 5,
+        "final_status": "translated",
+        "iterations_used": 1,
+        "chosen_iteration": 1,
+        "cost_usd": 0.001,
+        "failure_classes": None,
+        "last_feedback": None,
+    }
+    results = [
+        _result("I.q1.a1", translated=1, usages=[_usage(0.001)]),
+    ]
+    results[0].segment_records.append(record)
+
+    with (
+        patch("translate.run.get_conn") as mock_gc,
+        patch("translate.run.psycopg2") as mock_psycopg2,
+    ):
+        conn = mock_gc.return_value.__enter__.return_value
+        cur = conn.cursor.return_value.__enter__.return_value
+        _close_run(7, results)
+
+    rows = mock_psycopg2.extras.execute_values.call_args.args[2]
+    assert len(rows) == 1
+    assert rows[0][0] == 7  # run_id
+    assert rows[0][1] == 5  # segment_id
+    sql, params = cur.execute.call_args.args
+    assert "UPDATE translation_run" in sql
+    assert params[0] == 1  # total_segments
+    assert params[4] == 7  # run_id
+
+
+def test_translate_article_task_builds_segment_records():
+    from translate.loop import SegmentOutcome
+    from translate.run import translate_article_task
+
+    outcome = SegmentOutcome(
+        segment_id=11,
+        iterations_used=2,
+        chosen_iteration=2,
+        failure_classes=[{"iter": 1, "class": "precheck_terminology", "term": "rozum"}],
+        last_feedback=None,
+    )
+    with (
+        patch("translate.run.get_conn"),
+        patch(
+            "translate.run.get_pending_segment_ids_for_article",
+            return_value=[11],
+        ),
+        patch(
+            "translate.run.translate_segment",
+            return_value=("translated", [_usage(0.002)], outcome),
+        ),
+    ):
+        result = translate_article_task.fn("I.q1.a1", work_id=1)
+
+    assert result.translated == 1
+    rec = result.segment_records[0]
+    assert rec["segment_id"] == 11
+    assert rec["final_status"] == "translated"
+    assert rec["iterations_used"] == 2
+    assert abs(rec["cost_usd"] - 0.002) < 1e-9
+    assert rec["failure_classes"][0]["term"] == "rozum"

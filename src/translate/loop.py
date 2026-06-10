@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, field
 
 import psycopg2.extras
 from dotenv import load_dotenv
@@ -28,6 +29,24 @@ load_dotenv()
 
 MAX_ITERATIONS = 3
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class SegmentOutcome:
+    """Per-segment analytics record for the run_segment table (migration 005).
+
+    failure_classes entries are recorded at failure time, one dict per event:
+      {"iter": 1, "class": "precheck_terminology", "term": "rozum"}
+      {"iter": 2, "class": "reviewer_revision"}
+    Known classes: precheck_terminology, precheck_structure, reviewer_revision,
+    translator_error, reviewer_error, no_source_text.
+    """
+
+    segment_id: int
+    iterations_used: int = 0
+    chosen_iteration: int | None = None
+    failure_classes: list[dict] = field(default_factory=list)
+    last_feedback: str | None = None
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -132,6 +151,51 @@ def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int
 
 _SUFFIX_RE = re.compile(r"\d+$")
 
+# Perfect-passive habere: 'habitum est' / 'habita sunt' ("as was held/stated").
+_HABERE_PPP_RE = re.compile(r"\b(habitum|habita)\s+(?:est|sunt)\b", re.IGNORECASE)
+
+
+def _drop_habere_ppp_constraints(latin: str, constraints: list[dict]) -> list[dict]:
+    """Drop 'habitus' constraints whose only evidence is perfect-passive habere.
+
+    CLTK lemmatizes the participle in 'habitum est' / 'habita sunt' to the noun
+    *habitus*, so the resolver writes a bogus term_usage row and the pipeline
+    then demands 'habitus' in the Slovak draft of a segment that never mentions
+    the concept. When every token supporting the constraint is part of such a
+    construction, the constraint is false — remove it. Constraints also backed
+    by a genuine habitus token elsewhere in the segment are kept.
+
+    TEMPORARY read-time patch: the root cause is the resolver writing the bogus
+    term_usage row. Part 1's re-resolution pass will fix resolution with
+    pos_tag_latin (participle + esse form never maps to a noun term) and purge
+    the existing bad rows — delete this function once the data is clean.
+    """
+    if not latin or not constraints:
+        return constraints
+    ppp_tokens = {m.group(1).lower() for m in _HABERE_PPP_RE.finditer(latin)}
+    if not ppp_tokens:
+        return constraints
+
+    result: list[dict] = []
+    for c in constraints:
+        stripped = _SUFFIX_RE.sub("", c["latin_lemma"])
+        if stripped != "habitus":
+            result.append(c)
+            continue
+        other_evidence = any(
+            stripped in {_SUFFIX_RE.sub("", cand) for cand in lemmatize_latin(token)}
+            for token in set(re.findall(r"[a-zA-Z]+", latin))
+            if token.lower() not in ppp_tokens
+        )
+        if other_evidence:
+            result.append(c)
+        else:
+            log.info(
+                "dropping false 'habitus' constraint — only evidence is "
+                "perfect-passive habere ('habitum est'/'habita sunt')"
+            )
+    return result
+
 
 def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict]:
     """Replace lemma-form constraints with the inflected surface forms from the Latin text.
@@ -174,19 +238,39 @@ def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict
     return result
 
 
+def _build_terminology_microedit(failures: list[str]) -> str:
+    """Feedback turn for a terminology-only precheck failure.
+
+    A full re-translation usually reproduces the same synonym (observed 3/3
+    identical retries), so ask for a targeted word substitution instead and
+    keep everything else byte-identical.
+    """
+    lines = "\n".join(f"  - {f}" for f in failures)
+    return (
+        "Terminology fix only:\n"
+        f"{lines}\n"
+        "Re-output your previous translation EXACTLY as it is, changing only the "
+        "words needed to satisfy the required terms above. Use each required "
+        "Slovak term inflected as the grammar of your sentence requires. "
+        "Do not reword, restructure, or re-translate anything else."
+    )
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
 def translate_segment(
     segment_id: int, conn, prompt_log: PromptLogger | None = None
-) -> tuple[str, list[UsageInfo]]:
+) -> tuple[str, list[UsageInfo], SegmentOutcome]:
     """Translate one segment through the full draft → pre-check → R1 → revise loop.
 
-    Returns (status, usages) where status is 'translated' or 'needs_human' and
-    usages is the list of UsageInfo from every API call made.
+    Returns (status, usages, outcome) where status is 'translated' or
+    'needs_human', usages is the list of UsageInfo from every API call made,
+    and outcome is the SegmentOutcome analytics record for run_segment.
     Always commits before returning.
     Raises RuntimeError only if the segment is not found in DB.
     """
+    outcome = SegmentOutcome(segment_id=segment_id)
     seg = get_segment_with_texts(conn, segment_id)
     if seg is None:
         raise RuntimeError(f"segment_id={segment_id} not found in DB")
@@ -195,7 +279,8 @@ def translate_segment(
         log.error("segment_id=%d: no Latin text in DB; flagging needs_human", segment_id)
         update_translation_status(conn, segment_id, "needs_human")
         conn.commit()
-        return "needs_human", []
+        outcome.failure_classes.append({"iter": 0, "class": "no_source_text"})
+        return "needs_human", [], outcome
 
     locked_terms = get_locked_terms(conn, segment_id)
     constraints = [
@@ -207,6 +292,9 @@ def translate_segment(
         }
         for t in locked_terms
     ]
+    # 'habitum est' is a form of habere, not the noun habitus — drop constraints
+    # that have no other textual evidence, for translator, precheck and reviewer alike.
+    constraints = _drop_habere_ppp_constraints(seg.get("latin") or "", constraints)
     # Surface-form constraints for the translator: CLTK maps each approved lemma
     # to the inflected forms that actually appear in this segment's Latin text,
     # so the model sees e.g. 'rationem → rozum' rather than 'ratio → rozum'.
@@ -229,6 +317,7 @@ def translate_segment(
     locator = seg.get("locator_path", "")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
+        outcome.iterations_used = iteration
         # For logging: the system prompt is always messages[0]; the user turn is
         # always the last message (initial request on iter 1, feedback on retries).
         system_prompt = messages[0]["content"] if prompt_log else ""
@@ -239,6 +328,7 @@ def translate_segment(
             usages.append(t_usage)
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d translator error: %s", segment_id, iteration, exc)
+            outcome.failure_classes.append({"iter": iteration, "class": "translator_error"})
             break
 
         # Draft is eligible as fallback (written on exhausted path)
@@ -249,10 +339,23 @@ def translate_segment(
         terminology_result = check_terminology_lemma(draft, constraints)
 
         if not structure_result.ok or not terminology_result.ok:
+            if not structure_result.ok:
+                outcome.failure_classes.append(
+                    {"iter": iteration, "class": "precheck_structure"}
+                )
+            for term in terminology_result.failed_terms:
+                outcome.failure_classes.append(
+                    {"iter": iteration, "class": "precheck_terminology", "term": term}
+                )
             all_failures = structure_result.failures + terminology_result.failures
-            feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
-                f"  - {f}" for f in all_failures
-            )
+            if structure_result.ok:
+                # Terminology is the only failure: targeted micro-edit converges
+                # far better than a full re-translation turn.
+                feedback = _build_terminology_microedit(terminology_result.failures)
+            else:
+                feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
+                    f"  - {f}" for f in all_failures
+                )
             if prompt_log:
                 prompt_log.log_iteration(
                     segment_id=segment_id,
@@ -284,7 +387,8 @@ def translate_segment(
                 update_translation_status(conn, segment_id, "translated")
                 conn.commit()
                 log.info("segment_id=%d title translated (reviewer skipped — no Latin)", segment_id)
-                return "translated", usages
+                outcome.chosen_iteration = iteration
+                return "translated", usages, outcome
             log.error("segment_id=%d iteration=%d: missing Latin text; skipping R1", segment_id, iteration)
             break
 
@@ -298,6 +402,7 @@ def translate_segment(
                 usages.append(review.usage)
         except RuntimeError as exc:
             log.error("segment_id=%d iteration=%d reviewer error: %s", segment_id, iteration, exc)
+            outcome.failure_classes.append({"iter": iteration, "class": "reviewer_error"})
             break
 
         if prompt_log:
@@ -333,8 +438,11 @@ def translate_segment(
                     chosen_iteration=iteration,
                     chosen_draft=draft,
                 )
-            return "translated", usages
+            outcome.chosen_iteration = iteration
+            outcome.last_feedback = None
+            return "translated", usages, outcome
 
+        outcome.failure_classes.append({"iter": iteration, "class": "reviewer_revision"})
         last_feedback = review.feedback
         if not last_feedback:
             log.warning("segment_id=%d iter=%d: REVISION_NEEDED with empty feedback; breaking", segment_id, iteration)
@@ -345,6 +453,8 @@ def translate_segment(
     # Exhausted — write precheck_passing_draft (last to clear all pre-checks) or fall back
     final_draft = precheck_passing_draft if precheck_passing_draft is not None else fallback_draft
     chosen_iter = precheck_passing_iter if precheck_passing_iter is not None else fallback_iter
+    outcome.chosen_iteration = chosen_iter
+    outcome.last_feedback = last_feedback
     if final_draft is None:
         # No draft was ever produced (e.g., translator raised on every iteration).
         # Still mark needs_human so the segment doesn't stay stuck as 'pending'.
@@ -359,7 +469,7 @@ def translate_segment(
                 chosen_iteration=None,
                 chosen_draft=None,
             )
-        return "needs_human", usages
+        return "needs_human", usages, outcome
 
     write_segment_text(conn, segment_id, "sk", src_model, final_draft)
     update_translation_status(conn, segment_id, "needs_human")
@@ -380,4 +490,4 @@ def translate_segment(
             chosen_iteration=chosen_iter,
             chosen_draft=final_draft,
         )
-    return "needs_human", usages
+    return "needs_human", usages, outcome

@@ -26,6 +26,7 @@ _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+TRANSLATOR_TEMPERATURE = 0.3  # also recorded in translation_run for run comparison
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -73,7 +74,7 @@ def call_translator_v3(
             json={
                 "model": _DEEPSEEK_MODEL,
                 "messages": messages,
-                "temperature": 0.3,
+                "temperature": TRANSLATOR_TEMPERATURE,
                 "max_tokens": 2048,
             },
             timeout=60,
@@ -111,7 +112,10 @@ def build_initial_user_turn(
     parts: list[str] = []
 
     # Hard term constraints
-    parts.append("HARD TERM CONSTRAINTS (verbatim, no exceptions):")
+    parts.append(
+        "HARD TERM CONSTRAINTS — for each Latin term below, use the given Slovak "
+        "lemma, inflected as the grammar of your sentence requires (never a synonym):"
+    )
     if constraints:
         for c in constraints:
             label = c.get("context_label") or ""
