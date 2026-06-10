@@ -185,3 +185,32 @@ def lemmatize_slovak(surface: str) -> list[str]:
         lemmatize_slovak('múdrosťou') -> ['múdrosť']
     """
     return _extract_lemmas(_slovak_morpho(), surface)
+
+
+@functools.lru_cache(maxsize=4096)
+def generate_slovak_forms(lemma: str) -> frozenset[str]:
+    """Return every inflected surface form for a Slovak lemma, lowercased.
+
+    Uses MorphoDiTa *generation* — the closed-vocabulary direction, reliable
+    for any lemma present in the MorfFlex SK dictionary. This is the inverse
+    of lemmatize_slovak: instead of analysing arbitrary text (open vocabulary,
+    where the dictionary has gaps), it enumerates the finite form set of a
+    known lemma.
+
+    Returns an empty frozenset for out-of-vocabulary lemmas (e.g. archaic
+    'čnosť' — the dictionary only has modern 'cnosť' — or the Latin loan
+    'habitus'). Callers must apply their own OOV fallback.
+
+    Examples:
+        generate_slovak_forms('rozum') -> frozenset({'rozum', 'rozumu', ...})
+        generate_slovak_forms('čnosť') -> frozenset()
+    """
+    import ufal.morphodita as m
+
+    morpho = _slovak_morpho()
+    lemmas_forms = m.TaggedLemmasForms()
+    # Returns -1 for OOV lemmas, leaving lemmas_forms empty — no need to branch.
+    morpho.generate(lemma, "", morpho.GUESSER, lemmas_forms)
+    return frozenset(
+        form.form.lower() for entry in lemmas_forms for form in entry.forms
+    )

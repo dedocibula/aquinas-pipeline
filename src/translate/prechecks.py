@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import psycopg2.extras
 from dotenv import load_dotenv
 
-from common.lemmatize import lemmatize_slovak
+from common.lemmatize import generate_slovak_forms
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ load_dotenv()
 class CheckResult:
     ok: bool
     failures: list[str] = field(default_factory=list)  # human-readable failure descriptions
+    failed_terms: list[str] = field(default_factory=list)  # required_slovak of unmet constraints
 
 
 # ── Module-level formula cache ─────────────────────────────────────────────────
@@ -149,35 +150,63 @@ def check_structure(seg: dict, draft: str, db_conn) -> CheckResult:
 
 # ── check_terminology_lemma ───────────────────────────────────────────────────
 
+def _oov_stem(word: str) -> str:
+    """Derive a normalised stem prefix for a lemma MorphoDiTa cannot generate.
+
+    Latin loans decline without their -us ending (habitus → habitu/habitom),
+    so it is stripped. Otherwise trailing vowels are inflectional endings.
+    Stems shorter than 3 characters are too prefix-happy; keep the full word.
+    """
+    w = _normalise(word)
+    if w.endswith("us") and len(w) >= 5:
+        stem = w[:-2]
+    else:
+        stem = w.rstrip("aeiouy")
+    return stem if len(stem) >= 3 else w
+
+
+def _word_in_draft(word: str, draft_tokens: set[str], draft_tokens_norm: set[str]) -> bool:
+    """True if any inflected form of `word` appears among the draft's tokens."""
+    w = word.lower()
+    if w in draft_tokens:
+        return True
+    forms = generate_slovak_forms(w)
+    if forms:
+        return bool(forms & draft_tokens)
+    # OOV lemma (archaic 'čnosť', loan 'habitus'): stem-prefix match.
+    stem = _oov_stem(w)
+    return any(t.startswith(stem) for t in draft_tokens_norm)
+
+
 def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
-    """Lemma-aware terminology check using MorphoDiTa Slovak model.
+    """Generation-based terminology check using the MorphoDiTa Slovak model.
 
     Dispatches on constraint category:
 
-    formula — word-boundary regex on normalised text (bypasses the lemmatizer,
+    formula — word-boundary regex on normalised text (bypasses morphology,
         which cannot handle prepositional phrases like 'o sebe').
         Word boundaries prevent 'po sebe'/'vo sebe' satisfying 'o sebe'.
 
-    term / name / prose / None (Krystal-seeded) — per-word candidate intersection.
-        Each word in required_slovak is lemmatized; if ANY lemma candidate for
-        that word appears in the draft's lemma set, the word is satisfied.
-        Handles multi-word constraints (e.g. 'intencionálny obraz') and inflected
-        single-word constraints (e.g. 'rozum' satisfied by 'rozumu'/'rozumom').
-        Adjacency of words is not enforced — acceptable for a fast gate.
+    term / name / prose / None (Krystal-seeded) — per-word form-set matching.
+        For each word of required_slovak, MorphoDiTa *generates* the closed
+        set of inflected forms (reliable for in-dictionary lemmas) and the
+        word is satisfied when any draft token is in that set. The draft is
+        never analysed — analysis is open-vocabulary, exactly where MorfFlex
+        SK has gaps, and it false-failed correct inflections ('čnostiam').
+        OOV lemmas fall back to a normalised stem-prefix match.
+        Adjacency of multi-word constraints is not enforced — acceptable for
+        a fast gate; the R1 reviewer sees the full constraints.
     """
     if not constraints:
         return CheckResult(ok=True)
 
-    # Only lemmatize draft tokens if at least one constraint uses the term path.
-    # Formula constraints use regex only, so avoid calling the lemmatizer unnecessarily.
-    needs_lemma = any((c.get("category") or "term") != "formula" for c in constraints)
-    draft_lemmas: set[str] = set()
-    if needs_lemma:
-        tokens = _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
-        for token in tokens:
-            draft_lemmas.update(lm.lower() for lm in lemmatize_slovak(token))
+    draft_tokens = {
+        t.lower() for t in _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
+    }
+    draft_tokens_norm = {_normalise(t) for t in draft_tokens}
 
     failures: list[str] = []
+    failed_terms: list[str] = []
     for c in constraints:
         required = c["required_slovak"]
         category = c.get("category") or "term"
@@ -191,22 +220,22 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
                 msg = f"formula '{required}' (for {c['latin_lemma']}) not found in draft"
                 print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
                 failures.append(msg)
+                failed_terms.append(required)
         else:
-            # term / name / prose: per-word candidate intersection.
+            # term / name / prose: every word must appear in some inflected form.
             required_words = _re.findall(r"[^\W\d_]+", required, flags=_re.UNICODE)
-            missing_words = []
-            for word in required_words:
-                candidates = {lm.lower() for lm in lemmatize_slovak(word)}
-                if not candidates:
-                    candidates = {word.lower()}  # OOV fallback: match verbatim form
-                if not candidates.intersection(draft_lemmas):
-                    missing_words.append(word)
+            missing_words = [
+                word
+                for word in required_words
+                if not _word_in_draft(word, draft_tokens, draft_tokens_norm)
+            ]
             if missing_words:
                 msg = f"missing components {missing_words} for '{required}' ({c['latin_lemma']})"
                 print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
                 failures.append(msg)
+                failed_terms.append(required)
 
-    return CheckResult(ok=len(failures) == 0, failures=failures)
+    return CheckResult(ok=len(failures) == 0, failures=failures, failed_terms=failed_terms)
 
 
 # ── check_terminology ─────────────────────────────────────────────────────────

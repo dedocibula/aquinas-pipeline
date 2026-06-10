@@ -247,26 +247,29 @@ def test_terminology_multiple_missing_all_reported():
 
 
 # ── check_terminology_lemma tests ─────────────────────────────────────────────
-# These tests mock lemmatize_slovak so they run without the MorphoDiTa model.
+# These tests mock generate_slovak_forms so they run without the MorphoDiTa model.
 
-def _mock_lemmatize(word_to_lemma: dict):
-    """Return a lemmatize_slovak mock that maps surface → [lemma]."""
-    def _fn(surface: str) -> list[str]:
-        return word_to_lemma.get(surface.lower(), [surface.lower()])
+def _mock_generate(lemma_to_forms: dict):
+    """Return a generate_slovak_forms mock that maps lemma → frozenset of forms.
+
+    Unknown lemmas return frozenset() — the OOV signal, same as MorphoDiTa.
+    """
+    def _fn(lemma: str) -> frozenset[str]:
+        return frozenset(lemma_to_forms.get(lemma.lower(), set()))
     return _fn
 
 
 def test_terminology_lemma_empty_constraints():
-    """Empty constraints returns ok=True immediately, no lemmatizer called."""
+    """Empty constraints returns ok=True immediately, no morphology called."""
     result = check_terminology_lemma("Ľubovoľný text.", [])
     assert result.ok is True
     assert result.failures == []
 
 
-def test_terminology_lemma_ok_when_lemma_matches(monkeypatch):
-    """Returns ok=True when a declined form lemmatizes to the required term."""
-    lemma_map = {"vierou": ["viera"], "je": ["byť"], "silná": ["silný"]}
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+def test_terminology_lemma_ok_when_inflected_form_matches(monkeypatch):
+    """Returns ok=True when a generated declined form appears in the draft."""
+    form_map = {"viera": {"viera", "viery", "viere", "vieru", "vierou"}}
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "fides", "required_slovak": "viera"}]
     draft = "Je silná vierou."
@@ -275,9 +278,10 @@ def test_terminology_lemma_ok_when_lemma_matches(monkeypatch):
     assert result.failures == []
 
 
-def test_terminology_lemma_fail_when_lemma_missing(monkeypatch):
-    """Returns ok=False when required lemma is absent from the draft."""
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize({}))
+def test_terminology_lemma_fail_when_no_form_present(monkeypatch):
+    """Returns ok=False when no inflected form of the required term is in the draft."""
+    form_map = {"viera": {"viera", "viery", "vierou"}}
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "fides", "required_slovak": "viera"}]
     draft = "Tento text neobsahuje požadovaný termín."
@@ -290,9 +294,9 @@ def test_terminology_lemma_fail_when_lemma_missing(monkeypatch):
 
 def test_terminology_lemma_case_insensitive(monkeypatch):
     """Comparison is case-insensitive on both sides."""
-    # Lemmatizer returns "boh" (lowercase); constraint is "Boh" (title-case).
-    lemma_map = {"boh": ["boh"], "je": ["byť"], "veľký": ["veľký"]}
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+    # Generated forms are lowercase; constraint is "Boh" (title-case), draft capitalised.
+    form_map = {"boh": {"boh", "boha", "bohu"}}
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "deus", "required_slovak": "Boh"}]
     draft = "Boh je veľký."
@@ -301,8 +305,9 @@ def test_terminology_lemma_case_insensitive(monkeypatch):
 
 
 def test_terminology_lemma_multiple_constraints_all_reported(monkeypatch):
-    """All missing lemmas are reported, not just the first."""
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize({}))
+    """All missing terms are reported, not just the first."""
+    form_map = {"viera": {"viera", "vierou"}, "rozum": {"rozum", "rozumu"}}
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [
         {"latin_lemma": "fides", "required_slovak": "viera"},
@@ -315,10 +320,9 @@ def test_terminology_lemma_multiple_constraints_all_reported(monkeypatch):
 
 
 def test_terminology_lemma_no_substring_false_positive(monkeypatch):
-    """Lemma check does not match on substring — 'forma' does not match 'informácia'."""
-    # "informácia" lemmatizes to "informácia", not "forma" — only the lemma set is checked
-    lemma_map = {"text": ["text"], "obsahuje": ["obsahovať"], "informácia": ["informácia"]}
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+    """Form-set check does not match on substring — 'forma' does not match 'informácia'."""
+    form_map = {"forma": {"forma", "formy", "forme", "formou"}}
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "forma", "required_slovak": "forma"}]
     draft = "Text obsahuje informácia."
@@ -326,19 +330,14 @@ def test_terminology_lemma_no_substring_false_positive(monkeypatch):
     assert result.ok is False
 
 
-# ── check_terminology_lemma — multi-word term (intersection) ──────────────────
+# ── check_terminology_lemma — multi-word term (per-word form sets) ────────────
 
-def test_terminology_lemma_multiword_term_intersection_ok(monkeypatch):
-    """Multi-word term via intersection: each component word satisfied independently."""
-    lemma_map = {
-        "boh": ["boh"],
-        "existuje": ["existovať"],
-        "o": ["o"],
-        "sebe": ["seba"],
-    }
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+def test_terminology_lemma_multiword_term_all_components_ok(monkeypatch):
+    """Multi-word term: each component word satisfied independently (verbatim here)."""
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
-    # category=None (Krystal-seeded) defaults to "term" → per-word intersection
+    # category=None (Krystal-seeded) defaults to "term" → per-word matching.
+    # Both words appear verbatim, satisfied before generation is consulted.
     constraints = [{"latin_lemma": "per se", "required_slovak": "o sebe", "category": None}]
     draft = "Boh existuje o sebe."
     result = check_terminology_lemma(draft, constraints)
@@ -348,14 +347,11 @@ def test_terminology_lemma_multiword_term_intersection_ok(monkeypatch):
 
 def test_terminology_lemma_multiword_term_inflected_components(monkeypatch):
     """Inflected multi-word constraint: 'intencionálneho obrazu' satisfies 'intencionálny obraz'."""
-    lemma_map = {
-        "nie": ["nie"],
-        "je": ["byť"],
-        "tu": ["tu"],
-        "intencionálneho": ["intencionálny"],
-        "obrazu": ["obraz"],
+    form_map = {
+        "intencionálny": {"intencionálny", "intencionálneho", "intencionálnemu"},
+        "obraz": {"obraz", "obrazu", "obrazom"},
     }
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "species", "required_slovak": "intencionálny obraz", "category": "term"}]
     draft = "Nie je tu intencionálneho obrazu."
@@ -366,12 +362,11 @@ def test_terminology_lemma_multiword_term_inflected_components(monkeypatch):
 
 def test_terminology_lemma_multiword_term_partial_missing(monkeypatch):
     """If only some words of a multi-word term are missing, the check fails."""
-    lemma_map = {
-        "je": ["byť"],
-        "intencionálny": ["intencionálny"],
-        # "obraz" absent — second word missing
+    form_map = {
+        "intencionálny": {"intencionálny", "intencionálneho"},
+        "obraz": {"obraz", "obrazu"},
     }
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _mock_lemmatize(lemma_map))
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate(form_map))
 
     constraints = [{"latin_lemma": "species", "required_slovak": "intencionálny obraz", "category": "term"}]
     draft = "Je intencionálny."
@@ -380,20 +375,11 @@ def test_terminology_lemma_multiword_term_partial_missing(monkeypatch):
     assert "obraz" in result.failures[0]
 
 
-# ── check_terminology_lemma — formula category (regex) ───────────────────────
+# ── check_terminology_lemma — OOV fallback (generation returns nothing) ───────
 
-def test_terminology_lemma_oov_falls_back_to_verbatim(monkeypatch):
-    """When lemmatizer returns [] for a constraint word, verbatim form is used as fallback."""
-    # Empty list simulates OOV / MorphoDiTa timeout for the constraint word.
-    # The draft contains the exact verbatim form, so the fallback must find it.
-    lemma_map_draft = {"hybris": ["hybris"]}
-
-    def oov_lemmatize(word):
-        # Returns [] for constraint word "hybris" when called for required_words;
-        # returns actual lemma when called during draft tokenization.
-        return lemma_map_draft.get(word.lower(), [])
-
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", oov_lemmatize)
+def test_terminology_lemma_oov_verbatim_match(monkeypatch):
+    """OOV word present verbatim passes — exact match short-circuits generation."""
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
     constraints = [{"latin_lemma": "hybris", "required_slovak": "hybris", "category": "term"}]
     draft = "Text obsahuje hybris ako termín."
@@ -401,13 +387,47 @@ def test_terminology_lemma_oov_falls_back_to_verbatim(monkeypatch):
     assert result.ok is True
 
 
-def test_terminology_lemma_formula_match(monkeypatch):
-    """Formula category uses word-boundary regex; lemmatizer not invoked for check."""
-    # Patch lemmatizer to raise so any call would explode — confirms it's not used for checks.
-    def _boom(_):
-        raise AssertionError("lemmatize_slovak must not be called for formula constraints")
+def test_terminology_lemma_oov_stem_prefix_match(monkeypatch):
+    """OOV archaic lemma matches inflected forms via stem prefix (čnosť → čnostiam)."""
+    # MorfFlex SK only has modern 'cnosť'; generation returns nothing for 'čnosť'.
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", _boom)
+    constraints = [{"latin_lemma": "virtus", "required_slovak": "čnosť", "category": "term"}]
+    draft = "Smeruje k rozličným čnostiam."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is True
+
+
+def test_terminology_lemma_oov_latin_loan_declined(monkeypatch):
+    """OOV Latin loan in -us matches declined forms that drop the ending (habitom)."""
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
+
+    constraints = [{"latin_lemma": "habitus", "required_slovak": "habitus", "category": "term"}]
+    draft = "Disponuje habitom čnosti."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is True
+
+
+def test_terminology_lemma_oov_absent_fails(monkeypatch):
+    """OOV word with no stem match in the draft still fails."""
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
+
+    constraints = [{"latin_lemma": "habitus", "required_slovak": "habitus", "category": "term"}]
+    draft = "Tento text hovorí o inom pojme."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is False
+    assert "habitus" in result.failures[0]
+
+
+# ── check_terminology_lemma — formula category (regex) ───────────────────────
+
+def test_terminology_lemma_formula_match(monkeypatch):
+    """Formula category uses word-boundary regex; morphology not invoked for check."""
+    # Patch generation to raise so any call would explode — confirms it's not used.
+    def _boom(_):
+        raise AssertionError("generate_slovak_forms must not be called for formula constraints")
+
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _boom)
 
     constraints = [{"latin_lemma": "sed_contra", "required_slovak": "Avšak proti", "category": "formula"}]
     draft = "Avšak proti je to, čo hovorí Augustín."
@@ -417,7 +437,7 @@ def test_terminology_lemma_formula_match(monkeypatch):
 
 def test_terminology_lemma_formula_word_boundary_no_false_positive(monkeypatch):
     """'po sebe' must NOT satisfy formula 'o sebe' — word boundary enforced."""
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", lambda _: [])
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
     constraints = [{"latin_lemma": "per se", "required_slovak": "o sebe", "category": "formula"}]
     draft = "Veci nasledujú po sebe v čase."
@@ -427,7 +447,7 @@ def test_terminology_lemma_formula_word_boundary_no_false_positive(monkeypatch):
 
 def test_terminology_lemma_formula_fail_when_absent(monkeypatch):
     """Formula check fails when formula string is not in draft."""
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", lambda _: [])
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
     constraints = [{"latin_lemma": "respondeo", "required_slovak": "Odpovedám", "category": "formula"}]
     draft = "Táto veta neobsahuje formulku."
@@ -442,7 +462,7 @@ def test_terminology_lemma_formula_diacritics_normalised(monkeypatch):
     _normalise("Avšak") → "avsak" (š → s + combining_caron; caron dropped → "avsak").
     A draft rendered with "Avsak" (caron stripped) also normalises to "avsak". They match.
     """
-    monkeypatch.setattr("src.translate.prechecks.lemmatize_slovak", lambda _: [])
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
 
     constraints = [{"latin_lemma": "sed_contra", "required_slovak": "Avšak proti", "category": "formula"}]
     draft = "Avsak proti je to, co hovori Augustín."  # š → s (caron stripped)
