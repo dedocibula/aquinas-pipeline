@@ -90,8 +90,11 @@ WHERE {where_clause}
 """
 
 _WHERE_MAIN = (
-    "(resolution_method IS NULL OR resolution_method != 'krystal_single') "
-    "OR status != 'approved'"
+    "status = 'flagged' "
+    "OR (category IN ('term', 'formula') AND ("
+    "    resolution_method IS NULL OR resolution_method != 'krystal_single' "
+    "    OR status != 'approved'"
+    "))"
 )
 _WHERE_AUTO = "resolution_method = 'krystal_single' AND status = 'approved'"
 
