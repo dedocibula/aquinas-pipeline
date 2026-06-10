@@ -105,6 +105,11 @@ Keep: surface-form Latin → Slovak lemma mapping in the prompt (good anchoring)
    surface match when the token is `habitum/habita` immediately followed by `est/sunt` in the
    Latin (unambiguously *habere*). Optionally harden at resolver level later using existing
    `pos_tag_latin`.
+   **DECISION (2026-06-10): the loop filter (`_drop_habere_ppp_constraints`) is a temporary
+   read-time patch for the imminent re-run. The clean fix lands with Part 1's re-resolution
+   pass: (a) resolver uses `pos_tag_latin` — a participle followed by an *esse* form never
+   maps to a noun glossary term; (b) one-off purge of existing bogus habitus `term_usage`
+   rows. Delete `_drop_habere_ppp_constraints` once the data is clean.
 
 ### Expected impact on the 79 needs_human
 - Part 2 fix 1: eliminates `čnosť`-class false fails (~10 segs/run) and `habitus`-OOV fails.

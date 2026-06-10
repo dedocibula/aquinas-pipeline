@@ -133,7 +133,7 @@ Avg iterations: 1.11 | Cost: $0.42 | Cache hit: 48.9%
 - `habitum est` (perfect passive of habere) mislemmatized to noun `habitus` → bogus constraint (3 segs).
 - Preamble injection (4), Latin output (4), genuine semantic errors (~10), permanent-accept (1).
 
-### APPROVED PLAN: `docs/plans/m5_glossary_and_term_flow_plan.md`
+### APPROVED PLAN: `.claude/m5_glossary_and_term_flow_plan.md`
 Four parts, all decisions user-confirmed:
 1. **Glossary sense mining (Option B)**: mine existing cs/en aligned corpus (91%/99% coverage)
    for multi-rendering Latin lemmas; DeepSeek labels candidates only (~$1–3). NOT full-draft mining.
