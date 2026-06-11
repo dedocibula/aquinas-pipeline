@@ -26,7 +26,7 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
 
     Each term dict: {term_id, latin_lemma, is_multiword, category, la_surface, senses: [...]}
     Each sense dict: {sense_id, context_label, cs_lemma, en_cue, sk_content, version, la_surface}
-    term.la_surface = first non-null la_surface across senses (authority-ranked: human beats seed).
+    term.la_surface = glossary_term.la_surface column (NULL → fall back to latin_lemma).
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         # Only load 'approved' senses into the Krystal lookup.
@@ -38,13 +38,12 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
         # beats model, Krystal beats Bahounek). Each LATERAL returns at most one
         # row per lang, so no GROUP BY is needed.
         cur.execute("""
-            SELECT gt.term_id, gt.latin_lemma, gt.is_multiword, gt.category,
+            SELECT gt.term_id, gt.latin_lemma, gt.is_multiword, gt.category, gt.la_surface,
                    gs.sense_id, gs.context_label, gs.version,
                    cs_sub.lemma   AS cs_lemma,
                    cs_sub.content AS cs_content,
                    en_sub.content AS en_cue,
-                   sk_sub.content AS sk_content,
-                   la_sub.content AS la_surface
+                   sk_sub.content AS sk_content
             FROM glossary_term gt
             JOIN glossary_sense gs USING (term_id)
             LEFT JOIN LATERAL (
@@ -71,14 +70,6 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
                 ORDER BY src.authority_rank
                 LIMIT 1
             ) sk_sub ON true
-            LEFT JOIN LATERAL (
-                SELECT sr.content
-                FROM sense_rendering sr
-                JOIN source src ON src.source_id = sr.source_id
-                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'la'
-                ORDER BY src.authority_rank
-                LIMIT 1
-            ) la_sub ON true
             WHERE gs.status = 'approved'
             ORDER BY gt.latin_lemma, gs.sense_id
         """)
@@ -93,7 +84,7 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
                 "latin_lemma": row["latin_lemma"],
                 "is_multiword": row["is_multiword"],
                 "category": row["category"],
-                "la_surface": None,   # populated below: first non-null across senses
+                "la_surface": row["la_surface"],
                 "senses": [],
             }
         terms[tid]["senses"].append({
@@ -106,10 +97,6 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
             "sk_content": row["sk_content"],
             "la_surface": row["la_surface"],
         })
-
-    # Populate term-level la_surface from senses (first non-null wins).
-    for t in terms.values():
-        t["la_surface"] = next((s["la_surface"] for s in t["senses"] if s.get("la_surface")), None)
 
     all_terms = sorted(terms.values(), key=lambda t: t["latin_lemma"])
     multiword = [t for t in all_terms if t["is_multiword"]]

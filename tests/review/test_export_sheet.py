@@ -67,6 +67,7 @@ def _db_row(**overrides) -> dict:
         "sense_id": 101,
         "latin_lemma": "ratio",
         "category": "term",
+        "latin_text": "ratio",
         "context_label": None,
         "proposed_slovak": "rozum",
         "latin_occurrence": "Ratio est...",
@@ -89,7 +90,7 @@ def _db_row(**overrides) -> dict:
 def test_rows_to_sheet_values_length():
     values = rows_to_sheet_values([_db_row()])
     assert len(values) == 1
-    assert len(values[0]) == 14
+    assert len(values[0]) == 15
 
 
 def test_rows_to_sheet_values_approved_is_false():
@@ -98,45 +99,46 @@ def test_rows_to_sheet_values_approved_is_false():
 
 
 def test_rows_to_sheet_values_column_order():
-    row = _db_row(context_label="as rational faculty")
+    row = _db_row(context_label="as rational faculty", latin_text="ratio")
     values = rows_to_sheet_values([row])[0]
     assert values[1] == "term"                  # B category
     assert values[2] == "ratio"                 # C latin_lemma
-    assert values[3] == "as rational faculty"   # D context_label
-    assert values[4] == "rozum"                 # E proposed_slovak
-    assert values[5] == "Ratio est..."          # F latin_occurrence
-    assert values[6] == "Rozum je..."           # G czech_occurrence
-    assert values[7] == "Reason is..."          # H english_occurrence
-    assert values[8] == "krystal_single"        # I resolution_method
-    assert values[9] == 4400                    # J frequency
-    assert values[10] == "I.q1.a1.arg1"        # K sample_locator
-    assert values[11] == 101                    # L sense_id
-    assert values[12] == 1                      # M group_id
-    assert values[13] == 1                      # N db_version
+    assert values[3] == "ratio"                 # D latin_text
+    assert values[4] == "as rational faculty"   # E context_label
+    assert values[5] == "rozum"                 # F proposed_slovak
+    assert values[6] == "Ratio est..."          # G latin_occurrence
+    assert values[7] == "Rozum je..."           # H czech_occurrence
+    assert values[8] == "Reason is..."          # I english_occurrence
+    assert values[9] == "krystal_single"        # J resolution_method
+    assert values[10] == 4400                   # K frequency
+    assert values[11] == "I.q1.a1.arg1"        # L sample_locator
+    assert values[12] == 101                    # M sense_id
+    assert values[13] == 1                      # N group_id
+    assert values[14] == 1                      # O db_version
 
 
 def test_rows_to_sheet_values_null_context_label_is_empty_string():
     row = _db_row(context_label=None)
     values = rows_to_sheet_values([row])[0]
-    assert values[3] == ""
+    assert values[4] == ""  # E context_label
 
 
 def test_rows_to_sheet_values_none_to_empty_string():
-    row = _db_row(category=None, context_label=None, proposed_slovak=None,
+    row = _db_row(category=None, latin_text=None, context_label=None, proposed_slovak=None,
                   latin_occurrence=None, czech_occurrence=None, english_occurrence=None,
                   resolution_method=None, sample_locator=None,
                   frequency=None, group_id=None, version=None)
     values = rows_to_sheet_values([row])[0]
-    # cols: 1=category, 3=context_label, 4=proposed_slovak, 5=latin, 6=czech,
-    #       7=english, 8=method, 9=freq, 10=locator, 12=group_id, 13=db_version
-    for col in [1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13]:
+    # cols: 1=category, 3=latin_text, 4=context_label, 5=proposed_slovak, 6=latin_occ,
+    #       7=czech_occ, 8=en_occ, 9=method, 10=freq, 11=locator, 13=group_id, 14=db_version
+    for col in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]:
         assert values[col] == "", f"col {col} should be empty string, got {values[col]!r}"
 
 
 def test_rows_to_sheet_values_sense_id_preserved():
     row = _db_row(sense_id=999)
     values = rows_to_sheet_values([row])[0]
-    assert values[11] == 999  # col L (was K before context_label insertion)
+    assert values[12] == 999  # col M (sense_id shifted by latin_text insertion at D)
 
 
 # ── fetch_main_rows / fetch_auto_resolved_rows SQL filtering ─────────────────
@@ -196,9 +198,9 @@ def test_export_tab_creates_worksheet_if_missing():
 
 
 def test_export_tab_existing_rows_not_duplicated():
-    # Sheet already has the header + one data row with sense_id=101 (col L = index 11)
+    # Sheet already has the header + one data row with sense_id=101 (col M = index 12)
     existing_data_row = [
-        "FALSE", "term", "ratio", "", "rozum", "", "", "", "krystal_single",
+        "FALSE", "term", "ratio", "ratio", "", "rozum", "", "", "", "krystal_single",
         4400, "I.q1.a1", 101, 1, 1,
     ]
     sp = FakeSpreadsheet()

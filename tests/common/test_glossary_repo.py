@@ -108,10 +108,10 @@ def test_la_surface_on_sense_dict():
     assert sense["la_surface"] == "Sed contra"
 
 
-def test_la_surface_first_non_null_across_senses():
-    """Term-level la_surface = first sense with a non-null la_surface."""
+def test_la_surface_multisense_term_carries_column_value():
+    """Multi-sense term: la_surface comes from gt.la_surface column (same for all senses)."""
     rows = [
-        _row(term_id=1, latin_lemma="ratio", sense_id=10, la_surface=None),
+        _row(term_id=1, latin_lemma="ratio", sense_id=10, la_surface="ratio"),
         _row(term_id=1, latin_lemma="ratio", sense_id=11, la_surface="ratio"),
     ]
     conn = FakeConn(rows)

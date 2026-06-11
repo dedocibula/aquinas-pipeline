@@ -9,9 +9,12 @@ import re
 from review.import_approvals import (
     COLS,
     get_current_sense,
+    get_la_surface,
     get_model_rendering,
+    get_term_flags,
     load_approved_rows,
     process_approval,
+    write_human_surface,
 )
 from review.sheets import HEADER
 
@@ -68,14 +71,16 @@ class FakeWorksheet:
 def _make_sheet_row(
     approved: str = "TRUE",
     latin: str = "ratio",
+    latin_text: str = "ratio",
     context_label: str = "",
     proposed_slovak: str = "rozum",
     sense_id: int = 101,
     db_version: int = 1,
 ) -> list:
-    row = [""] * 14
+    row = [""] * 15
     row[COLS["approved"]] = approved
     row[COLS["latin_lemma"]] = latin
+    row[COLS["latin_text"]] = latin_text
     row[COLS["context_label"]] = context_label
     row[COLS["proposed_slovak"]] = proposed_slovak
     row[COLS["sense_id"]] = str(sense_id)
@@ -407,5 +412,191 @@ def test_process_approval_context_label_does_not_bump_version():
     )
     assert status == "OK"
     assert bumped is False
+
+
+# ── get_la_surface ────────────────────────────────────────────────────────────
+
+
+def test_get_la_surface_returns_content():
+    conn = FakeConn(fetchone_results=[("Sed contra",)])
+    result = get_la_surface(conn, 101)
+    assert result == "Sed contra"
+
+
+def test_get_la_surface_returns_none_when_missing():
+    conn = FakeConn(fetchone_results=[None])
+    result = get_la_surface(conn, 101)
+    assert result is None
+
+
+def test_get_la_surface_queries_glossary_term():
+    conn = FakeConn(fetchone_results=[("Sed contra",)])
+    get_la_surface(conn, 55)
+    sql, params = conn.executed[0]
+    assert "glossary_term" in sql
+    assert "la_surface" in sql
+    assert params == (55,)
+
+
+# ── get_term_flags ────────────────────────────────────────────────────────────
+
+
+def test_get_term_flags_returns_dict():
+    conn = FakeConn(fetchone_results=[(True, "formula")])
+    result = get_term_flags(conn, 101)
+    assert result == {"is_multiword": True, "category": "formula"}
+
+
+def test_get_term_flags_returns_none_when_missing():
+    conn = FakeConn(fetchone_results=[None])
+    result = get_term_flags(conn, 999)
+    assert result is None
+
+
+def test_get_term_flags_queries_correct_tables():
+    conn = FakeConn(fetchone_results=[(False, "term")])
+    get_term_flags(conn, 42)
+    sql, params = conn.executed[0]
+    assert "glossary_sense" in sql
+    assert "glossary_term" in sql
+    assert params == (42,)
+
+
+# ── write_human_surface ───────────────────────────────────────────────────────
+
+
+def test_write_human_surface_updates_glossary_term():
+    conn = FakeConn()
+    write_human_surface(conn, 101, "Respondeo dicendum quod", 7)
+    sql, params = conn.executed[0]
+    assert "UPDATE glossary_term" in sql
+    assert "la_surface" in sql
+    assert "Respondeo dicendum quod" in params
+    assert 101 in params
+
+
+def test_write_human_surface_targets_correct_term():
+    conn = FakeConn()
+    write_human_surface(conn, 55, "Sed contra", 7)
+    sql, params = conn.executed[0]
+    assert "glossary_sense" in sql  # resolves sense_id → term_id
+    assert 55 in params
+
+
+# ── process_approval — latin_text import semantics ───────────────────────────
+
+
+def _row_with_surface(**overrides):
+    base = {
+        "sense_id": 101,
+        "proposed_slovak": "rozum",
+        "context_label": "",
+        "db_version": 1,
+        "latin_lemma": "ratio",
+        "latin_text": "ratio",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_process_approval_latin_text_unchanged_no_surface_write():
+    """When latin_text matches current LA surface, no write is performed."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),   # get_current_sense
+        ("rozum",),             # get_model_rendering (same SK content)
+        ("ratio",),             # get_la_surface → same as latin_text
+    ])
+    status, bumped = process_approval(conn, _row_with_surface(), human_src_id=6)
+    assert status == "OK"
+    updates_la = [e for e in conn.executed if "UPDATE glossary_term" in e[0] and "la_surface" in e[0]]
+    assert len(updates_la) == 0
+
+
+def test_process_approval_latin_text_changed_writes_la_surface():
+    """When latin_text differs from DB LA surface, glossary_term.la_surface is updated."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),                   # get_current_sense
+        ("rozum",),                             # get_model_rendering (same → no SK bump)
+        ("old_ratio",),                         # get_la_surface → different
+        (False, "term"),                        # get_term_flags → singleword term
+    ])
+    status, bumped = process_approval(conn, _row_with_surface(latin_text="ratio"), human_src_id=6)
+    assert status == "OK"
+    updates_la = [e for e in conn.executed if "UPDATE glossary_term" in e[0] and "la_surface" in e[0]]
+    assert len(updates_la) == 1
+
+
+def test_process_approval_latin_text_changed_singleword_no_bump():
+    """LA surface change for a singleword term must NOT trigger a version bump."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("rozum",),         # same SK → no SK bump
+        ("old_ratio",),     # different LA surface
+        (False, "term"),    # singleword, not formula
+    ])
+    status, bumped = process_approval(conn, _row_with_surface(latin_text="ratio"), human_src_id=6)
+    assert status == "OK"
+    assert bumped is False
+    bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
+    assert len(bump_calls) == 0
+
+
+def test_process_approval_latin_text_changed_multiword_bumps_version():
+    """LA surface change for a multiword term triggers a version bump."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("actus essendi",), # same SK
+        ("old surface",),   # different LA surface
+        (True, "term"),     # is_multiword=True
+        (2,),               # bump RETURNING
+    ])
+    status, bumped = process_approval(conn, _row_with_surface(latin_text="actus essendi"), human_src_id=6)
+    assert status == "OK"
+    assert bumped is True
+
+
+def test_process_approval_latin_text_changed_formula_bumps_version():
+    """LA surface change for a formula term triggers a version bump."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("Odpovedám",),         # same SK
+        ("old formula",),       # different LA surface
+        (True, "formula"),      # is_multiword=True + formula category
+        (2,),                   # bump RETURNING
+    ])
+    status, bumped = process_approval(conn, _row_with_surface(latin_text="Respondeo dicendum quod"), human_src_id=6)
+    assert status == "OK"
+    assert bumped is True
+
+
+def test_process_approval_sk_and_la_change_only_bumps_once():
+    """If both SK and LA changed, version is bumped once (SK bump already covers it)."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("old_rozum",),         # different SK → SK bump
+        (3,),                   # bump_sense_version RETURNING
+        ("old surface",),       # different LA surface
+        (True, "formula"),      # formula → LA would bump too, but already bumped
+    ])
+    row = _row_with_surface(proposed_slovak="new_rozum", latin_text="new surface")
+    status, bumped = process_approval(conn, row, human_src_id=6)
+    assert status == "OK"
+    assert bumped is True
+    bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
+    assert len(bump_calls) == 1
+
+
+def test_process_approval_empty_latin_text_skips_la_processing():
+    """Empty or blank latin_text is treated as None — LA processing is skipped."""
+    conn = FakeConn(fetchone_results=[
+        (101, 1, "proposed"),
+        ("rozum",),
+    ])
+    row = _row_with_surface(latin_text="")
+    status, bumped = process_approval(conn, row, human_src_id=6)
+    assert status == "OK"
+    # No LA surface queries or writes should have been made
+    la_queries = [e for e in conn.executed if "la_surface" in e[0]]
+    assert len(la_queries) == 0
     bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
     assert len(bump_calls) == 0

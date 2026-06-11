@@ -74,6 +74,7 @@ def _term_row(**overrides) -> dict:
         "version": 1,
         "context_label": None,
         "category": None,
+        "latin_surface": None,
     }
     base.update(overrides)
     return base
@@ -181,6 +182,23 @@ def test_get_locked_terms_category_formula():
     conn, cur = _fake_conn(rows)
     result = get_locked_terms(conn, 1)
     assert result[0]["category"] == "formula"
+
+
+def test_get_locked_terms_includes_latin_surface():
+    """get_locked_terms must return the 'latin_surface' field."""
+    rows = [_term_row(latin_lemma="respondeo", category="formula", latin_surface="Respondeo dicendum quod")]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert "latin_surface" in result[0]
+    assert result[0]["latin_surface"] == "Respondeo dicendum quod"
+
+
+def test_get_locked_terms_latin_surface_none_when_absent():
+    """latin_surface=None is returned correctly when no LA rendering exists."""
+    rows = [_term_row(latin_surface=None)]
+    conn, cur = _fake_conn(rows)
+    result = get_locked_terms(conn, 1)
+    assert result[0]["latin_surface"] is None
 
 
 # ── _build_surface_constraints — context_label passthrough ───────────────────
@@ -366,7 +384,6 @@ def _make_conn(seg=None, locked_terms=None):
 
 _PATCH_TRANSLATOR = "translate.loop.call_translator_v3"
 _PATCH_REVIEWER = "translate.loop.call_reviewer_r1"
-_PATCH_STRUCTURE = "translate.loop.check_structure"
 _PATCH_TERMINOLOGY = "translate.loop.check_terminology_lemma"
 _PATCH_SOURCE_ID = "translate.loop.source_id"
 
@@ -416,7 +433,6 @@ def test_translate_segment_approved_returns_translated():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Preložený text.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -429,7 +445,6 @@ def test_translate_segment_approved_commits():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -442,7 +457,6 @@ def test_translate_segment_approved_with_notes_writes_notes():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved_notes()),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
@@ -457,7 +471,6 @@ def test_translate_segment_approved_no_notes_skips_write_notes():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
@@ -475,7 +488,6 @@ def test_translate_segment_updates_sense_version_on_success():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
         patch("translate.loop.update_sense_version_used") as mock_vsn,
@@ -490,7 +502,6 @@ def test_translate_segment_updates_sense_version_on_needs_human():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
         patch("translate.loop.update_sense_version_used") as mock_vsn,
@@ -503,28 +514,13 @@ def test_translate_segment_updates_sense_version_on_needs_human():
 # ── translate_segment — pre-check failure skips R1 ───────────────────────────
 
 
-def test_translate_segment_precheck_failure_skips_r1():
-    conn = _make_conn()
-    reviewer_mock = MagicMock()
-    with (
-        patch(_PATCH_SOURCE_ID, return_value=1),
-        patch(_PATCH_TRANSLATOR, return_value=_t("Bad draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_fail("missing respondeo")),
-        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
-        patch(_PATCH_REVIEWER, reviewer_mock),
-    ):
-        translate_segment(1, conn)
-    reviewer_mock.assert_not_called()
-
-
 def test_translate_segment_terminology_failure_skips_r1():
-    """Terminology pre-check failure alone must skip R1."""
+    """Terminology pre-check failure must skip R1."""
     conn = _make_conn()
     reviewer_mock = MagicMock()
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Bad draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_fail("lemma 'viera' not found")),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
@@ -532,45 +528,18 @@ def test_translate_segment_terminology_failure_skips_r1():
     reviewer_mock.assert_not_called()
 
 
-def test_translate_segment_precheck_failure_retries_translator():
+def test_translate_segment_terminology_failure_retries_translator():
     conn = _make_conn()
     translator_mock = MagicMock(return_value=_t("Fixed draft."))
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, translator_mock),
-        patch(_PATCH_STRUCTURE, side_effect=[_fail(), _ok()]),
-        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, side_effect=[_fail(), _ok()]),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
         status, _, _ = translate_segment(1, conn)
     assert translator_mock.call_count == 2
     assert status == "translated"
-
-
-def test_translate_segment_precheck_failure_includes_failures_in_feedback():
-    conn = _make_conn()
-    translator_calls: list[tuple] = []
-
-    def capture_translator(*args, **kwargs):
-        translator_calls.append(args)
-        return _t("Draft.")
-
-    with (
-        patch(_PATCH_SOURCE_ID, return_value=1),
-        patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
-        patch(_PATCH_STRUCTURE, side_effect=[_fail("missing formula"), _ok()]),
-        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
-        patch(_PATCH_REVIEWER, return_value=_approved()),
-    ):
-        translate_segment(1, conn)
-
-    # Second call: messages list ends with a user feedback turn
-    assert len(translator_calls) == 2
-    (messages,) = translator_calls[1]
-    last_user_content = next(
-        m["content"] for m in reversed(messages) if m["role"] == "user"
-    )
-    assert "missing formula" in last_user_content
 
 
 def test_translate_segment_terminology_failure_included_in_feedback():
@@ -585,7 +554,6 @@ def test_translate_segment_terminology_failure_included_in_feedback():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, side_effect=[_fail("lemma 'viera' not found"), _ok()]),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -599,8 +567,8 @@ def test_translate_segment_terminology_failure_included_in_feedback():
     assert "viera" in last_user_content
 
 
-def test_translate_segment_terminology_only_failure_sends_microedit():
-    """Structure ok + terminology fail → targeted micro-edit turn, not full retry."""
+def test_translate_segment_terminology_failure_sends_microedit():
+    """Terminology fail → targeted micro-edit turn, not full retry."""
     conn = _make_conn()
     translator_calls: list[tuple] = []
 
@@ -611,7 +579,6 @@ def test_translate_segment_terminology_only_failure_sends_microedit():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, side_effect=[_fail("lemma 'viera' not found"), _ok()]),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -623,34 +590,6 @@ def test_translate_segment_terminology_only_failure_sends_microedit():
     )
     assert "Terminology fix only" in last_user_content
     assert "Pre-check failures" not in last_user_content
-
-
-def test_translate_segment_structure_failure_uses_full_retry_feedback():
-    """Any structure failure keeps the full retry framing, even with terminology fails."""
-    conn = _make_conn()
-    translator_calls: list[tuple] = []
-
-    def capture_translator(*args, **kwargs):
-        translator_calls.append(args)
-        return _t("Draft.")
-
-    with (
-        patch(_PATCH_SOURCE_ID, return_value=1),
-        patch(_PATCH_TRANSLATOR, side_effect=capture_translator),
-        patch(_PATCH_STRUCTURE, side_effect=[_fail("missing formula"), _ok()]),
-        patch(_PATCH_TERMINOLOGY, side_effect=[_fail("lemma 'viera' not found"), _ok()]),
-        patch(_PATCH_REVIEWER, return_value=_approved()),
-    ):
-        translate_segment(1, conn)
-
-    (messages,) = translator_calls[1]
-    last_user_content = next(
-        m["content"] for m in reversed(messages) if m["role"] == "user"
-    )
-    assert "Pre-check failures" in last_user_content
-    assert "missing formula" in last_user_content
-    assert "viera" in last_user_content
-    assert "Terminology fix only" not in last_user_content
 
 
 def test_build_terminology_microedit_content():
@@ -672,7 +611,6 @@ def test_translate_segment_revision_needed_retries():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, translator_mock),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
@@ -686,7 +624,6 @@ def test_translate_segment_max_iterations_needs_human():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
     ):
@@ -699,7 +636,6 @@ def test_translate_segment_max_iterations_writes_best_draft():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Best draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
         patch("translate.loop.write_segment_text") as mock_write,
@@ -721,7 +657,6 @@ def test_translate_segment_revision_feedback_passed_to_translator():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=capture),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, side_effect=[_revision("fix semantics"), _approved()]),
     ):
@@ -767,7 +702,6 @@ def test_translate_segment_reviewer_error_eventually_needs_human():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, side_effect=RuntimeError("R1 down")),
     ):
@@ -787,7 +721,6 @@ def test_translate_segment_best_draft_is_last_precheck_pass():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, translator_mock),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
         patch("translate.loop.write_segment_text") as mock_write,
@@ -805,8 +738,7 @@ def test_translate_segment_all_precheck_fail_writes_last_draft():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Always failing draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_fail("no formula")),
-        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
+        patch(_PATCH_TERMINOLOGY, return_value=_fail("missing term")),
         patch("translate.loop.write_segment_text") as mock_write,
     ):
         status, _, _ = translate_segment(1, conn)
@@ -824,7 +756,6 @@ def test_translate_segment_always_commits_on_needs_human():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
     ):
@@ -845,7 +776,6 @@ def test_translate_segment_constraints_include_category():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -869,13 +799,83 @@ def test_translate_segment_constraints_default_category_to_term():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
         translate_segment(1, conn)
 
     assert captured[0][0]["category"] == "term"
+
+
+def test_translate_segment_formula_uses_latin_surface_in_constraint():
+    """Formula term with a latin_surface: constraint dict must show surface, not slug."""
+    term = _term_row(
+        latin_lemma="respondeo",
+        required_slovak="Odpovedám: treba povedať, že",
+        category="formula",
+        latin_surface="Respondeo dicendum quod",
+    )
+    conn = _make_conn(locked_terms=[term])
+    captured: list[list] = []
+
+    def capture_precheck(draft, constraints):
+        captured.append(list(constraints))
+        return CheckResult(ok=True)
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    c = captured[0][0]
+    assert c["latin_lemma"] == "Respondeo dicendum quod"
+    assert c["category"] == "formula"
+
+
+def test_translate_segment_formula_falls_back_to_slug_when_no_surface():
+    """Formula with no latin_surface: constraint dict uses the slug."""
+    term = _term_row(
+        latin_lemma="ad_nonum_dicendum",
+        required_slovak="k deviatej sa postupuje takto",
+        category="formula",
+        latin_surface=None,
+    )
+    conn = _make_conn(locked_terms=[term])
+    captured: list[list] = []
+
+    def capture_precheck(draft, constraints):
+        captured.append(list(constraints))
+        return CheckResult(ok=True)
+
+    with (
+        patch(_PATCH_SOURCE_ID, return_value=1),
+        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
+        patch(_PATCH_TERMINOLOGY, side_effect=capture_precheck),
+        patch(_PATCH_REVIEWER, return_value=_approved()),
+    ):
+        translate_segment(1, conn)
+
+    c = captured[0][0]
+    assert c["latin_lemma"] == "ad_nonum_dicendum"
+
+
+def test_build_surface_constraints_skips_formula_terms():
+    """Formula terms must pass through _build_surface_constraints without CLTK substitution."""
+    constraints = [
+        {
+            "latin_lemma": "Respondeo dicendum quod",
+            "required_slovak": "Odpovedám",
+            "category": "formula",
+            "context_label": None,
+        },
+    ]
+    result = _build_surface_constraints(_LATIN, constraints)
+    assert len(result) == 1
+    assert result[0]["latin_lemma"] == "Respondeo dicendum quod"
+    assert result[0]["category"] == "formula"
 
 
 def test_translate_segment_missing_latin_skips_r1_and_needs_human():
@@ -885,7 +885,6 @@ def test_translate_segment_missing_latin_skips_r1_and_needs_human():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
@@ -912,7 +911,6 @@ def test_translate_segment_exhausted_writes_reviewer_notes():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision("R1 feedback message")),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
@@ -932,7 +930,6 @@ def test_translate_segment_exhausted_notes_omitted_when_no_feedback():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_fail(["missing term"])),
         patch("translate.loop.write_reviewer_notes") as mock_notes,
     ):
@@ -955,7 +952,6 @@ def test_translate_segment_article_title_no_latin_translates_directly():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Či je posvätná náuka vedou?")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
@@ -975,7 +971,6 @@ def test_translate_segment_question_title_no_latin_translates_directly():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Povaha a rozsah posvätnej náuky")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, reviewer_mock),
     ):
@@ -993,7 +988,6 @@ def test_translate_segment_outcome_clean_pass():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Preložený text.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -1017,7 +1011,6 @@ def test_translate_segment_outcome_records_terminology_failure_with_term():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, side_effect=[term_fail, _ok()]),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
@@ -1030,18 +1023,6 @@ def test_translate_segment_outcome_records_terminology_failure_with_term():
     ]
 
 
-def test_translate_segment_outcome_records_structure_failure():
-    conn = _make_conn()
-    with (
-        patch(_PATCH_SOURCE_ID, return_value=1),
-        patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, side_effect=[_fail("missing formula"), _ok()]),
-        patch(_PATCH_TERMINOLOGY, return_value=_ok()),
-        patch(_PATCH_REVIEWER, return_value=_approved()),
-    ):
-        _, _, outcome = translate_segment(1, conn)
-    assert {"iter": 1, "class": "precheck_structure"} in outcome.failure_classes
-
 
 def test_translate_segment_outcome_records_reviewer_revisions():
     """Exhausted on REVISION_NEEDED: one reviewer_revision per iteration + last_feedback."""
@@ -1049,7 +1030,6 @@ def test_translate_segment_outcome_records_reviewer_revisions():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision("semantic drift")),
     ):
@@ -1066,7 +1046,6 @@ def test_translate_segment_outcome_translator_error():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=RuntimeError("HTTP 500")),
-        patch(_PATCH_STRUCTURE, return_value=_ok()),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):

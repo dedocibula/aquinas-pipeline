@@ -1,7 +1,7 @@
 """Translation loop — translate_segment() orchestrator.
 
-MAX_ITERATIONS = 3 hard cap. Pre-checks run before every R1 call; a
-pre-check failure sends the draft back to the translator without calling R1.
+MAX_ITERATIONS = 3 hard cap. Terminology pre-check runs before every R1 call;
+a failure sends the draft back to the translator without calling R1.
 The loop writes the best qualifying draft and updates DB state, then commits.
 """
 
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from common.db import source_id
 from common.lemmatize import lemmatize_latin
 from common.pricing import UsageInfo
-from translate.prechecks import check_structure, check_terminology_lemma
+from translate.prechecks import check_terminology_lemma
 from translate.prompt_logger import PromptLogger
 from translate.reviewer import build_reviewer_turn, call_reviewer_r1
 from translate.translator import (
@@ -38,7 +38,7 @@ class SegmentOutcome:
     failure_classes entries are recorded at failure time, one dict per event:
       {"iter": 1, "class": "precheck_terminology", "term": "rozum"}
       {"iter": 2, "class": "reviewer_revision"}
-    Known classes: precheck_terminology, precheck_structure, reviewer_revision,
+    Known classes: precheck_terminology, reviewer_revision,
     translator_error, reviewer_error, no_source_text.
     """
 
@@ -90,6 +90,7 @@ def get_locked_terms(conn, segment_id: int) -> list[dict]:
             SELECT DISTINCT ON (gs.sense_id)
                 gt.latin_lemma,
                 gt.category,
+                gt.la_surface   AS latin_surface,
                 sr.content      AS required_slovak,
                 gs.sense_id,
                 gs.version,
@@ -223,7 +224,7 @@ def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict
     result: list[dict] = []
     for c in constraints:
         lemma = c["latin_lemma"]
-        if " " in lemma:
+        if " " in lemma or c.get("category") == "formula":
             result.append(c)
             continue
 
@@ -285,7 +286,9 @@ def translate_segment(
     locked_terms = get_locked_terms(conn, segment_id)
     constraints = [
         {
-            "latin_lemma": t["latin_lemma"],
+            # For formula terms, show the human-readable Latin surface (e.g.
+            # "Ad nonum sic proceditur") rather than the slug key.
+            "latin_lemma": t.get("latin_surface") or t["latin_lemma"],
             "required_slovak": t["required_slovak"],
             "context_label": t.get("context_label"),
             "category": t.get("category") or "term",
@@ -335,27 +338,14 @@ def translate_segment(
         fallback_draft = draft
         fallback_iter = iteration
 
-        structure_result = check_structure(seg, draft, conn)
         terminology_result = check_terminology_lemma(draft, constraints)
 
-        if not structure_result.ok or not terminology_result.ok:
-            if not structure_result.ok:
-                outcome.failure_classes.append(
-                    {"iter": iteration, "class": "precheck_structure"}
-                )
+        if not terminology_result.ok:
             for term in terminology_result.failed_terms:
                 outcome.failure_classes.append(
                     {"iter": iteration, "class": "precheck_terminology", "term": term}
                 )
-            all_failures = structure_result.failures + terminology_result.failures
-            if structure_result.ok:
-                # Terminology is the only failure: targeted micro-edit converges
-                # far better than a full re-translation turn.
-                feedback = _build_terminology_microedit(terminology_result.failures)
-            else:
-                feedback = "Pre-check failures — fix before R1 review:\n" + "\n".join(
-                    f"  - {f}" for f in all_failures
-                )
+            feedback = _build_terminology_microedit(terminology_result.failures)
             if prompt_log:
                 prompt_log.log_iteration(
                     segment_id=segment_id,
@@ -365,7 +355,7 @@ def translate_segment(
                     user_turn=user_turn,
                     draft=draft,
                     precheck_ok=False,
-                    precheck_failures=all_failures,
+                    precheck_failures=terminology_result.failures,
                     reviewer_turn=None,
                     verdict=None,
                     notes=None,

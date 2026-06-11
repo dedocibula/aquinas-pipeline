@@ -24,10 +24,11 @@ _REVIEW_TAB = "Review"
 COLS = {
     "approved": 0,          # A
     "latin_lemma": 2,       # C
-    "context_label": 3,     # D — new
-    "proposed_slovak": 4,   # E — was D
-    "sense_id": 11,         # L — was K
-    "db_version": 13,       # N — was M
+    "latin_text": 3,        # D — canonical Latin surface form (editable)
+    "context_label": 4,     # E — was D
+    "proposed_slovak": 5,   # F — was E
+    "sense_id": 12,         # M — was L
+    "db_version": 14,       # O — was N
 }
 
 _TRUTHY = {"TRUE", "True", "true", "1", "YES", "yes"}
@@ -55,6 +56,7 @@ def load_approved_rows(worksheet) -> list[dict]:
             db_version = None
         result.append({
             "sense_id": sense_id_val,
+            "latin_text": raw[COLS["latin_text"]] if len(raw) > COLS["latin_text"] else "",
             "proposed_slovak": raw[COLS["proposed_slovak"]] if len(raw) > COLS["proposed_slovak"] else "",
             "context_label": raw[COLS["context_label"]] if len(raw) > COLS["context_label"] else "",
             "db_version": db_version,
@@ -74,6 +76,52 @@ def get_current_sense(conn, sense_id_val: int) -> dict | None:
     if row is None:
         return None
     return {"sense_id": row[0], "version": row[1], "status": row[2]}
+
+
+def get_la_surface(conn, sense_id_val: int) -> str | None:
+    """Fetch la_surface for the term owning this sense. Returns None if absent."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT gt.la_surface
+            FROM glossary_sense gs
+            JOIN glossary_term gt ON gt.term_id = gs.term_id
+            WHERE gs.sense_id = %s
+            """,
+            (sense_id_val,),
+        )
+        row = cur.fetchone()
+    return row[0] if row is not None else None
+
+
+def get_term_flags(conn, sense_id_val: int) -> dict | None:
+    """Fetch is_multiword and category for the term owning this sense."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT gt.is_multiword, gt.category
+            FROM glossary_sense gs
+            JOIN glossary_term gt ON gt.term_id = gs.term_id
+            WHERE gs.sense_id = %s
+            """,
+            (sense_id_val,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return {"is_multiword": row[0], "category": row[1]}
+
+
+def write_human_surface(conn, sense_id_val: int, surface: str, src_id: int) -> None:
+    """Write la_surface onto the glossary_term that owns this sense."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE glossary_term SET la_surface = %s
+            WHERE term_id = (SELECT term_id FROM glossary_sense WHERE sense_id = %s)
+            """,
+            (surface, sense_id_val),
+        )
 
 
 def get_model_rendering(conn, sense_id_val: int) -> str | None:
@@ -145,6 +193,19 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     if new_slovak != reference_text:
         bump_sense_version(conn, sense_id_val)
         version_bumped = True
+
+    # Process latin_text (LA surface) — write if reviewer changed it, bump only for
+    # multiword/formula terms (surface change → re-resolution + rerun_stale needed).
+    new_surface = (row.get("latin_text") or "").strip() or None
+    if new_surface is not None:
+        current_surface = get_la_surface(conn, sense_id_val)
+        if new_surface != current_surface:
+            write_human_surface(conn, sense_id_val, new_surface, human_src_id)
+            if not version_bumped:
+                flags = get_term_flags(conn, sense_id_val)
+                if flags and (flags["is_multiword"] or flags["category"] == "formula"):
+                    bump_sense_version(conn, sense_id_val)
+                    version_bumped = True
 
     update_sense_status(conn, sense_id_val, "approved")
     return "OK", version_bumped

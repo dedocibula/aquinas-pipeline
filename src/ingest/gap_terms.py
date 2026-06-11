@@ -77,12 +77,13 @@ def _scan_gap_lemmas(
             # Phase 2 tries all candidates for Krystal lookup; skip here if any would hit.
             if any(c in krystal_lemmas for c in cands):
                 continue
-            lemma = _strip_lemma_suffix(cands[0]).lower()
+            lemma = _strip_lemma_suffix(cands[0])
+            lemma_lower = lemma.lower()
             if (
                 len(lemma) <= min_len
                 or lemma in krystal_lemmas
-                or lemma in _CLTK_STOPS
-                or lemma in ignored_lemmas
+                or lemma_lower in _CLTK_STOPS
+                or lemma_lower in ignored_lemmas
                 or lemma in seen_in_seg
             ):
                 continue

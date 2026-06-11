@@ -19,22 +19,23 @@ load_dotenv()
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _SECRETS_PATH = ".secrets/gsheets_service_account.json"
 
-SENSE_ID_COL = 11   # column L (0-based); shifted by context_label insertion at D
+SENSE_ID_COL = 12   # column M (0-based); shifted by latin_text insertion at D
 HEADER = [
     "approved",              # A — checkbox; reviewer ticks to approve
     "category",              # B
     "latin_lemma",           # C
-    "context_label",         # D — editable by reviewer; English, 3-6 words
-    "proposed_slovak",       # E — editable by reviewer
-    "latin_occurrence",      # F — full Latin segment text
-    "czech_occurrence",      # G — full Czech segment text
-    "english_occurrence",    # H — full English segment text
-    "resolution_method",     # I
-    "frequency",             # J
-    "sample_locator",        # K
-    "sense_id",              # L — hidden
-    "group_id",              # M — hidden
-    "db_version",            # N — hidden
+    "latin_text",            # D — editable by reviewer; canonical Latin surface form
+    "context_label",         # E — editable by reviewer; English, 3-6 words
+    "proposed_slovak",       # F — editable by reviewer
+    "latin_occurrence",      # G — full Latin segment text
+    "czech_occurrence",      # H — full Czech segment text
+    "english_occurrence",    # I — full English segment text
+    "resolution_method",     # J
+    "frequency",             # K
+    "sample_locator",        # L
+    "sense_id",              # M — hidden
+    "group_id",              # N — hidden
+    "db_version",            # O — hidden
 ]
 
 # Sheets API hard limit on ValueRange objects per batchUpdate request.
@@ -161,11 +162,12 @@ def batch_write_rows(
     db_rows: list[list],
     existing_map: dict[int, int],
 ) -> None:
-    """Idempotent write: update existing rows (preserve cols A, D, E) and append new rows.
+    """Idempotent write: update existing rows (preserve cols A, D, E, F) and append new rows.
 
-    Preserved on update (reviewer-editable): A (checkbox), D (context_label), E (proposed_slovak).
-    Updated from DB: B-C (category, latin_lemma) and F-N (occurrences through db_version).
-    Updates are issued as two ValueRange objects per row (B:C and F:N), chunked at
+    Preserved on update (reviewer-editable): A (checkbox), D (latin_text),
+    E (context_label), F (proposed_slovak).
+    Updated from DB: B-C (category, latin_lemma) and G-O (occurrences through db_version).
+    Updates are issued as two ValueRange objects per row (B:C and G:O), chunked at
     _BATCH_LIMIT ranges per batchUpdate call to stay within the Sheets API limit.
     """
     updates: list[dict] = []
@@ -175,12 +177,12 @@ def batch_write_rows(
         sense_id = row[SENSE_ID_COL]
         if sense_id in existing_map:
             row_num = existing_map[sense_id]
-            # Two contiguous ranges per row, skipping preserved cols A(0), D(3), E(4).
-            b_to_c = [row[1], row[2]]                                    # B, C
-            f_to_n = [row[5], row[6], row[7], row[8], row[9], row[10],  # F, G, H, I, J, K
-                      row[11], row[12], row[13]]                         # L, M, N
+            # Two contiguous ranges per row, skipping preserved cols A(0), D(3), E(4), F(5).
+            b_to_c = [row[1], row[2]]                                           # B, C
+            g_to_o = [row[6], row[7], row[8], row[9], row[10], row[11],        # G, H, I, J, K, L
+                      row[12], row[13], row[14]]                                # M, N, O
             updates.append({"range": f"B{row_num}:C{row_num}", "values": [b_to_c]})
-            updates.append({"range": f"F{row_num}:N{row_num}", "values": [f_to_n]})
+            updates.append({"range": f"G{row_num}:O{row_num}", "values": [g_to_o]})
         else:
             inserts.append(row)
 
