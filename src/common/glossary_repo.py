@@ -24,29 +24,62 @@ _BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "article_title", "ques
 def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
     """Return (multiword_terms, singleword_terms) sorted for deterministic processing.
 
-    Each term dict: {term_id, latin_lemma, is_multiword, senses: [...]}
-    Each sense dict: {sense_id, context_label, cs_lemma, en_cue, sk_content, version}
+    Each term dict: {term_id, latin_lemma, is_multiword, category, la_surface, senses: [...]}
+    Each sense dict: {sense_id, context_label, cs_lemma, en_cue, sk_content, version, la_surface}
+    term.la_surface = first non-null la_surface across senses (authority-ranked: human beats seed).
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         # Only load 'approved' senses into the Krystal lookup.
         # 'proposed' senses belong to gap terms and must continue to be resolved
         # via gap methods (bahounek_derived etc.) on every run, not promoted to
         # krystal_single just because they were created in a previous run.
+        # All language renderings use LATERAL ORDER BY authority_rank so the
+        # highest-authority source wins (lower rank = higher authority; e.g. human
+        # beats model, Krystal beats Bahounek). Each LATERAL returns at most one
+        # row per lang, so no GROUP BY is needed.
         cur.execute("""
-            SELECT gt.term_id, gt.latin_lemma, gt.is_multiword,
+            SELECT gt.term_id, gt.latin_lemma, gt.is_multiword, gt.category,
                    gs.sense_id, gs.context_label, gs.version,
-                   max(sr_cs.lemma)   FILTER (WHERE sr_cs.lang = 'cs') AS cs_lemma,
-                   max(sr_cs.content) FILTER (WHERE sr_cs.lang = 'cs') AS cs_content,
-                   max(sr_en.content) FILTER (WHERE sr_en.lang = 'en') AS en_cue,
-                   max(sr_sk.content) FILTER (WHERE sr_sk.lang = 'sk') AS sk_content
+                   cs_sub.lemma   AS cs_lemma,
+                   cs_sub.content AS cs_content,
+                   en_sub.content AS en_cue,
+                   sk_sub.content AS sk_content,
+                   la_sub.content AS la_surface
             FROM glossary_term gt
             JOIN glossary_sense gs USING (term_id)
-            LEFT JOIN sense_rendering sr_cs ON sr_cs.sense_id = gs.sense_id AND sr_cs.lang = 'cs'
-            LEFT JOIN sense_rendering sr_en ON sr_en.sense_id = gs.sense_id AND sr_en.lang = 'en'
-            LEFT JOIN sense_rendering sr_sk ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
+            LEFT JOIN LATERAL (
+                SELECT sr.lemma, sr.content
+                FROM sense_rendering sr
+                JOIN source src ON src.source_id = sr.source_id
+                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'cs'
+                ORDER BY src.authority_rank
+                LIMIT 1
+            ) cs_sub ON true
+            LEFT JOIN LATERAL (
+                SELECT sr.content
+                FROM sense_rendering sr
+                JOIN source src ON src.source_id = sr.source_id
+                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'en'
+                ORDER BY src.authority_rank
+                LIMIT 1
+            ) en_sub ON true
+            LEFT JOIN LATERAL (
+                SELECT sr.content
+                FROM sense_rendering sr
+                JOIN source src ON src.source_id = sr.source_id
+                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+                ORDER BY src.authority_rank
+                LIMIT 1
+            ) sk_sub ON true
+            LEFT JOIN LATERAL (
+                SELECT sr.content
+                FROM sense_rendering sr
+                JOIN source src ON src.source_id = sr.source_id
+                WHERE sr.sense_id = gs.sense_id AND sr.lang = 'la'
+                ORDER BY src.authority_rank
+                LIMIT 1
+            ) la_sub ON true
             WHERE gs.status = 'approved'
-            GROUP BY gt.term_id, gt.latin_lemma, gt.is_multiword,
-                     gs.sense_id, gs.context_label, gs.version
             ORDER BY gt.latin_lemma, gs.sense_id
         """)
         rows = cur.fetchall()
@@ -59,6 +92,8 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
                 "term_id": tid,
                 "latin_lemma": row["latin_lemma"],
                 "is_multiword": row["is_multiword"],
+                "category": row["category"],
+                "la_surface": None,   # populated below: first non-null across senses
                 "senses": [],
             }
         terms[tid]["senses"].append({
@@ -69,7 +104,12 @@ def _load_glossary(conn) -> tuple[list[dict], list[dict]]:
             "cs_content": row["cs_content"],
             "en_cue": row["en_cue"],
             "sk_content": row["sk_content"],
+            "la_surface": row["la_surface"],
         })
+
+    # Populate term-level la_surface from senses (first non-null wins).
+    for t in terms.values():
+        t["la_surface"] = next((s["la_surface"] for s in t["senses"] if s.get("la_surface")), None)
 
     all_terms = sorted(terms.values(), key=lambda t: t["latin_lemma"])
     multiword = [t for t in all_terms if t["is_multiword"]]
