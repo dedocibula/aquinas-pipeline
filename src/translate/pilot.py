@@ -26,6 +26,7 @@ from common.db import get_conn
 from common.pricing import UsageInfo
 from translate.loop import translate_segment
 from translate.prompt_logger import PromptLogger
+from translate.run import ArticleResult, _close_run, _open_run
 
 load_dotenv()
 
@@ -171,26 +172,6 @@ def fetch_corpus_char_counts(conn) -> dict[str, int]:
         return {row[0]: row[1] for row in cur.fetchall()}
 
 
-def fetch_reviewer_notes(conn, segment_id: int) -> dict | None:
-    """Return reviewer_notes JSON for a segment, or None."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT reviewer_notes FROM segment WHERE segment_id = %s",
-            (segment_id,),
-        )
-        row = cur.fetchone()
-        return row[0] if row else None
-
-
-def _iteration_count(notes: dict | None, status: str) -> int:
-    """Infer iteration count from reviewer_notes and final status."""
-    if status == "needs_human":
-        return 3  # always exhausted MAX_ITERATIONS
-    if notes and isinstance(notes, dict) and "iteration" in notes:
-        return notes["iteration"]
-    return 1  # APPROVED with no notes → approved on first R1 call
-
-
 # ── Pilot runner ──────────────────────────────────────────────────────────────
 
 
@@ -199,6 +180,13 @@ def run_pilot() -> None:
     debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
     full_mode = os.environ.get("PILOT_FULL", "").strip() == "1"
     titles_mode = os.environ.get("PILOT_TITLES", "").strip() == "1"
+
+    if titles_mode:
+        flow_name = "pilot_titles"
+    elif full_mode:
+        flow_name = "pilot_full"
+    else:
+        flow_name = "pilot_debug"
 
     with get_conn() as conn:
         if titles_mode:
@@ -249,27 +237,29 @@ def run_pilot() -> None:
         n_workers = _DEFAULT_WORKERS
     log.info("Workers: %d", n_workers)
 
+    run_id = _open_run(flow_name, None, None, n_workers)
+
     translated_count = 0
     needs_human_count = 0
     iterations_list: list[int] = []
     stats_list: list[SegmentStats] = []
+    article_result = ArticleResult(locator=flow_name)
 
     def _translate_worker(
         seg: dict, pl: PromptLogger
-    ) -> tuple[dict, str, list, dict | None, dict]:
+    ) -> tuple[dict, str, list, object, dict]:
         """Translate one segment in its own DB connection."""
         with get_conn() as wconn:
-            status, usages, _outcome = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
-            notes = fetch_reviewer_notes(wconn, seg["segment_id"])
+            status, usages, outcome = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
             lengths = fetch_segment_text_lengths(wconn, seg["segment_id"])
-        return seg, status, usages, notes, lengths
+        return seg, status, usages, outcome, lengths
 
     completed = 0
     with PromptLogger(debug_log_path) as prompt_log, ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = {pool.submit(_translate_worker, seg, prompt_log): seg for seg in pending}
         for fut in as_completed(futures):
             try:
-                seg, status, usages, notes, lengths = fut.result()
+                seg, status, usages, outcome, lengths = fut.result()
             except Exception as exc:
                 orig_seg = futures[fut]
                 log.error(
@@ -283,7 +273,7 @@ def run_pilot() -> None:
             sid = seg["segment_id"]
             completed += 1
 
-            iters = _iteration_count(notes, status)
+            iters = outcome.iterations_used
             iterations_list.append(iters)
 
             seg_stats = SegmentStats(
@@ -295,12 +285,26 @@ def run_pilot() -> None:
             )
             stats_list.append(seg_stats)
 
-            seg_cost = sum(u.cost_usd for u in usages)
+            article_result.usages.extend(usages)
             if status == "translated":
                 translated_count += 1
+                article_result.translated += 1
             else:
                 needs_human_count += 1
+                article_result.needs_human += 1
+            article_result.segment_records.append(
+                {
+                    "segment_id": sid,
+                    "final_status": status,
+                    "iterations_used": outcome.iterations_used,
+                    "chosen_iteration": outcome.chosen_iteration,
+                    "cost_usd": sum(u.cost_usd for u in usages),
+                    "failure_classes": outcome.failure_classes or None,
+                    "last_feedback": outcome.last_feedback,
+                }
+            )
 
+            seg_cost = sum(u.cost_usd for u in usages)
             log.info(
                 "[%d/%d] segment_id=%d  %s → %s (iter=%d, cost=$%.4f, running needs_human=%.1f%%)",
                 completed,
@@ -314,6 +318,8 @@ def run_pilot() -> None:
             )
 
     elapsed = time.time() - start
+    _close_run(run_id, [article_result])
+
     total_run = len(pending)
     report_name = "m4_titles.txt" if titles_mode else "m4_pilot.txt"
     _write_report(
