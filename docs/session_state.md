@@ -177,3 +177,25 @@ All five implementation steps complete and committed:
 5. **POS-aware resolver fix** — use `pos_tag_latin` to prevent PPP + esse from mapping to noun; purge bogus `habitus` term_usage rows; then delete `_drop_habere_ppp_constraints`.
 6. **Restart partial run** — I/I_II/III pars q1–q20 still have ~2,268 pending; II_II q1–q20 already done.
 7. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER review cycle.
+
+## Formula Terms — DB State (applied 2026-06-11)
+
+One-off `seed_formula_terms.py` was run and deleted. The following is now live in the DB and must be reproduced by the glossary-rebuild pipeline:
+
+**Migration 006** (`migrations/006_sense_rendering_la_lang.sql`):
+- `sense_rendering.lang` check extended to include `'la'` (was cs/en/sk only).
+- `term_usage.resolution_method` check extended to include `'formula_backfill'`.
+
+**glossary_term changes:**
+- `sed_contra`: `is_multiword=True`, `la_surface='Sed contra'` written to `sense_rendering(lang='la', source='model')`.
+- `respondeo`: `is_multiword=True`, `la_surface='Respondeo dicendum quod'` written to `sense_rendering(lang='la', source='model')`.
+
+**term_usage backfill:**
+- 2,655 `sed_contra` segment rows inserted (`resolution_method='formula_backfill'`, `confidence='auto'`).
+- 2,599 `respondeo` segment rows inserted.
+
+**Glossary-rebuild must:**
+1. Set `is_multiword=True` for structural formula terms (sed_contra, respondeo) — slug keys cannot be phrase-matched otherwise.
+2. Write `la` sense_rendering with the anchoring surface prefix (`_match_pattern` uses it over `latin_lemma`).
+3. Insert `term_usage` rows for all segments of the matching `element_type` using `resolution_method='formula_backfill'`.
+4. `praeterea` stays singleword — CLTK finds it via token lemmatization; `^`-anchoring would break mid-sentence occurrences.
