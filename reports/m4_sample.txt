@@ -1,0 +1,32 @@
+SAMPLE RUN SUMMARY
+  Scope:             pilot_sample_100.json (100-segment representative sample)
+  Total segments:    100
+  Translated:        86  (86.0%)
+  Needs human:       14  (14.0%)
+  Avg iterations:    1.50
+  Time elapsed:      11m 29s
+
+ABORT THRESHOLDS
+  needs_human > 20%: ok
+  avg_iters > 2.5:   ok
+
+COST (actual, pilot run only)
+  Translator (deepseek-chat):  $0.0559
+  Reviewer   (deepseek-reasoner): $0.1912
+  Total:                          $0.2472
+  Avg cost/segment:               $0.00247
+  Cache hit rate:                 57.1%  (387,072 hit / 677,296 total input tokens)
+
+M5 EXTRAPOLATION (calibrated from pilot)
+  Pilot segments:                 100
+  Pilot input chars (la+cs+en):   371,224
+  Corpus chars — la:              10,529,334
+                  cs:              9,610,514
+                  en:              9,593,067
+                  total:           29,732,915
+  Calibrated translator $/char:   $0.00000015
+  Calibrated reviewer $/la-char:  $0.00000118
+  Est. translator cost (corpus):  ~$4.48
+  Est. reviewer cost (corpus):    ~$12.43
+  Est. full corpus total:         ~$16.91
+  Note: assumes cache hit rate stays at 57.1%; lower rate raises cost proportionally.
