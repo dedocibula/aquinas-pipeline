@@ -588,7 +588,7 @@ def test_translate_segment_terminology_failure_sends_microedit():
     last_user_content = next(
         m["content"] for m in reversed(messages) if m["role"] == "user"
     )
-    assert "Terminology fix only" in last_user_content
+    assert "<system_rejection>" in last_user_content
     assert "Pre-check failures" not in last_user_content
 
 
@@ -596,9 +596,9 @@ def test_build_terminology_microedit_content():
     """Micro-edit turn lists failures and forbids any other change."""
     msg = _build_terminology_microedit(["missing components ['rozum'] for 'rozum' (ratio)"])
     assert "rozum" in msg
-    assert "Terminology fix only" in msg
-    assert "inflected" in msg
-    assert "Do not reword" in msg
+    assert "<system_rejection>" in msg
+    assert "inflect" in msg
+    assert "find-and-replace" in msg
 
 
 # ── translate_segment — REVISION_NEEDED path ─────────────────────────────────

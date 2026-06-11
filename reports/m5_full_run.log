@@ -1,0 +1,407 @@
+19:45:57.121 | INFO    | prefect - Starting temporary server on http://127.0.0.1:8675
+See https://docs.prefect.io/v3/concepts/server#how-to-guides for more information on running a dedicated Prefect server.
+19:45:59.001 | INFO    | Flow run 'glittering-eagle' - Beginning flow run 'glittering-eagle' for flow 'translate-corpus'
+[PRECHECK] WARNING: no approved formula for 'respondeo' — skipping check
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+19:46:35.874 | WARNING | translate.loop - segment_id=11454 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:47:09.839 | WARNING | translate.loop - segment_id=11502 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['matéria'] for 'matéria' (materia)
+[PRECHECK] terminology FAIL: missing components ['matéria'] for 'matéria' (materia)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:48:03.991 | WARNING | translate.loop - segment_id=11471 flagged needs_human after 3 iterations
+19:48:13.540 | WARNING | translate.loop - segment_id=11475 flagged needs_human after 3 iterations
+19:48:25.020 | INFO    | Task run 'translate-article-d75' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['nábožná', 'oddanosť'] for 'nábožná oddanosť' (devotio)
+[PRECHECK] segment_id=11467 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['uctivosť'] for 'uctivosť' (observantia)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:48:55.860 | WARNING | translate.loop - segment_id=11479 flagged needs_human after 3 iterations
+19:48:57.898 | INFO    | Task run 'translate-article-24f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:49:10.979 | WARNING | translate.loop - segment_id=11506 flagged needs_human after 3 iterations
+[PRECHECK] segment_id=11505 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:49:21.672 | WARNING | translate.loop - segment_id=11495 flagged needs_human after 3 iterations
+19:49:24.906 | INFO    | Task run 'translate-article-4b5' - Finished in state Completed()
+19:49:31.092 | INFO    | Task run 'translate-article-01e' - Finished in state Completed()
+19:49:39.471 | INFO    | Task run 'translate-article-d1a' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['princíp'] for 'princíp' (principium)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:49:53.292 | WARNING | translate.loop - segment_id=11547 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:50:12.717 | INFO    | Task run 'translate-article-c18' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:50:22.840 | WARNING | translate.loop - segment_id=11478 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:50:32.400 | WARNING | translate.loop - segment_id=11555 flagged needs_human after 3 iterations
+19:50:34.537 | INFO    | Task run 'translate-article-b5b' - Finished in state Completed()
+19:50:49.091 | INFO    | Task run 'translate-article-ca4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:51:00.250 | INFO    | Task run 'translate-article-bc4' - Finished in state Completed()
+19:51:13.664 | WARNING | translate.loop - segment_id=11590 flagged needs_human after 3 iterations
+19:51:14.483 | WARNING | translate.loop - segment_id=11434 flagged needs_human after 3 iterations
+[PRECHECK] segment_id=11491 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+19:51:28.463 | INFO    | Task run 'translate-article-10c' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['dar'] for 'dar' (oblatio)
+[PRECHECK] terminology FAIL: missing components ['dar'] for 'dar' (oblatio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:51:56.495 | INFO    | Task run 'translate-article-26a' - Finished in state Completed()
+19:51:58.959 | INFO    | Task run 'translate-article-4f3' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:52:13.265 | INFO    | Task run 'translate-article-63b' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:52:36.735 | WARNING | translate.loop - segment_id=11595 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:52:50.974 | INFO    | Task run 'translate-article-bcc' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:52:54.535 | WARNING | translate.loop - segment_id=11625 flagged needs_human after 3 iterations
+19:52:59.810 | INFO    | Task run 'translate-article-177' - Finished in state Completed()
+19:53:06.587 | INFO    | Task run 'translate-article-d10' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:53:18.820 | WARNING | translate.loop - segment_id=11651 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:53:31.213 | WARNING | translate.loop - segment_id=11622 flagged needs_human after 3 iterations
+19:53:37.543 | INFO    | Task run 'translate-article-5de' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:53:47.587 | INFO    | Task run 'translate-article-7e0' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:53:54.220 | INFO    | Task run 'translate-article-c27' - Finished in state Completed()
+19:53:55.863 | INFO    | Task run 'translate-article-e91' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:53:58.653 | WARNING | translate.loop - segment_id=11693 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+19:54:08.165 | WARNING | translate.loop - segment_id=11634 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:54:16.275 | WARNING | translate.loop - segment_id=11700 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['spravodlivosť'] for 'spravodlivosť' (iustitia)
+[PRECHECK] terminology FAIL: missing components ['princíp'] for 'princíp' (principium)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:54:43.475 | WARNING | translate.loop - segment_id=11659 flagged needs_human after 3 iterations
+19:54:51.944 | INFO    | Task run 'translate-article-962' - Finished in state Completed()
+19:54:56.836 | INFO    | Task run 'translate-article-e7d' - Finished in state Completed()
+19:55:03.905 | INFO    | Task run 'translate-article-297' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:55:10.743 | WARNING | translate.loop - segment_id=11702 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milovanie'] for 'milovanie' (dilectio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['o', 'sebe'] for 'o sebe' (per se)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:55:29.990 | WARNING | translate.loop - segment_id=11730 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:55:35.673 | WARNING | translate.loop - segment_id=11696 flagged needs_human after 3 iterations
+19:55:35.676 | INFO    | Task run 'translate-article-5fc' - Finished in state Completed()
+19:55:41.487 | INFO    | Task run 'translate-article-56b' - Finished in state Completed()
+[PRECHECK] segment_id=11718 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+19:56:02.192 | INFO    | Task run 'translate-article-3b9' - Finished in state Completed()
+19:56:02.298 | INFO    | Task run 'translate-article-8f4' - Finished in state Completed()
+19:56:09.241 | INFO    | Task run 'translate-article-55b' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['odplata'] for 'odplata' (vindicatio)
+19:56:56.184 | INFO    | Task run 'translate-article-9c9' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['princíp'] for 'princíp' (principium)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:57:14.867 | WARNING | translate.loop - segment_id=11688 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:57:24.551 | INFO    | Task run 'translate-article-6d2' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:57:29.998 | WARNING | translate.loop - segment_id=11756 flagged needs_human after 3 iterations
+19:57:45.050 | INFO    | Task run 'translate-article-2a6' - Finished in state Completed()
+19:57:50.321 | INFO    | Task run 'translate-article-c9d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+19:58:09.665 | INFO    | Task run 'translate-article-bc4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['pravda'] for 'pravda' (veritas)
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:58:58.043 | INFO    | Task run 'translate-article-a37' - Finished in state Completed()
+19:59:01.028 | INFO    | Task run 'translate-article-205' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['akcidentálne'] for 'akcidentálne' (per accidens)
+[PRECHECK] terminology FAIL: missing components ['sebe'] for 'o sebe' (per se)
+19:59:17.908 | INFO    | Task run 'translate-article-74b' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['prezieravosť'] for 'prezieravosť' (prudentia)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:59:36.742 | WARNING | translate.loop - segment_id=11859 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+19:59:57.833 | INFO    | Task run 'translate-article-ec2' - Finished in state Completed()
+19:59:58.734 | INFO    | Task run 'translate-article-8cf' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+20:00:16.909 | INFO    | Task run 'translate-article-6b5' - Finished in state Completed()
+20:00:24.947 | INFO    | Task run 'translate-article-943' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+20:00:31.360 | WARNING | translate.loop - segment_id=11918 flagged needs_human after 3 iterations
+20:00:34.863 | INFO    | Task run 'translate-article-930' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:01:01.257 | WARNING | translate.loop - segment_id=11706 flagged needs_human after 3 iterations
+20:01:01.261 | INFO    | Task run 'translate-article-20f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:01:36.426 | INFO    | Task run 'translate-article-d35' - Finished in state Completed()
+[PRECHECK] segment_id=11903 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+20:01:50.044 | INFO    | Task run 'translate-article-633' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:01:54.816 | INFO    | Task run 'translate-article-391' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:01:55.307 | WARNING | translate.loop - segment_id=11972 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:02:11.686 | WARNING | translate.loop - segment_id=11941 flagged needs_human after 3 iterations
+20:02:13.159 | INFO    | Task run 'translate-article-8ff' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:02:26.489 | INFO    | Task run 'translate-article-167' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+20:02:26.801 | WARNING | translate.loop - segment_id=11942 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:02:42.710 | WARNING | translate.loop - segment_id=11993 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['umierenosť'] for 'umierenosť' (temperantia)
+[PRECHECK] terminology FAIL: missing components ['intencionálny', 'obraz'] for 'intencionálny obraz' (species)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:03:08.386 | WARNING | translate.loop - segment_id=11954 flagged needs_human after 3 iterations
+20:03:28.108 | INFO    | Task run 'translate-article-001' - Finished in state Completed()
+20:03:28.250 | INFO    | Task run 'translate-article-92f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['lesť'] for 'lesť' (dolus)
+[PRECHECK] terminology FAIL: missing components ['pokora'] for 'pokora' (humilitas)
+20:03:32.775 | WARNING | translate.loop - segment_id=11960 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['lesť'] for 'lesť' (dolus)
+[PRECHECK] terminology FAIL: missing components ['lesť'] for 'lesť' (dolus)
+20:03:36.828 | WARNING | translate.loop - segment_id=12017 flagged needs_human after 3 iterations
+20:03:49.993 | INFO    | Task run 'translate-article-dfe' - Finished in state Completed()
+20:04:00.593 | INFO    | Task run 'translate-article-7b3' - Finished in state Completed()
+20:04:07.886 | INFO    | Task run 'translate-article-51c' - Finished in state Completed()
+20:04:10.990 | INFO    | Task run 'translate-article-723' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['láska'] for 'láska' (caritas)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+20:04:20.124 | INFO    | Task run 'translate-article-d84' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['priateľstvo'] for 'priateľstvo' (amicitia)
+[PRECHECK] terminology FAIL: missing components ['láska'] for 'láska' (amor)
+[PRECHECK] terminology FAIL: missing components ['intencionálny', 'obraz'] for 'intencionálny obraz' (species)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intencionálny', 'obraz'] for 'intencionálny obraz' (species)
+20:05:12.506 | WARNING | translate.loop - segment_id=12044 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:05:33.275 | WARNING | translate.loop - segment_id=12052 flagged needs_human after 3 iterations
+[PRECHECK] segment_id=12051 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:05:45.136 | INFO    | Task run 'translate-article-c3d' - Finished in state Completed()
+20:05:57.360 | INFO    | Task run 'translate-article-839' - Finished in state Completed()
+20:05:58.375 | INFO    | Task run 'translate-article-c9d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:06:01.168 | INFO    | Task run 'translate-article-7ac' - Finished in state Completed()
+20:06:02.687 | INFO    | Task run 'translate-article-ff2' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:06:07.204 | WARNING | translate.loop - segment_id=12102 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['umierenosť'] for 'umierenosť' (temperantia)
+20:06:31.485 | INFO    | Task run 'translate-article-838' - Finished in state Completed()
+20:06:32.388 | WARNING | translate.loop - segment_id=12134 flagged needs_human after 3 iterations
+20:06:33.944 | INFO    | Task run 'translate-article-395' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['spravodlivosť'] for 'spravodlivosť' (iustitia)
+[PRECHECK] terminology FAIL: missing components ['štedrosť'] for 'štedrosť' (liberalitas)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+20:06:50.738 | INFO    | Task run 'translate-article-c96' - Finished in state Completed()
+20:06:59.535 | INFO    | Task run 'translate-article-12b' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+20:07:14.145 | WARNING | translate.loop - segment_id=12107 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['hrabivosť'] for 'hrabivosť' (avaritia)
+20:07:19.632 | INFO    | Task run 'translate-article-c1d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['hrabivosť'] for 'hrabivosť' (avaritia)
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['láska'] for 'láska' (amor)
+[PRECHECK] terminology FAIL: missing components ['hrabivosť'] for 'hrabivosť' (avaritia)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:07:48.482 | INFO    | Task run 'translate-article-12f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:08:25.940 | INFO    | Task run 'translate-article-328' - Finished in state Completed()
+20:08:31.378 | INFO    | Task run 'translate-article-85f' - Finished in state Completed()
+20:08:32.545 | INFO    | Task run 'translate-article-ecb' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+20:08:48.652 | INFO    | Task run 'translate-article-acd' - Finished in state Completed()
+20:08:51.541 | INFO    | Task run 'translate-article-6b3' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['spravodlivosť'] for 'spravodlivosť' (iustitia)
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+20:09:12.097 | INFO    | Task run 'translate-article-bb1' - Finished in state Completed()
+20:09:16.216 | WARNING | translate.loop - segment_id=12196 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+20:09:25.200 | WARNING | translate.loop - segment_id=12224 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:25:02.754 | ERROR   | translate.loop - segment_id=12208 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.756 | ERROR   | translate.loop - segment_id=12236 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.758 | ERROR   | translate.loop - segment_id=12194 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.761 | ERROR   | translate.loop - segment_id=12262 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.762 | ERROR   | translate.loop - segment_id=12219 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.765 | ERROR   | translate.loop - segment_id=12228 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.767 | ERROR   | translate.loop - segment_id=12128 iteration=3 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:25:02.773 | INFO    | Task run 'translate-article-41c' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+20:25:02.774 | INFO    | Task run 'translate-article-d05' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+20:25:02.776 | INFO    | Task run 'translate-article-cd8' - Task run failed with exception: ConnectionError(ProtocolError('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))) - Retry 1/3 will start 30 second(s) from now
+20:25:02.778 | WARNING | translate.loop - segment_id=12208 flagged needs_human after 3 iterations
+20:25:02.780 | WARNING | translate.loop - segment_id=12236 flagged needs_human after 3 iterations
+20:25:02.780 | WARNING | translate.loop - segment_id=12219 flagged needs_human after 3 iterations
+20:25:02.780 | WARNING | translate.loop - segment_id=12262 flagged needs_human after 3 iterations
+20:25:02.782 | WARNING | translate.loop - segment_id=12228 flagged needs_human after 3 iterations
+20:25:02.783 | WARNING | translate.loop - segment_id=12194 flagged needs_human after 3 iterations
+20:25:02.787 | WARNING | translate.loop - segment_id=12128 flagged needs_human after 3 iterations
+20:25:10.051 | INFO    | Task run 'translate-article-695' - Finished in state Completed()
+20:25:20.431 | INFO    | Task run 'translate-article-035' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+20:40:39.784 | ERROR   | translate.loop - segment_id=12225 iteration=1 reviewer error: DeepSeek R1 network error: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
+20:40:39.805 | WARNING | translate.loop - segment_id=12225 flagged needs_human after 3 iterations
+20:40:39.809 | INFO    | Task run 'translate-article-6a7' - Finished in state Completed()
+20:41:02.643 | ERROR   | translate.loop - segment_id=12264 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.649 | ERROR   | translate.loop - segment_id=12217 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.652 | ERROR   | translate.loop - segment_id=12299 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.655 | ERROR   | translate.loop - segment_id=12238 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.657 | ERROR   | translate.loop - segment_id=12284 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.661 | ERROR   | translate.loop - segment_id=12210 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.662 | ERROR   | translate.loop - segment_id=12108 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.663 | ERROR   | translate.loop - segment_id=12275 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.665 | ERROR   | translate.loop - segment_id=12288 iteration=3 reviewer error: DeepSeek R1 network error: Response ended prematurely
+20:41:02.672 | WARNING | translate.loop - segment_id=12238 flagged needs_human after 3 iterations
+20:41:02.672 | WARNING | translate.loop - segment_id=12264 flagged needs_human after 3 iterations
+20:41:02.673 | WARNING | translate.loop - segment_id=12217 flagged needs_human after 3 iterations
+20:41:02.673 | WARNING | translate.loop - segment_id=12108 flagged needs_human after 3 iterations
+20:41:02.677 | INFO    | Task run 'translate-article-41c' - Finished in state Completed()
+20:41:02.680 | WARNING | translate.loop - segment_id=12275 flagged needs_human after 3 iterations
+20:41:02.681 | WARNING | translate.loop - segment_id=12284 flagged needs_human after 3 iterations
+20:41:02.681 | WARNING | translate.loop - segment_id=12210 flagged needs_human after 3 iterations
+20:41:02.684 | WARNING | translate.loop - segment_id=12299 flagged needs_human after 3 iterations
+20:41:02.688 | WARNING | translate.loop - segment_id=12288 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:41:15.136 | INFO    | Task run 'translate-article-651' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:41:20.988 | INFO    | Task run 'translate-article-1d4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:41:27.570 | WARNING | translate.loop - segment_id=12342 flagged needs_human after 3 iterations
+20:41:33.191 | INFO    | Task run 'translate-article-eb8' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:41:40.695 | INFO    | Task run 'translate-article-ce7' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['duša'] for 'duša' (anima)
+[PRECHECK] terminology FAIL: missing components ['statočnosť'] for 'statočnosť' (fortitudo)
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+20:42:07.239 | INFO    | Task run 'translate-article-d05' - Finished in state Completed()
+20:42:19.471 | WARNING | translate.loop - segment_id=12286 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:42:32.800 | WARNING | translate.loop - segment_id=12331 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['sebe'] for 'o sebe' (per se)
+[PRECHECK] segment_id=12312 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+20:42:39.792 | INFO    | Task run 'translate-article-8a3' - Finished in state Completed()
+20:42:43.038 | INFO    | Task run 'translate-article-cd8' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:42:45.977 | WARNING | translate.loop - segment_id=12326 flagged needs_human after 3 iterations
+20:43:01.074 | INFO    | Task run 'translate-article-0cf' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+20:43:08.502 | WARNING | translate.loop - segment_id=12361 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelektové', 'nahliadnutie'] for 'intelektové nahliadnutie' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:43:27.256 | INFO    | Task run 'translate-article-4d0' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:43:36.130 | WARNING | translate.loop - segment_id=12349 flagged needs_human after 3 iterations
+[PRECHECK] segment_id=12357 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:43:51.585 | INFO    | Task run 'translate-article-d6c' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+20:43:54.826 | WARNING | translate.loop - segment_id=12381 flagged needs_human after 3 iterations
+20:44:21.952 | INFO    | Task run 'translate-article-7fa' - Finished in state Completed()
+[PRECHECK] segment_id=12386 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+20:44:28.395 | INFO    | Task run 'translate-article-79a' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['uctivosť'] for 'uctivosť' (observantia)
+20:44:33.839 | INFO    | Task run 'translate-article-f8e' - Finished in state Completed()
+20:44:37.170 | INFO    | Task run 'translate-article-58e' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+[PRECHECK] terminology FAIL: missing components ['uctivosť'] for 'uctivosť' (observantia)
+[PRECHECK] terminology FAIL: missing components ['pravda'] for 'pravda' (veritas)
+[PRECHECK] terminology FAIL: missing components ['sila'] for 'sila' (vis)
+[PRECHECK] segment_id=12346 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+[PRECHECK] terminology FAIL: missing components ['uctivosť'] for 'uctivosť' (observantia)
+[PRECHECK] segment_id=12395 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+20:45:15.120 | INFO    | Task run 'translate-article-252' - Finished in state Completed()
+20:45:19.242 | INFO    | Task run 'translate-article-919' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:45:26.928 | INFO    | Task run 'translate-article-6bc' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:45:28.244 | WARNING | translate.loop - segment_id=12444 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:45:47.268 | INFO    | Task run 'translate-article-6bb' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:46:11.928 | INFO    | Task run 'translate-article-581' - Finished in state Completed()
+20:46:13.523 | INFO    | Task run 'translate-article-49c' - Finished in state Completed()
+20:46:18.115 | INFO    | Task run 'translate-article-baa' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+20:46:20.792 | WARNING | translate.loop - segment_id=12336 flagged needs_human after 3 iterations
+[PRECHECK] segment_id=12335 element_type=sed_contra FAIL: expected sed_contra formula 'Avšak proti' not found in draft
+20:46:29.179 | INFO    | Task run 'translate-article-965' - Finished in state Completed()
+20:46:51.711 | INFO    | Task run 'translate-article-b4e' - Finished in state Completed()
+20:46:51.914 | INFO    | Task run 'translate-article-103' - Finished in state Completed()
+06:31:32.767 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 
+06:51:04.770 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: [Errno 8] nodename nor servname provided, or not known
+07:06:17.656 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: [Errno 8] nodename nor servname provided, or not known
+07:24:12.724 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: [Errno 8] nodename nor servname provided, or not known
+07:38:00.543 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: [Errno 8] nodename nor servname provided, or not known
+08:00:30.713 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 
+08:33:58.035 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 
+08:49:30.787 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 
+08:55:18.436 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 
+20:20:06.000 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 

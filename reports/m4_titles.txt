@@ -1,0 +1,32 @@
+TITLES RUN SUMMARY
+  Scope:             all question_title + article_title (full corpus)
+  Total segments:    3161
+  Translated:        3161  (100.0%)
+  Needs human:       0  (0.0%)
+  Avg iterations:    1.00
+  Time elapsed:      14m 4s
+
+ABORT THRESHOLDS
+  needs_human > 20%: ok
+  avg_iters > 2.5:   ok
+
+COST (actual, pilot run only)
+  Translator (deepseek-chat):  $0.0823
+  Reviewer   (deepseek-reasoner): $0.0000
+  Total:                          $0.0823
+  Avg cost/segment:               $0.00003
+  Cache hit rate:                 72.9%  (1,213,952 hit / 1,664,559 total input tokens)
+
+M5 EXTRAPOLATION (calibrated from pilot)
+  Pilot segments:                 3161
+  Pilot input chars (la+cs+en):   166,209
+  Corpus chars — la:              10,529,334
+                  cs:              9,610,514
+                  en:              9,593,067
+                  total:           29,732,915
+  Calibrated translator $/char:   $0.00000050
+  Calibrated reviewer $/la-char:  $0.00000000
+  Est. translator cost (corpus):  ~$14.72
+  Est. reviewer cost (corpus):    ~$0.00
+  Est. full corpus total:         ~$14.72
+  Note: assumes cache hit rate stays at 72.9%; lower rate raises cost proportionally.

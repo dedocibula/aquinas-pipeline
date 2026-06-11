@@ -56,8 +56,14 @@ def phrase_match(latin_text: str, multiword_terms: list[dict]) -> list[tuple[dic
 
     for term in multiword_terms:
         pattern = _match_pattern(term)
-        for m in pattern.finditer(normalized):
-            matches.append((m.start(), m.end(), term, m.group()))
+        if term.get("category") == "formula":
+            # Anchored pattern: at most one match at position 0.
+            m = pattern.match(normalized)
+            if m:
+                matches.append((m.start(), m.end(), term, m.group()))
+        else:
+            for m in pattern.finditer(normalized):
+                matches.append((m.start(), m.end(), term, m.group()))
 
     # Sort by start position; for same start prefer longer match (greedy / leftmost-longest).
     # This ensures "actus essendi" is consumed before "actus" can claim the same position.

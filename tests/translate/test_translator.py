@@ -93,9 +93,9 @@ class TestCallTranslatorV3:
         call_args = mock_post.call_args
         messages = call_args.kwargs["json"]["messages"]
         user_msg = next(m for m in messages if m["role"] == "user")
-        assert "HARD TERM CONSTRAINTS" in user_msg["content"]
-        assert "Deus → Boh" in user_msg["content"]
-        assert "esse → byť" in user_msg["content"]
+        assert "<hard_constraints>" in user_msg["content"]
+        assert 'latin="Deus" required_slovak="Boh"' in user_msg["content"]
+        assert 'latin="esse" required_slovak="byť"' in user_msg["content"]
 
     def test_user_turn_contains_latin_text(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -160,32 +160,30 @@ class TestBuildInitialUserTurnContextLabel:
     def test_no_context_label_emits_plain_constraint(self):
         from translate.translator import build_initial_user_turn
         turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS)
-        assert "Deus → Boh" in turn
-        assert "[" not in turn.split("HARD TERM CONSTRAINTS")[1].split("CZECH")[0]
+        assert '<term latin="Deus" required_slovak="Boh" />' in turn
+        assert "context=" not in turn.split("<hard_constraints>")[1].split("</hard_constraints>")[0]
 
     def test_context_label_emits_qualifier(self):
         from translate.translator import build_initial_user_turn
         turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL)
-        assert "gratiam [sanctifying grace] → milosť" in turn
+        assert 'latin="gratiam" required_slovak="milosť" context="sanctifying grace"' in turn
 
     def test_none_context_label_no_qualifier(self):
         from translate.translator import build_initial_user_turn
         turn = build_initial_user_turn(_MINIMAL_SEG, _CONSTRAINTS_WITH_LABEL)
-        assert "rationem → rozum" in turn
-        assert "rationem [" not in turn
+        assert '<term latin="rationem" required_slovak="rozum" />' in turn
 
     def test_empty_string_context_label_no_qualifier(self):
         from translate.translator import build_initial_user_turn
         constraints = [{"latin_lemma": "ratio", "required_slovak": "rozum", "context_label": ""}]
         turn = build_initial_user_turn(_MINIMAL_SEG, constraints)
-        assert "ratio → rozum" in turn
-        assert "ratio [" not in turn
+        assert '<term latin="ratio" required_slovak="rozum" />' in turn
 
     def test_missing_context_label_key_no_qualifier(self):
         from translate.translator import build_initial_user_turn
         constraints = [{"latin_lemma": "ratio", "required_slovak": "rozum"}]
         turn = build_initial_user_turn(_MINIMAL_SEG, constraints)
-        assert "ratio → rozum" in turn
+        assert '<term latin="ratio" required_slovak="rozum" />' in turn
 
 
 # ── TestLoadTranslatorSystemPrompt ────────────────────────────────────────────

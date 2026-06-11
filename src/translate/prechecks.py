@@ -94,8 +94,12 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
 
         if category == "formula":
             # Fixed phrases: word-boundary regex on normalised text.
-            # \b prevents 'po sebe'/'vo sebe' false-positives for 'o sebe'.
-            req_norm = _normalise(required)
+            # Strip trailing punctuation before building the pattern: a regex
+            # \b after re.escape("takto.") would require the next char to be \w,
+            # but sentence-ending periods are always followed by a space — the
+            # match would never fire. Stripping lets "takto." match "takto. " and
+            # "takto:" and "takto," without losing the leading \b anchor.
+            req_norm = _normalise(required).rstrip(".,;:!?")
             draft_norm = _normalise(draft)
             if not _re.search(rf"\b{_re.escape(req_norm)}\b", draft_norm):
                 msg = f"formula '{required}' (for {c['latin_lemma']}) not found in draft"

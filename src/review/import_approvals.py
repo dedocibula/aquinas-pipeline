@@ -3,9 +3,11 @@
 CLI:
     uv run python -m review.import_approvals
 
-Idempotent — safe to re-run. Rows with status='approved' and a matching
-db_version are counted as already confirmed and skipped. Rows where
-db_version is blank or mismatches the DB version are reported as conflicts.
+Idempotent — safe to re-run. Senses already marked 'approved' in the DB are
+skipped. Approvals always bump sense version so rerun_stale picks up stale
+segments. Version mismatches on proposed senses are accepted (the DB was
+bumped after export; human authority overrides). Only blank db_version is
+treated as a conflict.
 
 Prerequisites:
     - GSHEETS_SPREADSHEET_ID set in environment
@@ -94,24 +96,6 @@ def get_la_surface(conn, sense_id_val: int) -> str | None:
     return row[0] if row is not None else None
 
 
-def get_term_flags(conn, sense_id_val: int) -> dict | None:
-    """Fetch is_multiword and category for the term owning this sense."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT gt.is_multiword, gt.category
-            FROM glossary_sense gs
-            JOIN glossary_term gt ON gt.term_id = gs.term_id
-            WHERE gs.sense_id = %s
-            """,
-            (sense_id_val,),
-        )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    return {"is_multiword": row[0], "category": row[1]}
-
-
 def write_human_surface(conn, sense_id_val: int, surface: str, src_id: int) -> None:
     """Write la_surface onto the glossary_term that owns this sense."""
     with conn.cursor() as cur:
@@ -124,38 +108,15 @@ def write_human_surface(conn, sense_id_val: int, surface: str, src_id: int) -> N
         )
 
 
-def get_model_rendering(conn, sense_id_val: int) -> str | None:
-    """Fetch the reference Slovak rendering for version-bump comparison.
-
-    Prefers the model proposal; falls back to any existing SK rendering
-    (e.g. Krystal-seeded terms that have no model row). Returns None only
-    if no SK rendering exists at all.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT sr.content
-            FROM sense_rendering sr
-            JOIN source src ON sr.source_id = src.source_id
-            WHERE sr.sense_id = %s AND sr.lang = 'sk'
-            ORDER BY CASE src.code WHEN 'model' THEN 1 ELSE 2 END
-            LIMIT 1
-            """,
-            (sense_id_val,),
-        )
-        row = cur.fetchone()
-    return row[0] if row is not None else None
-
-
 def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     """Apply one approved row to the DB.
 
     Returns (status, version_bumped) where status is one of:
       'OK'                — processed successfully
-      'ALREADY_CONFIRMED' — row was already approved with the same version (skipped)
-      'CONFLICT'          — db_version is blank, or DB version has changed since export
+      'ALREADY_CONFIRMED' — sense already approved (skipped)
+      'CONFLICT'          — db_version is blank (skipped)
       'NOT_FOUND'         — sense_id does not exist in the DB
-    version_bumped is True only when Slovak content changed and version was incremented.
+    version_bumped is always True for 'OK'.
     """
     sense_id_val = row["sense_id"]
     new_slovak = row["proposed_slovak"]
@@ -169,18 +130,17 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     if sheet_version is None:
         return "CONFLICT", False
 
-    if current["version"] != sheet_version:
-        # If already approved at this version mismatch, it's a re-run after a
-        # successful first import that bumped the version.
-        if current["status"] == "approved":
-            return "ALREADY_CONFIRMED", False
-        return "CONFLICT", False
+    if current["status"] == "approved":
+        # Already approved — idempotent skip regardless of version.
+        return "ALREADY_CONFIRMED", False
 
-    # Versions match — safe to write.
+    # For proposed senses, a version mismatch means the DB was bumped after export
+    # (e.g. sense-mining re-resolution). The human has seen this sense and explicitly
+    # approved it, so proceed unconditionally.
+
     write_human_rendering(conn, sense_id_val, new_slovak, human_src_id)
 
-    # Write context_label unconditionally — empty string from sheet becomes NULL.
-    # Does NOT bump version: context_label is metadata, not sense_rendering content.
+    # Write context_label — empty string becomes NULL; does NOT bump version.
     raw_label = (row.get("context_label") or "").strip()
     with conn.cursor() as cur:
         cur.execute(
@@ -188,27 +148,19 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
             (raw_label if raw_label else None, sense_id_val),
         )
 
-    reference_text = get_model_rendering(conn, sense_id_val)
-    version_bumped = False
-    if new_slovak != reference_text:
-        bump_sense_version(conn, sense_id_val)
-        version_bumped = True
+    # Always bump on approval: marks all term_usage rows using any prior version
+    # as stale so rerun_stale picks them up.
+    bump_sense_version(conn, sense_id_val)
 
-    # Process latin_text (LA surface) — write if reviewer changed it, bump only for
-    # multiword/formula terms (surface change → re-resolution + rerun_stale needed).
+    # LA surface — write if reviewer supplied one; approval bump already covers rerun.
     new_surface = (row.get("latin_text") or "").strip() or None
     if new_surface is not None:
         current_surface = get_la_surface(conn, sense_id_val)
         if new_surface != current_surface:
             write_human_surface(conn, sense_id_val, new_surface, human_src_id)
-            if not version_bumped:
-                flags = get_term_flags(conn, sense_id_val)
-                if flags and (flags["is_multiword"] or flags["category"] == "formula"):
-                    bump_sense_version(conn, sense_id_val)
-                    version_bumped = True
 
     update_sense_status(conn, sense_id_val, "approved")
-    return "OK", version_bumped
+    return "OK", True
 
 
 def run() -> None:
@@ -222,19 +174,15 @@ def run() -> None:
         print("No approved rows found. Nothing to import.")
         return
 
-    ok = skipped = conflict = not_found = version_bumped = version_held = 0
+    ok = skipped = conflict = not_found = 0
     conflicts: list[dict] = []
 
     with get_conn() as conn:
         human_src_id = source_id(conn, "human")
         for row in approved_rows:
-            status, bumped = process_approval(conn, row, human_src_id)
+            status, _bumped = process_approval(conn, row, human_src_id)
             if status == "OK":
                 ok += 1
-                if bumped:
-                    version_bumped += 1
-                else:
-                    version_held += 1
             elif status == "ALREADY_CONFIRMED":
                 skipped += 1
             elif status == "CONFLICT":
@@ -244,14 +192,12 @@ def run() -> None:
                 not_found += 1
 
     print("Import complete.")
-    print(f"  Approved:                          {ok} terms")
-    print(f"  Skipped:                           {skipped} (already confirmed)")
-    print(f"  Not found:                         {not_found}")
-    print(f"  Conflicts:                         {conflict} (see below)")
-    print(f"  Version bumped (re-run triggered): {version_bumped} terms")
-    print(f"  Version held (no content change):  {version_held} terms")
+    print(f"  Approved (rerun triggered): {ok} terms")
+    print(f"  Skipped (already approved): {skipped}")
+    print(f"  Not found:                  {not_found}")
+    print(f"  Conflicts (blank version):  {conflict} (see below)")
     if conflicts:
-        print("\nConflicts (db_version blank or DB changed — skipped):")
+        print("\nConflicts (db_version blank — skipped):")
         for c in conflicts:
             print(f"  sense_id={c['sense_id']}  latin={c['latin_lemma']!r}  "
                   f"sheet_version={c['db_version']}")

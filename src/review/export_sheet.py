@@ -74,17 +74,9 @@ WITH base AS (
     LEFT JOIN segment_text st_en
            ON st_en.segment_id = tu_agg.sample_segment_id AND st_en.lang = 'en'
     ORDER BY
-        CASE gt.category
-            WHEN 'term'    THEN 1
-            WHEN 'name'    THEN 2
-            WHEN 'formula' THEN 3
-            WHEN 'prose'   THEN 4
-            ELSE 5
-        END,
-        CASE gs.status WHEN 'flagged' THEN 1 ELSE 2 END,
-        tu_agg.freq DESC NULLS LAST,
-        sr_sk.content,
-        gt.latin_lemma
+        gt.category,
+        gt.latin_lemma,
+        gs.context_label NULLS FIRST
 )
 SELECT * FROM base
 WHERE {where_clause}

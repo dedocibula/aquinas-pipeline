@@ -111,18 +111,21 @@ def build_initial_user_turn(
     """
     parts: list[str] = []
 
-    # Hard term constraints
-    parts.append(
-        "HARD TERM CONSTRAINTS — for each Latin term below, use the given Slovak "
-        "lemma, inflected as the grammar of your sentence requires (never a synonym):"
-    )
+    # Hard term constraints via XML
+    parts.append("<hard_constraints>")
     if constraints:
         for c in constraints:
             label = c.get("context_label") or ""
-            qualifier = f" [{label}]" if label else ""
-            parts.append(f"  {c['latin_lemma']}{qualifier} → {c['required_slovak']}")
+            qualifier = f" context=\"{label}\"" if label else ""
+            parts.append(f"  <term latin=\"{c['latin_lemma']}\" required_slovak=\"{c['required_slovak']}\"{qualifier} />")
+        parts.append("</hard_constraints>")
+        parts.append(
+            "\n⚠ CRITICAL: The terms in <hard_constraints> are compiler locks. "
+            "They must appear exactly as required, inflected for Slovak grammar. "
+            "No synonyms are permitted; failure results in immediate machine rejection."
+        )
     else:
-        parts.append("  (none)")
+        parts.append("  \n</hard_constraints>")
     parts.append("")
 
     # Czech reference

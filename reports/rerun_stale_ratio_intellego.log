@@ -1,0 +1,123 @@
+17:19:58.662 | INFO    | prefect - Starting temporary server on http://127.0.0.1:8316
+See https://docs.prefect.io/v3/concepts/server#how-to-guides for more information on running a dedicated Prefect server.
+17:20:02.634 | INFO    | Flow run 'esoteric-slug' - Beginning flow run 'esoteric-slug' for flow 'rerun-stale'
+17:20:02.886 | INFO    | Flow run 'fractal-centipede' - Beginning subflow run 'fractal-centipede' for flow 'translate-corpus'
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:20:19.119 | WARNING | translate.loop - segment_id=11502 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['matéria'] for 'matéria' (materia)
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:20:22.622 | WARNING | translate.loop - segment_id=11421 flagged needs_human after 3 iterations
+17:20:24.648 | INFO    | Task run 'translate-article-11d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['matéria'] for 'matéria' (materia)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:20:32.576 | INFO    | Task run 'translate-article-9d7' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['matéria'] for 'matéria' (materia)
+17:20:34.910 | WARNING | translate.loop - segment_id=11471 flagged needs_human after 3 iterations
+17:20:34.913 | INFO    | Task run 'translate-article-b87' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:20:42.243 | WARNING | translate.loop - segment_id=11598 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:20:44.058 | WARNING | translate.loop - segment_id=11479 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:20:52.960 | WARNING | translate.loop - segment_id=11495 flagged needs_human after 3 iterations
+17:20:52.963 | INFO    | Task run 'translate-article-d28' - Finished in state Completed()
+17:20:58.815 | INFO    | Task run 'translate-article-c64' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:20:58.866 | WARNING | translate.loop - segment_id=11445 flagged needs_human after 3 iterations
+17:20:58.867 | INFO    | Task run 'translate-article-e47' - Finished in state Completed()
+17:21:07.516 | INFO    | Task run 'translate-article-fd4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+17:21:10.144 | WARNING | translate.loop - segment_id=11555 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+17:21:14.021 | WARNING | translate.loop - segment_id=11646 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:21:16.125 | WARNING | translate.loop - segment_id=11478 flagged needs_human after 3 iterations
+17:21:16.125 | INFO    | Task run 'translate-article-e85' - Finished in state Completed()
+17:21:17.526 | INFO    | Task run 'translate-article-395' - Finished in state Completed()
+17:21:18.442 | INFO    | Task run 'translate-article-17f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:21:26.755 | WARNING | translate.loop - segment_id=11434 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:21:29.393 | INFO    | Task run 'translate-article-8b4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:21:37.829 | INFO    | Task run 'translate-article-3ea' - Finished in state Completed()
+17:21:39.869 | INFO    | Task run 'translate-article-b98' - Finished in state Completed()
+17:21:40.440 | INFO    | Task run 'translate-article-cd4' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:21:43.422 | WARNING | translate.loop - segment_id=11678 flagged needs_human after 3 iterations
+17:21:43.425 | INFO    | Task run 'translate-article-ab7' - Finished in state Completed()
+17:21:47.308 | INFO    | Task run 'translate-article-aab' - Finished in state Completed()
+17:21:48.443 | INFO    | Task run 'translate-article-0a6' - Finished in state Completed()
+17:21:48.688 | INFO    | Task run 'translate-article-65b' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+17:21:51.170 | WARNING | translate.loop - segment_id=11696 flagged needs_human after 3 iterations
+17:21:51.171 | INFO    | Task run 'translate-article-774' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:21:54.652 | INFO    | Task run 'translate-article-b92' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:21:55.379 | WARNING | translate.loop - segment_id=11794 flagged needs_human after 3 iterations
+17:21:55.383 | INFO    | Task run 'translate-article-d31' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+17:22:07.689 | INFO    | Task run 'translate-article-05d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+[PRECHECK] terminology FAIL: missing components ['prirodzenosť'] for 'prirodzenosť' (natura)
+17:22:14.866 | WARNING | translate.loop - segment_id=11634 flagged needs_human after 3 iterations
+17:22:14.869 | INFO    | Task run 'translate-article-1b1' - Finished in state Completed()
+17:22:29.093 | INFO    | Task run 'translate-article-e06' - Finished in state Completed()
+17:22:33.289 | INFO    | Task run 'translate-article-b5f' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:22:37.496 | INFO    | Task run 'translate-article-558' - Finished in state Completed()
+17:22:38.418 | INFO    | Task run 'translate-article-149' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:22:44.001 | WARNING | translate.loop - segment_id=11348 flagged needs_human after 3 iterations
+17:22:48.809 | INFO    | Task run 'translate-article-31c' - Finished in state Completed()
+17:22:50.936 | ERROR   | translate.loop - segment_id=11316 iteration=1 reviewer error: No verdict found in R1 output: '<evaluation>\nSemantics: The translation accurately conveys the meaning of the Latin original. No reversal of argument direction, no modal collapse, and no categorical weakening. The required terms "dô'
+17:22:50.946 | WARNING | translate.loop - segment_id=11316 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:23:00.949 | WARNING | translate.loop - segment_id=11350 flagged needs_human after 3 iterations
+17:23:04.195 | INFO    | Task run 'translate-article-3fa' - Finished in state Completed()
+17:23:06.384 | WARNING | translate.loop - segment_id=11756 flagged needs_human after 3 iterations
+17:23:06.387 | INFO    | Task run 'translate-article-cda' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:23:20.453 | INFO    | Task run 'translate-article-edc' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:23:23.471 | WARNING | translate.loop - segment_id=11840 flagged needs_human after 3 iterations
+17:23:23.475 | INFO    | Task run 'translate-article-1db' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+17:23:27.420 | ERROR   | Flow run 'fractal-centipede' - Crash detected! Execution was aborted by a termination signal.
+17:23:27.434 | INFO    | Flow run 'fractal-centipede' - Finished in state Crashed('Execution was aborted by a termination signal.')
+20:20:06.001 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 

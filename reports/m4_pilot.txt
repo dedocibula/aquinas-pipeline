@@ -1,0 +1,32 @@
+PILOT RUN SUMMARY
+  Pilot questions:   I.q1, I.q2, I.q3, I.q4, I.q5, I.q6
+  Total segments:    0
+  Translated:        0  (N/A)
+  Needs human:       0  (N/A)
+  Avg iterations:    0.00
+  Time elapsed:      0m 0s
+
+ABORT THRESHOLDS
+  needs_human > 20%: ok
+  avg_iters > 2.5:   ok
+
+COST (actual, pilot run only)
+  Translator (deepseek-chat):  $0.0000
+  Reviewer   (deepseek-reasoner): $0.0000
+  Total:                          $0.0000
+  Avg cost/segment:               $0.00000
+  Cache hit rate:                 0.0%  (0 hit / 0 total input tokens)
+
+M5 EXTRAPOLATION (calibrated from pilot)
+  Pilot segments:                 0
+  Pilot input chars (la+cs+en):   0
+  Corpus chars — la:              0
+                  cs:              0
+                  en:              0
+                  total:           0
+  Calibrated translator $/char:   $0.00000000
+  Calibrated reviewer $/la-char:  $0.00000000
+  Est. translator cost (corpus):  ~$0.00
+  Est. reviewer cost (corpus):    ~$0.00
+  Est. full corpus total:         ~$0.00
+  Note: assumes cache hit rate stays at 0.0%; lower rate raises cost proportionally.

@@ -1,0 +1,169 @@
+17:30:19.966 | INFO    | prefect - Starting temporary server on http://127.0.0.1:8303
+See https://docs.prefect.io/v3/concepts/server#how-to-guides for more information on running a dedicated Prefect server.
+17:30:21.621 | INFO    | Flow run 'broad-lyrebird' - Beginning flow run 'broad-lyrebird' for flow 'retranslate-body'
+17:30:21.843 | INFO    | Flow run 'proud-gharial' - Beginning subflow run 'proud-gharial' for flow 'translate-corpus'
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:30:41.655 | WARNING | translate.loop - segment_id=11520 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:30:41.866 | WARNING | translate.loop - segment_id=11453 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:30:42.214 | WARNING | translate.loop - segment_id=11511 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:30:42.799 | WARNING | translate.loop - segment_id=11464 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:30:42.921 | WARNING | translate.loop - segment_id=11438 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+17:30:43.338 | WARNING | translate.loop - segment_id=11473 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+17:30:44.190 | WARNING | translate.loop - segment_id=11484 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:30:48.827 | WARNING | translate.loop - segment_id=11529 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+17:32:14.896 | INFO    | Task run 'translate-article-0b8' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:32:23.242 | WARNING | translate.loop - segment_id=11541 flagged needs_human after 3 iterations
+17:32:28.134 | INFO    | Task run 'translate-article-a89' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['čnosť'] for 'čnosť' (virtus)
+17:32:31.069 | WARNING | translate.loop - segment_id=11430 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:32:36.333 | WARNING | translate.loop - segment_id=11550 flagged needs_human after 3 iterations
+17:32:59.105 | INFO    | Task run 'translate-article-371' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intencionálny'] for 'intencionálny obraz' (species)
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:33:02.482 | INFO    | Task run 'translate-article-f87' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:33:06.847 | WARNING | translate.loop - segment_id=11559 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:33:09.032 | WARNING | translate.loop - segment_id=11569 flagged needs_human after 3 iterations
+17:33:32.450 | INFO    | Task run 'translate-article-ca3' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:33:39.558 | WARNING | translate.loop - segment_id=11578 flagged needs_human after 3 iterations
+17:33:49.518 | INFO    | Task run 'translate-article-362' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:33:55.336 | INFO    | Task run 'translate-article-857' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:33:57.072 | WARNING | translate.loop - segment_id=11589 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:34:17.222 | INFO    | Task run 'translate-article-031' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:34:23.763 | WARNING | translate.loop - segment_id=11608 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:34:51.133 | INFO    | Task run 'translate-article-651' - Finished in state Completed()
+17:34:51.827 | INFO    | Task run 'translate-article-35d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['dar'] for 'dar' (oblatio)
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: missing components ['dar'] for 'dar' (oblatio)
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:34:57.222 | WARNING | translate.loop - segment_id=11617 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:34:58.682 | WARNING | translate.loop - segment_id=11628 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+17:35:03.958 | WARNING | translate.loop - segment_id=11545 flagged needs_human after 3 iterations
+17:35:16.077 | INFO    | Task run 'translate-article-c80' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:35:23.985 | WARNING | translate.loop - segment_id=11637 flagged needs_human after 3 iterations
+17:35:24.701 | INFO    | Task run 'translate-article-ec5' - Finished in state Completed()
+17:35:31.121 | INFO    | Task run 'translate-article-736' - Finished in state Completed()
+17:35:33.399 | INFO    | Task run 'translate-article-2d8' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:35:39.151 | WARNING | translate.loop - segment_id=11665 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+17:35:40.474 | WARNING | translate.loop - segment_id=11655 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+17:35:58.919 | INFO    | Task run 'translate-article-eae' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:36:03.623 | INFO    | Task run 'translate-article-83e' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:36:05.259 | WARNING | translate.loop - segment_id=11674 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:36:10.224 | WARNING | translate.loop - segment_id=11684 flagged needs_human after 3 iterations
+17:36:25.086 | INFO    | Task run 'translate-article-a2d' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intelekt'] for 'intelekt' (intellego)
+[PRECHECK] terminology FAIL: missing components ['rozum'] for 'rozum' (ratio)
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+17:37:04.095 | INFO    | Task run 'translate-article-c49' - Finished in state Completed()
+17:37:04.878 | INFO    | Task run 'translate-article-85a' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:37:09.506 | INFO    | Task run 'translate-article-714' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:37:11.614 | WARNING | translate.loop - segment_id=11715 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri piatej sa postupuje takto.' (for Ad quintum sic proceditur.) not found in draft
+17:37:15.309 | WARNING | translate.loop - segment_id=11724 flagged needs_human after 3 iterations
+17:37:18.345 | INFO    | Task run 'translate-article-6ae' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri šiestej sa postupuje takto.' (for Ad sextum sic proceditur.) not found in draft
+17:37:25.003 | WARNING | translate.loop - segment_id=11733 flagged needs_human after 3 iterations
+17:37:37.575 | INFO    | Task run 'translate-article-601' - Finished in state Completed()
+17:37:38.094 | INFO    | Task run 'translate-article-625' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri druhej sa postupuje takto.' (for Ad secundum sic proceditur.) not found in draft
+17:37:45.927 | WARNING | translate.loop - segment_id=11752 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: formula 'Pri prvej sa postupuje takto.' (for Ad primum sic proceditur.) not found in draft
+17:37:47.022 | WARNING | translate.loop - segment_id=11743 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+17:38:13.844 | INFO    | Task run 'translate-article-47a' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri tretej sa postupuje takto.' (for Ad tertium sic proceditur.) not found in draft
+17:38:19.557 | WARNING | translate.loop - segment_id=11761 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+17:38:23.845 | WARNING | translate.loop - segment_id=11703 flagged needs_human after 3 iterations
+17:38:26.781 | INFO    | Task run 'translate-article-759' - Finished in state Completed()
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+[PRECHECK] terminology FAIL: formula 'Pri štvrtej sa postupuje takto.' (for Ad quartum sic proceditur.) not found in draft
+17:38:33.437 | WARNING | translate.loop - segment_id=11771 flagged needs_human after 3 iterations
+17:38:34.755 | INFO    | Task run 'translate-article-576' - Finished in state Completed()
+17:38:39.919 | ERROR   | Flow run 'proud-gharial' - Crash detected! Execution was aborted by a termination signal.
+17:38:39.936 | INFO    | Flow run 'proud-gharial' - Finished in state Crashed('Execution was aborted by a termination signal.')
+20:20:06.002 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 

@@ -292,6 +292,28 @@ def test_terminology_lemma_formula_draft_ending_in_period(monkeypatch):
     assert result.ok is True
 
 
+def test_terminology_lemma_formula_required_ends_with_period(monkeypatch):
+    """Formula whose required_slovak ends with a period still matches in running text.
+
+    Regression: the trailing period in 'Pri tretej sa postupuje takto.' caused
+    re.escape to produce '...takto\\.', then the trailing \\b required the next
+    char to be \\w — a sentence-ending period is always followed by a space, so
+    the regex never fired. Fix: strip trailing punctuation from req_norm first.
+    """
+    monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))
+
+    constraints = [
+        {
+            "latin_lemma": "ad_tertium_sic_proceditur",
+            "required_slovak": "Pri tretej sa postupuje takto.",
+            "category": "formula",
+        }
+    ]
+    draft = "Pri tretej sa postupuje takto. Zdá sa, že Boh je teleso."
+    result = check_terminology_lemma(draft, constraints)
+    assert result.ok is True
+
+
 def test_terminology_lemma_formula_near_miss_word_boundary(monkeypatch):
     """Near-miss: 'k deviatej' alone does not satisfy 'k deviatej sa postupuje takto'."""
     monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", _mock_generate({}))

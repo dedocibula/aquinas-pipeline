@@ -11,8 +11,11 @@ Usage
 # After bumping glossary sense versions (re-translate stale segments):
     MAX_WORKERS=10 uv run python -m translate.run --flow rerun_stale
 
+# Re-translate only previously-translated body segments (with updated constraints):
+    MAX_WORKERS=10 uv run python -m translate.run --flow retranslate_body
+
 # Run a specific flow with args (Python API):
-    from translate.run import translate_corpus, rerun_stale
+    from translate.run import translate_corpus, rerun_stale, retranslate_body
     translate_corpus(work_id=1)
     translate_corpus(work_id=1, pars=["I", "I_II", "II_II", "III"], max_question=20)
 """
@@ -228,16 +231,23 @@ def _close_run(run_id: int, results: list[ArticleResult]) -> None:
 
 
 @task(retries=3, retry_delay_seconds=30, name="translate-article")
-def translate_article_task(locator_prefix: str, work_id: int = 1) -> ArticleResult:
+def translate_article_task(
+    locator_prefix: str,
+    work_id: int = 1,
+    segment_filter: frozenset[int] | None = None,
+) -> ArticleResult:
     """Translate all pending segments under locator_prefix.
 
     One Prefect task = one article. Retried up to 3 times on API failure.
     Each retry re-fetches pending segments so idempotently skips any that
     succeeded in a prior attempt.
+    segment_filter: when provided, only translate those segment IDs.
     """
     result = ArticleResult(locator=locator_prefix)
     with get_conn() as conn:
-        segment_ids = get_pending_segment_ids_for_article(conn, locator_prefix, work_id)
+        segment_ids = get_pending_segment_ids_for_article(
+            conn, locator_prefix, work_id, segment_filter
+        )
 
     for seg_id in segment_ids:
         with get_conn() as conn:
@@ -274,12 +284,14 @@ def translate_corpus(
     pars: list[str] | None = None,
     max_question: int | None = None,
     flow_name: str = "translate_corpus",
+    segment_filter: frozenset[int] | None = None,
 ) -> None:
     """Translate all pending segments in the corpus (or a filtered subset).
 
     pars: restrict to these pars (e.g. ['I', 'I_II', 'II_II', 'III']).
     max_question: restrict to question numbers <= this value.
     flow_name: recorded in translation_run ('rerun_stale' when called from there).
+    segment_filter: when provided, only translate those segment IDs.
     Safe to re-run: already-translated segments are skipped (status != 'pending').
     Every invocation opens a translation_run row; a NULL finished_at marks a crash.
     """
@@ -288,19 +300,25 @@ def translate_corpus(
     with get_conn() as conn:
         article_locators = get_all_article_locators(conn, work_id)
         article_locators = _filter_locators(article_locators, pars, max_question)
-        pending = [a for a in article_locators if has_pending_segments(conn, a, work_id)]
+        pending = [
+            a for a in article_locators
+            if has_pending_segments(conn, a, work_id, segment_filter)
+        ]
 
     log.info(
-        "Articles to translate: %d of %d (filtered) — pars=%s max_q=%s",
+        "Articles to translate: %d of %d (filtered) — pars=%s max_q=%s seg_filter=%s",
         len(pending),
         len(article_locators),
         pars,
         max_question,
+        f"{len(segment_filter)} ids" if segment_filter is not None else "none",
     )
 
     run_id = _open_run(flow_name, pars, max_question, MAX_WORKERS)
 
-    futures = [translate_article_task.submit(loc, work_id) for loc in pending]
+    futures = [
+        translate_article_task.submit(loc, work_id, segment_filter) for loc in pending
+    ]
     results: list[ArticleResult] = [f.result() for f in futures]
 
     elapsed = time.monotonic() - t_start
@@ -348,6 +366,60 @@ def rerun_stale(work_id: int = 1) -> None:
         reset_translation_status(conn, to_reset)
 
     translate_corpus(work_id, flow_name="rerun_stale")
+
+
+@flow(name="retranslate-body")
+def retranslate_body(work_id: int = 1) -> None:
+    """Reset previously-translated body segments to pending, then re-translate.
+
+    Targets arg, reply, sed_contra, respondeo segments only (excludes titles).
+    Useful after new glossary terms are approved — retranslates only the subset
+    that already has a translation, with updated constraints, without touching
+    the larger pool of never-translated pending segments.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT segment_id FROM segment
+                WHERE work_id = %s
+                  AND translation_status = 'translated'
+                  AND element_type NOT IN ('question_title', 'article_title')
+                ORDER BY segment_id
+                """,
+                (work_id,),
+            )
+            body_ids = [row[0] for row in cur.fetchall()]
+
+        if not body_ids:
+            log.info("No translated body segments — nothing to do.")
+            return
+
+        human_edited = set(get_human_edited_segments(conn, body_ids))
+        if human_edited:
+            log.info(
+                "Guarding %d human-edited segments (flagged needs_human, not reset)",
+                len(human_edited),
+            )
+            flag_needs_human(
+                conn,
+                sorted(human_edited),
+                "retranslate_body: human edit preserved — verify under updated constraints",
+            )
+
+        to_reset = [s for s in body_ids if s not in human_edited]
+        if not to_reset:
+            log.info("All translated body segments are human-edited — nothing to reset.")
+            return
+
+        log.info("Resetting %d translated body segments to pending", len(to_reset))
+        reset_translation_status(conn, to_reset)
+
+    translate_corpus(
+        work_id,
+        flow_name="retranslate_body",
+        segment_filter=frozenset(to_reset),
+    )
 
 
 # ── Report writers ────────────────────────────────────────────────────────────
@@ -475,7 +547,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="M5 translation flows")
     parser.add_argument(
         "--flow",
-        choices=["translate_corpus", "rerun_stale"],
+        choices=["translate_corpus", "rerun_stale", "retranslate_body"],
         default="translate_corpus",
         help="Which flow to run (default: translate_corpus)",
     )
@@ -496,6 +568,8 @@ if __name__ == "__main__":
 
     if args.flow == "rerun_stale":
         rerun_stale(work_id=args.work_id)
+    elif args.flow == "retranslate_body":
+        retranslate_body(work_id=args.work_id)
     else:
         translate_corpus(
             work_id=args.work_id,

@@ -16,9 +16,30 @@ DO NOT:
     output only the Slovak translation, beginning immediately with the first word
   - Reproduce the Latin source text in your output — the entire response must be in Slovak
 
-TERMINOLOGY: The HARD TERM CONSTRAINTS in the request map Latin terms to required Slovak
-  lemmas. Use each required Slovak word for its Latin term, inflected as the grammar of
-  your sentence requires. Never substitute a synonym for a required term.
+TERMINOLOGY:
+The <hard_constraints> provided in the user prompt are mechanical compiler locks, not stylistic preferences.
+You must use the EXACT required Slovak lemma for its Latin counterpart, correctly inflected for the sentence.
+
+CRITICAL: If your instinct is to use a natural synonym (e.g., 'um' or 'myseľ' instead of 'rozum', 'chápanie' instead of 'intelekt'), YOU MUST OVERRIDE THAT INSTINCT.
+Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.
+
+<examples>
+  <example>
+    <latin>Unde relinquitur quod ratio sit id quod est principium omnium humanorum operum.</latin>
+    <hard_constraints>
+      <term latin="ratio" required_slovak="rozum" />
+      <term latin="principium" required_slovak="princíp" />
+    </hard_constraints>
+    <slovak>Z toho teda vyplýva, že rozum je to, čo je princípom všetkých ľudských skutkov.</slovak>
+  </example>
+  <example>
+    <latin>Ad tertium dicendum quod intellego et velle sunt actus immanentes.</latin>
+    <hard_constraints>
+      <term latin="intellego" required_slovak="intelekt" />
+    </hard_constraints>
+    <slovak>K tretiemu treba povedať, že intelekt a chcenie sú imanentné úkony.</slovak>
+  </example>
+</examples>
 
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
   Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.

@@ -32,7 +32,10 @@ def get_all_article_locators(
 
 
 def get_pending_segment_ids_for_article(
-    conn: psycopg2.extensions.connection, locator_prefix: str, work_id: int = 1
+    conn: psycopg2.extensions.connection,
+    locator_prefix: str,
+    work_id: int = 1,
+    segment_filter: frozenset[int] | None = None,
 ) -> list[int]:
     """Return pending segment IDs under locator_prefix that have translatable text.
 
@@ -40,42 +43,81 @@ def get_pending_segment_ids_for_article(
     workers even if the DB returns rows in a different physical order.
     work_id guards against returning segments from a different loaded work that
     happens to share the same locator prefix.
+    segment_filter: when provided, only those segment IDs are returned.
     """
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT s.segment_id
-            FROM segment s
-            WHERE s.locator_path <@ %s::ltree
-              AND s.work_id = %s
-              AND s.translation_status = 'pending'
-              AND EXISTS (
-                  SELECT 1 FROM segment_text st
-                  WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
-              )
-            ORDER BY s.locator_path
-            """,
-            (locator_prefix, work_id),
-        )
+        if segment_filter is not None:
+            cur.execute(
+                """
+                SELECT s.segment_id
+                FROM segment s
+                WHERE s.locator_path <@ %s::ltree
+                  AND s.work_id = %s
+                  AND s.translation_status = 'pending'
+                  AND s.segment_id = ANY(%s)
+                  AND EXISTS (
+                      SELECT 1 FROM segment_text st
+                      WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
+                  )
+                ORDER BY s.locator_path
+                """,
+                (locator_prefix, work_id, list(segment_filter)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT s.segment_id
+                FROM segment s
+                WHERE s.locator_path <@ %s::ltree
+                  AND s.work_id = %s
+                  AND s.translation_status = 'pending'
+                  AND EXISTS (
+                      SELECT 1 FROM segment_text st
+                      WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
+                  )
+                ORDER BY s.locator_path
+                """,
+                (locator_prefix, work_id),
+            )
         return [row[0] for row in cur.fetchall()]
 
 
 def has_pending_segments(
-    conn: psycopg2.extensions.connection, locator_prefix: str, work_id: int = 1
+    conn: psycopg2.extensions.connection,
+    locator_prefix: str,
+    work_id: int = 1,
+    segment_filter: frozenset[int] | None = None,
 ) -> bool:
-    """Return True if the article has at least one pending segment."""
+    """Return True if the article has at least one pending segment.
+
+    segment_filter: when provided, only those segment IDs count as pending.
+    """
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1
-            FROM segment
-            WHERE locator_path <@ %s::ltree
-              AND work_id = %s
-              AND translation_status = 'pending'
-            LIMIT 1
-            """,
-            (locator_prefix, work_id),
-        )
+        if segment_filter is not None:
+            cur.execute(
+                """
+                SELECT 1
+                FROM segment
+                WHERE locator_path <@ %s::ltree
+                  AND work_id = %s
+                  AND translation_status = 'pending'
+                  AND segment_id = ANY(%s)
+                LIMIT 1
+                """,
+                (locator_prefix, work_id, list(segment_filter)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT 1
+                FROM segment
+                WHERE locator_path <@ %s::ltree
+                  AND work_id = %s
+                  AND translation_status = 'pending'
+                LIMIT 1
+                """,
+                (locator_prefix, work_id),
+            )
         return cur.fetchone() is not None
 
 

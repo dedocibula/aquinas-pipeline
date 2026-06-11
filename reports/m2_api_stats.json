@@ -1,7 +1,7 @@
 {
-  "calls": 38,
-  "input_tokens": 201679,
-  "output_tokens": 43921,
-  "cost_usd": 0.040533,
-  "lemmas_proposed": 4259
+  "calls": 4,
+  "input_tokens": 18333,
+  "output_tokens": 3695,
+  "cost_usd": 0.003601,
+  "lemmas_proposed": 4346
 }

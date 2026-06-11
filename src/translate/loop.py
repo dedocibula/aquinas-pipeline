@@ -240,20 +240,16 @@ def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict
 
 
 def _build_terminology_microedit(failures: list[str]) -> str:
-    """Feedback turn for a terminology-only precheck failure.
-
-    A full re-translation usually reproduces the same synonym (observed 3/3
-    identical retries), so ask for a targeted word substitution instead and
-    keep everything else byte-identical.
-    """
+    """Feedback turn for a terminology-only precheck failure."""
     lines = "\n".join(f"  - {f}" for f in failures)
     return (
-        "Terminology fix only:\n"
-        f"{lines}\n"
-        "Re-output your previous translation EXACTLY as it is, changing only the "
-        "words needed to satisfy the required terms above. Use each required "
-        "Slovak term inflected as the grammar of your sentence requires. "
-        "Do not reword, restructure, or re-translate anything else."
+        "<system_rejection>\n"
+        "Your translation failed the automated terminology check. The following required terms are missing:\n"
+        f"{lines}\n\n"
+        "You likely substituted a synonym. This is strictly forbidden. The required Slovak terms act as compiler locks.\n"
+        "</system_rejection>\n\n"
+        "Re-output your previous translation, changing ONLY the words necessary to insert the exact required Slovak terms. "
+        "Apply correct grammatical inflection. Do not alter the rest of the sentence. Act as a mechanical find-and-replace."
     )
 
 

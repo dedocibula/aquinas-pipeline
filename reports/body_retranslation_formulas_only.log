@@ -1,0 +1,97 @@
+17:51:12.401 | INFO    | prefect - Starting temporary server on http://127.0.0.1:8847
+See https://docs.prefect.io/v3/concepts/server#how-to-guides for more information on running a dedicated Prefect server.
+17:51:13.944 | INFO    | Flow run 'tungsten-zebu' - Beginning flow run 'tungsten-zebu' for flow 'translate-corpus'
+17:52:59.650 | INFO    | Task run 'translate-article-a07' - Finished in state Completed()
+17:53:23.812 | INFO    | Task run 'translate-article-921' - Finished in state Completed()
+17:53:35.870 | INFO    | Task run 'translate-article-78c' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+[PRECHECK] terminology FAIL: missing components ['prozreteľnosť'] for 'prozreteľnosť' (provideo)
+17:53:52.428 | WARNING | translate.loop - segment_id=11480 flagged needs_human after 3 iterations
+17:54:01.738 | INFO    | Task run 'translate-article-40a' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['intencionálny'] for 'intencionálny obraz' (species)
+17:54:46.049 | INFO    | Task run 'translate-article-8e4' - Finished in state Completed()
+17:54:49.243 | INFO    | Task run 'translate-article-218' - Finished in state Completed()
+17:54:56.960 | INFO    | Task run 'translate-article-971' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['uctivosť'] for 'uctivosť' (observantia)
+[PRECHECK] terminology FAIL: missing components ['intencionálny', 'obraz'] for 'intencionálny obraz' (species)
+17:55:23.641 | INFO    | Task run 'translate-article-bf9' - Finished in state Completed()
+17:55:35.770 | INFO    | Task run 'translate-article-372' - Finished in state Completed()
+17:56:04.827 | INFO    | Task run 'translate-article-2a7' - Finished in state Completed()
+17:56:06.736 | INFO    | Task run 'translate-article-c2a' - Finished in state Completed()
+17:56:12.135 | INFO    | Task run 'translate-article-11f' - Finished in state Completed()
+17:56:29.674 | INFO    | Task run 'translate-article-f1b' - Finished in state Completed()
+17:56:56.696 | INFO    | Task run 'translate-article-c8e' - Finished in state Completed()
+17:57:21.799 | INFO    | Task run 'translate-article-246' - Finished in state Completed()
+17:57:30.971 | INFO    | Task run 'translate-article-c91' - Finished in state Completed()
+17:57:54.975 | INFO    | Task run 'translate-article-282' - Finished in state Completed()
+17:57:58.662 | INFO    | Task run 'translate-article-8b4' - Finished in state Completed()
+17:58:09.995 | INFO    | Task run 'translate-article-1d0' - Finished in state Completed()
+17:58:16.516 | INFO    | Task run 'translate-article-83e' - Finished in state Completed()
+18:14:29.177 | ERROR   | translate.loop - segment_id=11704 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.178 | ERROR   | translate.loop - segment_id=11649 iteration=1 reviewer error: DeepSeek R1 network error: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+18:14:29.179 | ERROR   | translate.loop - segment_id=11668 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.181 | ERROR   | translate.loop - segment_id=11695 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.182 | WARNING | translate.loop - segment_id=11649 flagged needs_human after 3 iterations
+18:14:29.183 | WARNING | translate.loop - segment_id=11704 flagged needs_human after 3 iterations
+18:14:29.184 | INFO    | Task run 'translate-article-037' - Finished in state Completed()
+18:14:29.185 | ERROR   | translate.loop - segment_id=11681 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.186 | ERROR   | translate.loop - segment_id=11686 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.186 | WARNING | translate.loop - segment_id=11695 flagged needs_human after 3 iterations
+18:14:29.186 | WARNING | translate.loop - segment_id=11668 flagged needs_human after 3 iterations
+18:14:29.187 | ERROR   | translate.loop - segment_id=11622 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.188 | ERROR   | translate.loop - segment_id=11715 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.188 | INFO    | Task run 'translate-article-786' - Finished in state Completed()
+18:14:29.191 | ERROR   | translate.loop - segment_id=11724 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.191 | WARNING | translate.loop - segment_id=11681 flagged needs_human after 3 iterations
+18:14:29.194 | WARNING | translate.loop - segment_id=11715 flagged needs_human after 3 iterations
+18:14:29.195 | WARNING | translate.loop - segment_id=11686 flagged needs_human after 3 iterations
+18:14:29.196 | WARNING | translate.loop - segment_id=11724 flagged needs_human after 3 iterations
+18:14:29.197 | WARNING | translate.loop - segment_id=11622 flagged needs_human after 3 iterations
+18:14:29.234 | ERROR   | translate.loop - segment_id=11632 iteration=1 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:14:29.238 | WARNING | translate.loop - segment_id=11632 flagged needs_human after 3 iterations
+18:31:03.380 | INFO    | Task run 'translate-article-b47' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:31:03.381 | INFO    | Task run 'translate-article-930' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:31:03.517 | INFO    | Task run 'translate-article-be8' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:31:03.525 | INFO    | Task run 'translate-article-03e' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:31:03.526 | INFO    | Task run 'translate-article-001' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:31:03.529 | INFO    | Task run 'translate-article-cc8' - Task run failed with exception: ChunkedEncodingError(ProtocolError('Response ended prematurely')) - Retry 1/3 will start 30 second(s) from now
+18:35:35.486 | INFO    | Task run 'translate-article-03e' - Finished in state Completed()
+18:35:47.020 | INFO    | Task run 'translate-article-be8' - Finished in state Completed()
+18:53:00.403 | ERROR   | translate.loop - segment_id=11734 iteration=2 reviewer error: DeepSeek R1 network error: Response ended prematurely
+18:53:00.410 | WARNING | translate.loop - segment_id=11734 flagged needs_human after 3 iterations
+18:53:31.472 | INFO    | Task run 'translate-article-da3' - Task run failed with exception: ConnectionError(ReadTimeoutError("HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.")) - Retry 1/3 will start 30 second(s) from now
+18:53:31.537 | INFO    | Task run 'translate-article-80d' - Task run failed with exception: ConnectionError(ReadTimeoutError("HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.")) - Retry 1/3 will start 30 second(s) from now
+18:53:31.545 | INFO    | Task run 'translate-article-5ee' - Task run failed with exception: ConnectionError(ReadTimeoutError("HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.")) - Retry 1/3 will start 30 second(s) from now
+18:53:31.551 | INFO    | Task run 'translate-article-482' - Task run failed with exception: ConnectionError(ReadTimeoutError("HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.")) - Retry 1/3 will start 30 second(s) from now
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:13:24.623 | INFO    | Task run 'translate-article-b1c' - Task run failed with exception: ConnectionError(ReadTimeoutError("HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.")) - Retry 1/3 will start 30 second(s) from now
+19:13:36.736 | ERROR   | translate.loop - segment_id=11689 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:13:36.747 | WARNING | translate.loop - segment_id=11689 flagged needs_human after 3 iterations
+19:13:44.785 | ERROR   | translate.loop - segment_id=11678 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:13:44.808 | WARNING | translate.loop - segment_id=11678 flagged needs_human after 3 iterations
+19:13:46.025 | ERROR   | translate.loop - segment_id=11697 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:13:46.057 | WARNING | translate.loop - segment_id=11697 flagged needs_human after 3 iterations
+19:13:46.063 | INFO    | Task run 'translate-article-cc8' - Finished in state Completed()
+19:13:54.374 | ERROR   | translate.loop - segment_id=11753 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:13:54.383 | WARNING | translate.loop - segment_id=11753 flagged needs_human after 3 iterations
+19:13:54.628 | ERROR   | Task run 'translate-article-b1c' - Crash detected! Execution was interrupted by an unexpected exception: CancelledError: Task run cancelled by the task runner
+19:13:54.631 | ERROR   | Task run 'translate-article-b1c' - Finished in state Crashed('Execution was interrupted by an unexpected exception: CancelledError: Task run cancelled by the task runner')
+19:13:56.453 | INFO    | Task run 'translate-article-001' - Finished in state Completed()
+19:14:23.844 | ERROR   | translate.loop - segment_id=11738 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:14:23.859 | WARNING | translate.loop - segment_id=11738 flagged needs_human after 3 iterations
+19:14:34.841 | ERROR   | translate.loop - segment_id=11743 iteration=1 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:14:34.854 | WARNING | translate.loop - segment_id=11743 flagged needs_human after 3 iterations
+19:14:36.513 | ERROR   | translate.loop - segment_id=11705 iteration=2 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:14:36.524 | WARNING | translate.loop - segment_id=11705 flagged needs_human after 3 iterations
+19:14:39.109 | ERROR   | translate.loop - segment_id=11725 iteration=2 reviewer error: DeepSeek R1 network error: HTTPSConnectionPool(host='api.deepseek.com', port=443): Read timed out.
+19:14:39.121 | WARNING | translate.loop - segment_id=11725 flagged needs_human after 3 iterations
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:15:20.162 | INFO    | Task run 'translate-article-930' - Finished in state Completed()
+19:15:28.978 | INFO    | Task run 'translate-article-b47' - Finished in state Completed()
+19:15:39.652 | INFO    | Task run 'translate-article-da3' - Finished in state Completed()
+19:15:49.450 | INFO    | Task run 'translate-article-192' - Finished in state Completed()
+[PRECHECK] terminology FAIL: missing components ['milosť'] for 'milosť' (gratia)
+19:16:02.812 | INFO    | Task run 'translate-article-5ee' - Finished in state Completed()
+19:16:20.411 | INFO    | Task run 'translate-article-482' - Finished in state Completed()
+19:18:17.414 | INFO    | Task run 'translate-article-80d' - Finished in state Completed()
+20:20:06.000 | ERROR   | prefect.server.services.telemetry - Failed to send telemetry: 

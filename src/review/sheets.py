@@ -68,7 +68,7 @@ def authenticate() -> gspread.Client:
 # ── Worksheet helpers ─────────────────────────────────────────────────────────
 
 
-def get_or_create_worksheet(spreadsheet, title: str, rows: int = 5000, cols: int = 14):
+def get_or_create_worksheet(spreadsheet, title: str, rows: int = 5000, cols: int = 15):
     """Return an existing worksheet by title, or create a new one."""
     for ws in spreadsheet.worksheets():
         if ws.title == title:
