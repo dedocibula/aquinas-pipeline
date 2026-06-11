@@ -31,6 +31,20 @@ def _normalize_ws(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _match_pattern(term: dict) -> re.Pattern:
+    """Return a compiled regex for matching this term in Latin text.
+
+    Uses la_surface over latin_lemma (human-edited surface text beats the slug key).
+    Formula terms are anchored at start-of-text so "Praeterea" in the middle of a
+    sentence does not fire as a formula opener.
+    """
+    surface = term.get("la_surface") or term["latin_lemma"]
+    escaped = re.escape(surface)
+    if term.get("category") == "formula":
+        return re.compile(r"^" + escaped, re.IGNORECASE)
+    return re.compile(escaped, re.IGNORECASE)
+
+
 def phrase_match(latin_text: str, multiword_terms: list[dict]) -> list[tuple[dict, str]]:
     """Find all multiword glossary terms in latin_text.
 
@@ -41,9 +55,7 @@ def phrase_match(latin_text: str, multiword_terms: list[dict]) -> list[tuple[dic
     matches: list[tuple[int, int, dict, str]] = []
 
     for term in multiword_terms:
-        lemma = term["latin_lemma"]
-        # Simple substring search (case-insensitive)
-        pattern = re.compile(re.escape(lemma), re.IGNORECASE)
+        pattern = _match_pattern(term)
         for m in pattern.finditer(normalized):
             matches.append((m.start(), m.end(), term, m.group()))
 
@@ -64,7 +76,7 @@ def mask_spans(latin_text: str, multiword_terms: list[dict]) -> str:
     """Return latin_text with matched multiword spans replaced by spaces."""
     normalized = _normalize_ws(latin_text)
     for term in multiword_terms:
-        pattern = re.compile(re.escape(term["latin_lemma"]), re.IGNORECASE)
+        pattern = _match_pattern(term)
         normalized = pattern.sub(" ", normalized)
     return normalized
 

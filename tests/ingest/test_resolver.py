@@ -15,6 +15,7 @@ from ingest.gap_terms import (
     pilot_batch_sizes,
 )
 from ingest.resolution import (
+    _match_pattern,
     _resolve_multi,
     _resolve_single,
     mask_spans,
@@ -37,11 +38,20 @@ def _sense(sense_id: int, context_label: str | None = None,
     }
 
 
-def _term(term_id: int, lemma: str, senses: list[dict], is_multiword: bool = False) -> dict:
+def _term(
+    term_id: int,
+    lemma: str,
+    senses: list[dict],
+    is_multiword: bool = False,
+    category: str = "term",
+    la_surface: str | None = None,
+) -> dict:
     return {
         "term_id": term_id,
         "latin_lemma": lemma,
         "is_multiword": is_multiword,
+        "category": category,
+        "la_surface": la_surface,
         "senses": senses,
     }
 
@@ -85,7 +95,75 @@ class TestPhraseMatch:
         assert len(matches) == 1
 
 
+# ── _match_pattern ────────────────────────────────────────────────────────────
+
+
+class TestMatchPattern:
+    def _formula_term(self, lemma: str, la_surface: str) -> dict:
+        return _term(1, lemma, [_sense(1)], is_multiword=True, category="formula", la_surface=la_surface)
+
+    def _regular_term(self, lemma: str, la_surface: str | None = None) -> dict:
+        return _term(1, lemma, [_sense(1)], is_multiword=True, la_surface=la_surface)
+
+    def test_uses_la_surface_over_latin_lemma(self):
+        """la_surface is the match pattern when present, not latin_lemma."""
+        term = self._regular_term("sed_contra", la_surface="Sed contra")
+        pattern = _match_pattern(term)
+        assert pattern.search("Sed contra est quod dicit Augustinus")
+        assert not pattern.search("sed_contra is a slug")
+
+    def test_falls_back_to_latin_lemma_when_no_la_surface(self):
+        """latin_lemma is used when la_surface is absent."""
+        term = self._regular_term("per se", la_surface=None)
+        pattern = _match_pattern(term)
+        assert pattern.search("Movetur per se.")
+        assert not pattern.search("something else")
+
+    def test_formula_anchored_at_start(self):
+        """Formula pattern matches at start-of-text only."""
+        term = self._formula_term("respondeo", la_surface="Respondeo dicendum")
+        pattern = _match_pattern(term)
+        assert pattern.match("Respondeo dicendum quod...")
+        assert not pattern.search("Ideo Respondeo dicendum quod...")  # mid-text must not match
+
+    def test_non_formula_not_anchored(self):
+        """Non-formula multiword term matches anywhere in text."""
+        term = self._regular_term("actus essendi", la_surface=None)
+        pattern = _match_pattern(term)
+        assert pattern.search("Hoc est actus essendi rerum.")
+
+    def test_formula_case_insensitive(self):
+        """Formula anchor match is case-insensitive."""
+        term = self._formula_term("sed_contra", la_surface="Sed contra")
+        pattern = _match_pattern(term)
+        assert pattern.match("sed contra est quod...")
+
+    def test_phrase_match_uses_la_surface(self):
+        """phrase_match uses la_surface as the match pattern end-to-end."""
+        term = _term(1, "sed_contra", [_sense(1)], is_multiword=True,
+                     category="formula", la_surface="Sed contra")
+        matches = phrase_match("Sed contra est quod dicit Augustinus.", [term])
+        assert len(matches) == 1
+
+    def test_phrase_match_formula_not_matched_mid_text(self):
+        """Formula opener in the middle of text is not matched by phrase_match."""
+        term = _term(1, "sed_contra", [_sense(1)], is_multiword=True,
+                     category="formula", la_surface="Sed contra")
+        # "Sed contra" not at start — no match expected
+        matches = phrase_match("Ideo, Sed contra est quod dicit.", [term])
+        assert len(matches) == 0
+
+    def test_mask_spans_uses_la_surface(self):
+        """mask_spans masks via la_surface, not latin_lemma slug."""
+        term = _term(1, "sed_contra", [_sense(1)], is_multiword=True,
+                     category="formula", la_surface="Sed contra")
+        result = mask_spans("Sed contra est quod dicit.", [term])
+        assert "sed_contra" not in result
+        assert "Sed contra" not in result
+
+
 # ── mask_spans ────────────────────────────────────────────────────────────────
+
 
 class TestMaskSpans:
     def test_masks_matched_term(self):
