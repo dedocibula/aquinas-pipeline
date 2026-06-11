@@ -52,9 +52,11 @@ def _word_in_draft(word: str, draft_tokens: set[str], draft_tokens_norm: set[str
     if w in draft_tokens:
         return True
     forms = generate_slovak_forms(w)
-    if forms:
-        return bool(forms & draft_tokens)
-    # OOV lemma (archaic 'čnosť', loan 'habitus'): stem-prefix match.
+    if forms and forms & draft_tokens:
+        return True
+    # Stem-prefix fallback — covers both OOV lemmas ('čnosť', 'habitus') AND
+    # MorfFlex coverage gaps (e.g. 'pamäť' generates only {'pamäti'}, missing
+    # 'pamäťou', 'pamätiam', etc.). Always applied as a second-chance check.
     stem = _oov_stem(w)
     return any(t.startswith(stem) for t in draft_tokens_norm)
 
