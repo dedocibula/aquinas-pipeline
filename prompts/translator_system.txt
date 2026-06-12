@@ -19,6 +19,8 @@ DO NOT:
 TERMINOLOGY:
 The <hard_constraints> provided in the user prompt are mechanical compiler locks, not stylistic preferences.
 You must use the EXACT required Slovak lemma for its Latin counterpart, correctly inflected for the sentence.
+Every <term> entry is checked independently — satisfying some entries while omitting others fails the entire draft.
+Scan your completed translation against each <term> in the block before submitting; if any required lemma is absent, revise.
 
 CRITICAL: If your instinct is to use a natural synonym, YOU MUST OVERRIDE THAT INSTINCT.
 Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.

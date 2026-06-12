@@ -51,9 +51,16 @@ Notes: [bulleted list or "none"]
 </evaluation>
 
 <verdict>
-[Output EXACTLY ONE of the following on a single line, nothing else:
+[Output EXACTLY ONE of the following lines, verbatim — no deviations in spacing, capitalization, or punctuation:
   APPROVED
   APPROVED_WITH_NOTES: <concise note here>
   REVISION_NEEDED: <specific revision instruction here>
-No preamble. No explanation before or after the verdict tag.]
+Rules:
+  - APPROVED_WITH_NOTES and REVISION_NEEDED MUST be followed by a colon and a space, then the note/instruction on the same line.
+  - Do not output anything before or after the verdict tag — no summary, no reasoning, nothing.
+  - Do not add a second verdict line.
+Example valid outputs:
+  APPROVED
+  APPROVED_WITH_NOTES: Phrasing in clause 2 is stiff but semantically correct.
+  REVISION_NEEDED: Argument direction inverted — original is affirmative, draft is negative.]
 </verdict>
