@@ -39,7 +39,7 @@ for epoch in $(seq 1 "$EPOCHS"); do
     echo "Compare written to reports/latest_compare.txt"
 
     # 5. Let Claude optimize both prompts and log code suggestions
-    claude -p "Read reports/latest_compare.txt and prompt_changelog.md.
+    claude --dangerously-skip-permissions -p "Read reports/latest_compare.txt and prompt_changelog.md.
 Analyze the failure class deltas between run $RUN_A (baseline) and run $RUN_B (candidate).
 You may modify BOTH prompts/translator_system.txt and prompts/reviewer_system.txt
 if either needs improvement to reduce terminology failures; explain your reasoning for each file.

@@ -244,12 +244,15 @@ def _build_terminology_microedit(failures: list[str]) -> str:
     lines = "\n".join(f"  - {f}" for f in failures)
     return (
         "<system_rejection>\n"
-        "Your translation failed the automated terminology check. The following required terms are missing:\n"
+        "MACHINE REJECTION — FORBIDDEN SYNONYM DETECTED.\n"
+        "The following required Slovak terms are absent from your output:\n"
         f"{lines}\n\n"
-        "You likely substituted a synonym. This is strictly forbidden. The required Slovak terms act as compiler locks.\n"
+        "These are HARD COMPILER LOCKS. There is no acceptable synonym, paraphrase, or omission.\n"
+        "Find the concept in your draft and replace it with the exact required Slovak lemma, correctly inflected for grammar.\n"
+        "Every listed term MUST appear in your output. No exceptions.\n"
         "</system_rejection>\n\n"
-        "Re-output your previous translation, changing ONLY the words necessary to insert the exact required Slovak terms. "
-        "Apply correct grammatical inflection. Do not alter the rest of the sentence. Act as a mechanical find-and-replace."
+        "Re-output your translation with ONLY the locked terms corrected. "
+        "Inflect each required term for Slovak grammar. Do not change any other word."
     )
 
 

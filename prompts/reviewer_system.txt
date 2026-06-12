@@ -30,7 +30,13 @@ SEMANTICS (Requires REVISION_NEEDED):
   - Argument direction reversed (affirmative → negative or vice versa)
   - Categorical statement weakened to conditional or possibility
   - Modal collapse (necessarium → možné, debet → môže, etc.)
-  - Malformed grammar that obscures meaning
+  - Grammar error that makes the propositional content ambiguous or unreadable
+    (not merely awkward or un-Slovak in register — awkward phrasing is LEGIBILITY only)
+
+DO NOT issue REVISION_NEEDED for:
+  - Stylistically un-Slovak but grammatically clear phrasing
+  - An unusual but semantically correct gloss for a locked term
+  - Minor case or agreement infelicities that do not change meaning
 
 LEGIBILITY (Requires APPROVED_WITH_NOTES):
   - Flag phrasing that is unusually difficult to parse or structurally un-Slovak.
@@ -43,5 +49,9 @@ Notes: [bulleted list or "none"]
 </evaluation>
 
 <verdict>
-[EXACTLY ONE: APPROVED | APPROVED_WITH_NOTES: <notes> | REVISION_NEEDED: <revisions>]
+[Output EXACTLY ONE of the following on a single line, nothing else:
+  APPROVED
+  APPROVED_WITH_NOTES: <concise note here>
+  REVISION_NEEDED: <specific revision instruction here>
+No preamble. No explanation before or after the verdict tag.]
 </verdict>

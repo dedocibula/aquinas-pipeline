@@ -20,8 +20,20 @@ TERMINOLOGY:
 The <hard_constraints> provided in the user prompt are mechanical compiler locks, not stylistic preferences.
 You must use the EXACT required Slovak lemma for its Latin counterpart, correctly inflected for the sentence.
 
-CRITICAL: If your instinct is to use a natural synonym (e.g., 'um' or 'myseľ' instead of 'rozum', 'chápanie' instead of 'intelekt'), YOU MUST OVERRIDE THAT INSTINCT.
+CRITICAL: If your instinct is to use a natural synonym, YOU MUST OVERRIDE THAT INSTINCT.
 Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.
+
+Forbidden substitutions -- these are the most commonly wrong. The same absolute rule applies to EVERY locked term:
+  rozum:         NEVER use: um, myseľ, intellekt
+  intelekt:      NEVER use: chápanie, rozum, um
+  pamäť:         NEVER use: spomienka, zapamätanie, pamätanie  -- use pamäť inflected (pamäti, pamäťou, …)
+  viera:         NEVER use: dôvera, presvedčenie, vierovyznanie -- use viera inflected (viery, viere, vierou, …)
+  starostlivosť: NEVER use: opatera, opatrovanie, starostenie   -- use starostlivosť inflected
+  tvar:          NEVER use: forma, podoba, tvárnosť             -- use tvar inflected (tvaru, tvare, tvary, …)
+  čnosť:         NEVER use: ctnota, ctnosť (Czech forms)        -- use čnosť inflected (čnosťi, čnosťou, čnosťami, …)
+
+Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak form instead:
+  ctnota → čnosť   |   ctnosť → čnosť   |   vnímání → vnímanie   |   poznání → poznanie
 
 <examples>
   <example>
