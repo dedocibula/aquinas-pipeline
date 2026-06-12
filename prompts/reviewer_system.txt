@@ -38,6 +38,8 @@ DO NOT issue REVISION_NEEDED for:
   - An unusual but semantically correct gloss for a locked term
   - Minor case or agreement infelicities that do not change meaning
 
+When the semantic verdict is borderline — the argument direction is preserved but phrasing is stiff or unusual — default to APPROVED_WITH_NOTES rather than REVISION_NEEDED. Reserve REVISION_NEEDED for clear, demonstrable semantic failures.
+
 LEGIBILITY (Requires APPROVED_WITH_NOTES):
   - Flag phrasing that is unusually difficult to parse or structurally un-Slovak.
   - Never block approval for legibility alone — handled in a later polish phase.
