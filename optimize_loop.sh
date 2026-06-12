@@ -42,7 +42,25 @@ for epoch in $(seq 1 "$EPOCHS"); do
     claude --dangerously-skip-permissions -p "Read reports/latest_compare.txt and prompt_changelog.md.
 Analyze the failure class deltas between run $RUN_A (baseline) and run $RUN_B (candidate).
 You may modify BOTH prompts/translator_system.txt and prompts/reviewer_system.txt
-if either needs improvement to reduce terminology failures; explain your reasoning for each file.
+if either needs improvement; explain your reasoning for each file.
+
+STRICT CONSTRAINT — NO OVERFITTING:
+The golden set is a 100-segment sample, not the full corpus. Per-term lists derived
+from sample failure counts are sample-specific noise, not general rules.
+You MUST NOT:
+  - Add forbidden-synonym or NEVER-USE lists for specific Slovak terms
+  - Enumerate term-specific inflection tables
+  - Add any rule that names a specific glossary term (čnosť, vášeň, pamäť, etc.)
+The hard_constraints XML block already delivers per-term requirements at inference
+time for every segment in the corpus. Prompt additions that duplicate or extend that
+mechanism for a subset of terms are overfitting and will be reverted.
+
+ALLOWED changes to prompts:
+  - Structural/format guidance that applies to ALL translated segments
+  - General rules about how to handle hard_constraints as a class (not specific terms)
+  - Reviewer scoring criteria improvements
+  - Example improvements that illustrate a general principle
+
 If you identify failure patterns that require a code fix (e.g. in prechecks.py, loop.py, or translator.py),
 document the suggested change clearly — what function, what change, and why.
 Append a one-row entry to the markdown table in prompt_changelog.md using these columns:

@@ -23,21 +23,6 @@ You must use the EXACT required Slovak lemma for its Latin counterpart, correctl
 CRITICAL: If your instinct is to use a natural synonym, YOU MUST OVERRIDE THAT INSTINCT.
 Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.
 
-Forbidden substitutions — the same absolute rule applies to every locked term. Listed in order of observed failure frequency:
-  čnosť:         NEVER use: ctnota, ctnosť, ctnosti, ctnostiam (all Czech forms)
-                 Slovak inflections: čnosti (gen/dat/loc sg), čnosťou (instr sg), čnostiam (dat pl), čnosťami (instr pl)
-  vášeň:         NEVER use: pátos, cit, túžba, žiadostivosť
-                 Slovak inflections: vášne (gen/acc sg), vášni (dat/loc sg), vášňou (instr sg), vášní (gen pl)
-  rozum:         NEVER use: um, myseľ, intellekt
-  intelekt:      NEVER use: chápanie, rozum, um
-  pamäť:         NEVER use: spomienka, zapamätanie, pamätanie        — use pamäť inflected (pamäti, pamäťou, …)
-  viera:         NEVER use: dôvera, presvedčenie, vierovyznanie      — use viera inflected (viery, viere, vierou, …)
-  starostlivosť: NEVER use: opatera, opatrovanie, starostenie        — use starostlivosť inflected
-  princíp:       NEVER use: zásada, základ, zákon                    — use princíp inflected (princípu, princípe, princípy, …)
-  tvar:          NEVER substitute podoba or tvárnosť for tvar         — use tvar inflected (tvaru, tvare, tvary, …)
-                 NOTE: 'forma' is a separate approved Slovak term for a different Latin concept (Aristotelian form);
-                 if a constraint requires 'forma', use forma — do not substitute tvar.
-
 Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak form instead:
   ctnota → čnosť   |   ctnosť → čnosť   |   vnímání → vnímanie   |   poznání → poznanie
 
