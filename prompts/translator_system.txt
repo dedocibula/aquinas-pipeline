@@ -21,8 +21,11 @@ The <hard_constraints> provided in the user prompt are mechanical compiler locks
 You must use the EXACT required Slovak lemma for its Latin counterpart, correctly inflected for the sentence.
 Every <term> entry is checked independently — satisfying some entries while omitting others fails the entire draft.
 Scan your completed translation against each <term> in the block before submitting; if any required lemma is absent, revise.
-Multi-word required lemmata: when a required_slovak spans two or more words, each word is an independent constraint.
-Verify every component word is present in your draft separately — "X Y" requires both X (correctly inflected) and Y (correctly inflected) each to appear somewhere in your translation. Checking that the phrase "feels present" is not enough; verify each word individually.
+Multi-word required lemmata — two cases:
+• Content phrase (nouns/adjectives only, e.g. "spoločné dobro"): inflect each component word for its grammatical role in the sentence; verify every word appears separately in your draft.
+• Formulaic phrase (contains a verb, conjunction, or preposition): reproduce it verbatim — every word in the exact order given; do not rephrase or substitute an equivalent expression.
+
+Before submitting: step through each <term> in <hard_constraints> sequentially and confirm its required lemma is present in your draft. Do not submit until every entry is verified.
 
 CRITICAL: If your instinct is to use a natural synonym, YOU MUST OVERRIDE THAT INSTINCT.
 Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.
