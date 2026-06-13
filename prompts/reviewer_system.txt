@@ -30,8 +30,8 @@ SEMANTICS (Requires REVISION_NEEDED):
   - Argument direction reversed (affirmative → negative or vice versa)
   - Categorical statement weakened to conditional or possibility
   - Modal collapse (necessarium → možné, debet → môže, etc.)
-  - Grammar error that makes the argument's main conclusion ambiguous or unreadable
-    (not merely awkward; ambiguity confined to a subordinate clause that leaves the conclusion intact is LEGIBILITY only)
+  - Grammar error that makes the propositional content ambiguous or unreadable
+    (not merely awkward or un-Slovak in register — awkward phrasing is LEGIBILITY only)
 
 DO NOT issue REVISION_NEEDED for:
   - Stylistically un-Slovak but grammatically clear phrasing
