@@ -387,13 +387,21 @@ def translate_segment(
         english = seg.get("english")
         reviewer_turn = build_reviewer_turn(latin, draft, constraints, czech=czech, english=english) if prompt_log else ""
 
-        try:
-            review = call_reviewer_r1(latin, draft, constraints, czech=czech, english=english)
-            if review.usage is not None:
-                usages.append(review.usage)
-        except RuntimeError as exc:
-            log.error("segment_id=%d iteration=%d reviewer error: %s", segment_id, iteration, exc)
-            outcome.failure_classes.append({"iter": iteration, "class": "reviewer_error"})
+        review = None
+        for _attempt in range(2):
+            try:
+                review = call_reviewer_r1(latin, draft, constraints, czech=czech, english=english)
+                if review.usage is not None:
+                    usages.append(review.usage)
+                break
+            except RuntimeError as exc:
+                log.error(
+                    "segment_id=%d iteration=%d reviewer error (attempt %d): %s",
+                    segment_id, iteration, _attempt + 1, exc,
+                )
+                if _attempt == 0:
+                    outcome.failure_classes.append({"iter": iteration, "class": "reviewer_error"})
+        if review is None:
             break
 
         if prompt_log:

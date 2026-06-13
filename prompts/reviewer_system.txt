@@ -29,10 +29,7 @@ Evaluate SEMANTICS and LEGIBILITY only.
 SEMANTICS (Requires REVISION_NEEDED):
   - Argument direction reversed (affirmative → negative or vice versa)
   - Categorical statement weakened to conditional or possibility
-  - Modal collapse: necessity rendered as mere possibility (necessarium → možné, debet → môže)
-    or possibility strengthened to necessity. Only flag this if the modal shift changes the
-    argument — a stiff but still obligatory expression ("musí byť" rendered as "je nevyhnutné,
-    aby") is APPROVED_WITH_NOTES, not REVISION_NEEDED.
+  - Modal collapse (necessarium → možné, debet → môže, etc.)
   - Grammar error that makes the propositional content ambiguous or unreadable
     (not merely awkward or un-Slovak in register — awkward phrasing is LEGIBILITY only)
 

@@ -58,7 +58,10 @@ def _word_in_draft(word: str, draft_tokens: set[str], draft_tokens_norm: set[str
     # MorfFlex coverage gaps (e.g. 'pamäť' generates only {'pamäti'}, missing
     # 'pamäťou', 'pamätiam', etc.). Always applied as a second-chance check.
     stem = _oov_stem(w)
-    return any(t.startswith(stem) for t in draft_tokens_norm)
+    matched = next((t for t in draft_tokens_norm if t.startswith(stem)), None)
+    if matched is not None:
+        print(f"[PRECHECK] stem-fallback: '{word}' stem='{stem}' matched='{matched}'", file=sys.stderr)
+    return matched is not None
 
 
 def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:

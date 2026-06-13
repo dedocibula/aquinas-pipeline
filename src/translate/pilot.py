@@ -302,12 +302,23 @@ def run_pilot() -> None:
             except Exception as exc:
                 orig_seg = futures[fut]
                 log.error(
-                    "segment_id=%d (%s) failed: %s — skipping",
+                    "segment_id=%d (%s) worker crashed: %s — recording as needs_human",
                     orig_seg["segment_id"],
                     orig_seg["locator_path"],
                     exc,
                 )
                 completed += 1
+                needs_human_count += 1
+                article_result.needs_human += 1
+                article_result.segment_records.append({
+                    "segment_id": orig_seg["segment_id"],
+                    "final_status": "needs_human",
+                    "iterations_used": 0,
+                    "chosen_iteration": None,
+                    "cost_usd": 0.0,
+                    "failure_classes": [{"class": "worker_error", "error": str(exc)[:200]}],
+                    "last_feedback": None,
+                })
                 continue
             sid = seg["segment_id"]
             completed += 1

@@ -44,23 +44,7 @@ Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak
     </hard_constraints>
     <slovak>K tretiemu treba povedať, že intelekt a chcenie sú imanentné úkony.</slovak>
   </example>
-  <example>
-    <latin>Necesse est igitur quod homo per aliquam superiorem cognitionem perficiatur.</latin>
-    <hard_constraints>
-      <term latin="homo" required_slovak="človek" />
-      <term latin="cognitio" required_slovak="poznanie" />
-    </hard_constraints>
-    <slovak>Je teda nevyhnutné, aby bol človek zdokonalený nejakým vyšším poznaním.</slovak>
-    <note>necesse est → "je nevyhnutné", not "môže byť" or "mohlo by byť". Both term constraints satisfied.</note>
-  </example>
 </examples>
-
-MODALITY — preserve modal strength exactly:
-  Latin necessity (necesse est, debet, oportet, necessarium) → Slovak necessity (musí, treba, je nevyhnutné).
-  Latin possibility (potest, possibile est, contingit) → Slovak possibility (môže, je možné).
-  NEVER weaken a necessity to a conditional or possibility: debet → must be "musí", never "môže" or "mohlo by".
-  NEVER strengthen a possibility to a necessity.
-  Modal strength is propositional content — an obligation weakened to a mere possibility reverses Aquinas's argument.
 
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
   Recast confusing phrases natively while preserving exact Scholastic sentence boundaries.
