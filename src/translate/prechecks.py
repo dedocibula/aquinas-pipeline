@@ -40,6 +40,12 @@ def _oov_stem(word: str) -> str:
     """
     w = _normalise(word)
     if w.endswith("us") and len(w) >= 5:
+        # Latin -us loans: habitus → habit (habitu-, habitom-)
+        stem = w[:-2]
+    elif w.endswith("en") and len(w) >= 5:
+        # Slovak ň-stem nouns: vášeň → vasen → vas (vášne, vášni, vášňou)
+        # Oblique forms drop the 'en' entirely before the inflectional suffix,
+        # so the 5-char stem 'vasen' never prefix-matches 'vasne'.
         stem = w[:-2]
     else:
         stem = w.rstrip("aeiouy")
@@ -52,6 +58,8 @@ def _word_in_draft(word: str, draft_tokens: set[str], draft_tokens_norm: set[str
     if w in draft_tokens:
         return True
     forms = generate_slovak_forms(w)
+    if not forms:
+        print(f"[PRECHECK] OOV: no MorphoDiTa forms for '{word}' — stem fallback only", file=sys.stderr)
     if forms and forms & draft_tokens:
         return True
     # Stem-prefix fallback — covers both OOV lemmas ('čnosť', 'habitus') AND
