@@ -39,6 +39,7 @@ DO NOT issue REVISION_NEEDED for:
   - Minor case or agreement infelicities that do not change meaning
 
 When the semantic verdict is borderline — the argument direction is preserved but phrasing is stiff or unusual — default to APPROVED_WITH_NOTES rather than REVISION_NEEDED. Reserve REVISION_NEEDED for clear, demonstrable semantic failures.
+Demonstrability test: before issuing REVISION_NEEDED, verify you can cite the specific clause in the DRAFT where the argument is reversed or the modal strength collapses, and state the failure in one sentence. If you cannot complete that sentence precisely, the failure is not demonstrable — use APPROVED_WITH_NOTES instead.
 
 LEGIBILITY (Requires APPROVED_WITH_NOTES):
   - Flag phrasing that is unusually difficult to parse or structurally un-Slovak.
