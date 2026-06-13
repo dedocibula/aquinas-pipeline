@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from common.db import get_conn
 
-_SAMPLE = Path(__file__).resolve().parents[2] / "docs" / "pilot_sample_100.json"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SAMPLE = _REPO_ROOT / os.environ.get("PILOT_SAMPLE_FILE", "docs/pilot_sample_100.json")
 
 
 def main() -> None:

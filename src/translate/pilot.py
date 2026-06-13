@@ -45,7 +45,8 @@ _PILOT_QUESTIONS = ["I.q1", "I.q2", "I.q3", "I.q4", "I.q5", "I.q6"]
 _DEBUG_QUESTION = "I.q1"
 _DEBUG_LIMIT = 10
 _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
-_SAMPLE_FILE = Path(__file__).resolve().parent.parent.parent / "docs" / "pilot_sample_100.json"
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_SAMPLE_FILE = _REPO_ROOT / os.environ.get("PILOT_SAMPLE_FILE", "docs/pilot_sample_100.json")
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20
 _ABORT_AVG_ITERATIONS = 2.5
@@ -161,7 +162,7 @@ def fetch_segment_text_lengths(conn, segment_id: int) -> dict[str, int]:
 
 
 def fetch_sample_segments(conn) -> list[dict]:
-    """Return pending segments listed in docs/pilot_sample_100.json, ordered by locator_path."""
+    """Return pending segments listed in $PILOT_SAMPLE_FILE, ordered by locator_path."""
     sample = json.loads(_SAMPLE_FILE.read_text())
     ids = [s["segment_id"] for s in sample["segments"]]
     with conn.cursor() as cur:

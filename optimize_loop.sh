@@ -3,13 +3,14 @@
 # Usage: ./optimize_loop.sh [EPOCHS]   (default: 5)
 #
 # Each epoch:
-#   1. Reset the 100-segment golden set to pending
+#   1. Reset the 200-segment golden set to pending
 #   2. Run a full pilot (translator + R1 reviewer)
 #   3. Compare this run against the previous one
 #   4. Ask Claude Code to improve both system prompts and log changes
 set -euo pipefail
 
 EPOCHS=${1:-5}
+export PILOT_SAMPLE_FILE="docs/pilot_sample_200.json"
 DB_CMD="docker exec aquinas-pipeline-db-1 psql -U aquinas -d aquinas -t -A"
 
 for epoch in $(seq 1 "$EPOCHS"); do
