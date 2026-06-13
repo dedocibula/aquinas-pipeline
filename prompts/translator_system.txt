@@ -46,6 +46,13 @@ Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak
     </hard_constraints>
     <slovak>K tretiemu treba povedať, že intelekt a chcenie sú imanentné úkony.</slovak>
   </example>
+  <example>
+    <latin>Perfectio autem humana dependet ex appetitu boni communis.</latin>
+    <hard_constraints>
+      <term latin="bonum commune" required_slovak="spoločné dobro" />
+    </hard_constraints>
+    <slovak>Ľudská dokonalosť závisí od túžby po spoločnom dobre.</slovak>
+  </example>
 </examples>
 
 LEGIBILITY: The Slovak output must be at least as legible as the provided Czech reference.
