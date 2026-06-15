@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 
@@ -287,27 +286,10 @@ def resolve_segment(
 
 
 def _write_term_usage(conn, segment_id: int, resolutions: list[Resolution]) -> int:
-    """Write term_usage rows. Idempotent per (segment_id, sense_id). Returns count."""
-    if not resolutions:
-        return 0
-    with conn.cursor() as cur:
-        # Only wipe guessed rows — confirmed rows survive re-runs (Principle 3).
-        cur.execute("DELETE FROM term_usage WHERE segment_id = %s AND status = 'guessed'", (segment_id,))
-        for res in resolutions:
-            cur.execute(
-                """
-                INSERT INTO term_usage
-                  (segment_id, sense_id, sense_version_used,
-                   resolution_method, confidence, signals, status)
-                VALUES (%s, %s, %s, %s, %s, %s, 'guessed')
-                """,
-                (
-                    segment_id,
-                    res.sense["sense_id"],
-                    res.sense["version"],
-                    res.method,
-                    res.confidence,
-                    json.dumps(res.signals) if res.signals else None,
-                ),
-            )
-    return len(resolutions)
+    """Write term_usage rows. Idempotent per (segment_id, sense_id). Returns count.
+
+    Thin shim over ``TermUsageRepository.write_term_usage`` (SQL lives there now).
+    """
+    from storage.repositories import TermUsageRepository
+
+    return TermUsageRepository(conn).write_term_usage(segment_id, resolutions)

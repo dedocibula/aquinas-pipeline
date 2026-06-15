@@ -11,12 +11,12 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-import psycopg2.extras
 from dotenv import load_dotenv
 
-from common.db import source_id
 from common.lemmatize import lemmatize_latin
 from common.pricing import UsageInfo
+from storage.db import source_id
+from storage.repositories import GlossaryRepository, SegmentRepository
 from translate.prechecks import check_terminology_lemma
 from translate.prompt_logger import PromptLogger
 from translate.reviewer import build_reviewer_turn, call_reviewer_r1
@@ -52,100 +52,63 @@ class SegmentOutcome:
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 
+# These remain as a transition shim returning the legacy dict shapes. The SQL
+# now lives in SegmentRepository / GlossaryRepository.
+
+
 def get_segment_with_texts(conn, segment_id: int) -> dict | None:
-    """Return v_segment row for the given segment_id, or None if not found."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT
-                s.segment_id,
-                s.locator_path::text AS locator_path,
-                s.element_type,
-                s.reply_to,
-                s.translation_status,
-                max(t.content) FILTER (WHERE t.lang = 'la') AS latin,
-                max(t.content) FILTER (WHERE t.lang = 'cs') AS czech,
-                max(t.content) FILTER (WHERE t.lang = 'en') AS english
-            FROM segment s
-            LEFT JOIN segment_text t USING (segment_id)
-            WHERE s.segment_id = %s
-            GROUP BY s.segment_id, s.locator_path, s.element_type,
-                     s.reply_to, s.translation_status
-            """,
-            (segment_id,),
-        )
-        row = cur.fetchone()
-    return dict(row) if row else None
+    """Return the v_segment row for the given segment_id, or None if not found."""
+    seg = SegmentRepository(conn).get_segment(segment_id)
+    if seg is None:
+        return None
+    # Preserve the full eight-key v_segment shape (reply_to/translation_status
+    # always present, even when NULL) that callers built dict(row) from.
+    return {
+        "segment_id": seg.segment_id,
+        "locator_path": seg.locator_path,
+        "element_type": seg.element_type,
+        "reply_to": seg.reply_to,
+        "translation_status": seg.translation_status,
+        "latin": seg.latin,
+        "czech": seg.czech,
+        "english": seg.english,
+    }
 
 
 def get_locked_terms(conn, segment_id: int) -> list[dict]:
-    """Return approved term constraints for a segment.
+    """Return approved term constraints for a segment as legacy dicts.
 
-    Each entry: {latin_lemma, required_slovak, sense_id, version}.
-    Only approved senses with a SK rendering are included.
+    Each entry: {latin_lemma, category, latin_surface, required_slovak, sense_id,
+    version, context_label}. Only approved senses with a SK rendering are included.
     """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT DISTINCT ON (gs.sense_id)
-                gt.latin_lemma,
-                gt.category,
-                gt.la_surface   AS latin_surface,
-                sr.content      AS required_slovak,
-                gs.sense_id,
-                gs.version,
-                gs.context_label
-            FROM term_usage tu
-            JOIN glossary_sense gs  ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
-            JOIN glossary_term  gt  ON gt.term_id  = gs.term_id
-            JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
-            JOIN source          s  ON s.source_id  = sr.source_id
-            WHERE tu.segment_id = %s
-              AND sr.content IS NOT NULL
-            ORDER BY gs.sense_id, s.authority_rank
-            """,
-            (segment_id,),
-        )
-        return [dict(r) for r in cur.fetchall()]
+    return [
+        {
+            "latin_lemma": c.latin_lemma,
+            "category": c.category,
+            "latin_surface": c.latin_surface,
+            "required_slovak": c.required_slovak,
+            "sense_id": c.sense_id,
+            "version": c.version,
+            "context_label": c.context_label,
+        }
+        for c in GlossaryRepository(conn).locked_terms(segment_id)
+    ]
 
 
 def write_segment_text(conn, segment_id: int, lang: str, src_id: int, content: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO segment_text (segment_id, lang, content, source_id)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (segment_id, lang, source_id) DO UPDATE
-                SET content = EXCLUDED.content
-            """,
-            (segment_id, lang, content, src_id),
-        )
+    SegmentRepository(conn).write_segment_text(segment_id, lang, src_id, content)
 
 
 def update_translation_status(conn, segment_id: int, status: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE segment SET translation_status = %s WHERE segment_id = %s",
-            (status, segment_id),
-        )
+    SegmentRepository(conn).update_translation_status(segment_id, status)
 
 
 def write_reviewer_notes(conn, segment_id: int, notes: dict, iteration: int) -> None:
-    payload = {"iteration": iteration, **notes}
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE segment SET reviewer_notes = %s WHERE segment_id = %s",
-            (psycopg2.extras.Json(payload), segment_id),
-        )
+    SegmentRepository(conn).write_reviewer_notes(segment_id, notes, iteration)
 
 
 def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE term_usage SET sense_version_used = %s "
-            "WHERE segment_id = %s AND sense_id = %s",
-            (version, segment_id, sense_id),
-        )
+    SegmentRepository(conn).update_sense_version_used(segment_id, sense_id, version)
 
 
 # ── Term lookup ───────────────────────────────────────────────────────────────

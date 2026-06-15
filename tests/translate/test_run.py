@@ -316,9 +316,11 @@ def test_close_run_bulk_inserts_segments_and_totals():
     ]
     results[0].segment_records.append(record)
 
+    # _close_run delegates the run_segment/translation_run SQL to RunRepository,
+    # so the execute_values call now lives in storage.repositories.
     with (
         patch("translate.run.get_conn") as mock_gc,
-        patch("translate.run.psycopg2") as mock_psycopg2,
+        patch("storage.repositories.psycopg2") as mock_psycopg2,
     ):
         conn = mock_gc.return_value.__enter__.return_value
         cur = conn.cursor.return_value.__enter__.return_value

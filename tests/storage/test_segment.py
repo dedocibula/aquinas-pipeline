@@ -1,0 +1,128 @@
+"""Unit tests for SegmentRepository — per-segment loads/writes + corpus queries."""
+
+from __future__ import annotations
+
+from storage.models import Segment
+from storage.repositories import SegmentRepository
+
+
+def _seg_row(**overrides) -> dict:
+    base = {
+        "segment_id": 1,
+        "locator_path": "I.q1.a1",
+        "element_type": "respondeo",
+        "reply_to": None,
+        "translation_status": "pending",
+        "latin": "Respondeo dicendum quod...",
+        "czech": "Odpovídám...",
+        "english": "I answer that...",
+    }
+    base.update(overrides)
+    return base
+
+
+# ── get_segment ────────────────────────────────────────────────────────────────
+
+
+def test_get_segment_returns_model(fake_conn):
+    conn = fake_conn(fetchone_results=[_seg_row()])
+    seg = SegmentRepository(conn).get_segment(1)
+    assert isinstance(seg, Segment)
+    assert seg.translation_status == "pending"
+    assert seg.latin.startswith("Respondeo")
+
+
+def test_get_segment_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[])
+    assert SegmentRepository(conn).get_segment(999) is None
+
+
+def test_load_body_segments_returns_models(fake_conn):
+    rows = [_seg_row(segment_id=1), _seg_row(segment_id=2, latin=None)]
+    conn = fake_conn(fetchall_rows=rows)
+    segs = SegmentRepository(conn).load_body_segments(1)
+    assert [s.segment_id for s in segs] == [1, 2]
+    assert all(isinstance(s, Segment) for s in segs)
+
+
+# ── writes ─────────────────────────────────────────────────────────────────────
+
+
+def test_write_segment_text_upserts(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).write_segment_text(1, "sk", 3, "preklad")
+    sql, params = conn.executed[-1]
+    assert "INSERT INTO segment_text" in sql
+    assert params == (1, "sk", "preklad", 3)
+
+
+def test_update_translation_status(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).update_translation_status(1, "translated")
+    _, params = conn.executed[-1]
+    assert params == ("translated", 1)
+
+
+def test_update_sense_version_used(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).update_sense_version_used(1, 42, 2)
+    sql, params = conn.executed[-1]
+    assert "UPDATE term_usage SET sense_version_used" in sql
+    assert params == (2, 1, 42)
+
+
+# ── corpus-wide queries ────────────────────────────────────────────────────────
+
+
+def test_get_all_article_locators(fake_conn):
+    conn = fake_conn(fetchall_rows=[("I.q1.a1",), ("I.q2.a3",)])
+    assert SegmentRepository(conn).get_all_article_locators(1) == ["I.q1.a1", "I.q2.a3"]
+
+
+def test_get_pending_with_filter_passes_segment_list(fake_conn):
+    conn = fake_conn(fetchall_rows=[(5,)])
+    result = SegmentRepository(conn).get_pending_segment_ids_for_article(
+        "I.q1.a1", 1, frozenset({5, 6})
+    )
+    assert result == [5]
+    sql, params = conn.executed[-1]
+    assert "segment_id = ANY(%s)" in sql
+    assert params[0] == "I.q1.a1" and params[1] == 1 and sorted(params[2]) == [5, 6]
+
+
+def test_get_pending_without_filter_omits_any(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    SegmentRepository(conn).get_pending_segment_ids_for_article("I.q1.a1", 1)
+    sql, params = conn.executed[-1]
+    assert "segment_id = ANY(%s)" not in sql
+    assert params == ("I.q1.a1", 1)
+
+
+def test_has_pending_segments_true(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    assert SegmentRepository(conn).has_pending_segments("I.q1.a1") is True
+
+
+def test_get_stale_segments(fake_conn):
+    conn = fake_conn(fetchall_rows=[(3,), (4,)])
+    assert SegmentRepository(conn).get_stale_segments(1) == [3, 4]
+
+
+def test_get_human_edited_empty_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert SegmentRepository(conn).get_human_edited_segments([]) == []
+    assert conn.executed == []
+
+
+def test_flag_needs_human_empty_short_circuits(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).flag_needs_human([], "note")
+    assert conn.executed == []
+
+
+def test_reset_translation_status(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).reset_translation_status([7, 8])
+    sql, params = conn.executed[-1]
+    assert "translation_status = 'pending'" in sql
+    assert params == ([7, 8],)

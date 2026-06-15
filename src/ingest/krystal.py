@@ -28,7 +28,7 @@ from pathlib import Path
 
 import docx
 
-from common.db import get_conn, source_id
+from storage.db import get_conn, source_id
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCX_PATH = ROOT / "sources" / "czech" / "krystal" / "Teologická Suma úzus - verze 4.docx"

@@ -29,8 +29,8 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
-from common.db import get_conn, source_id
 from ingest.parser_latin import TEST_ARTICLES
+from storage.db import get_conn, source_id
 
 ROOT = Path(__file__).resolve().parents[2]
 DOMINICAN_DIR = ROOT / "sources" / "english" / "dominican"

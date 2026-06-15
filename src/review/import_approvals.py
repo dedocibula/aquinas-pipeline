@@ -16,9 +16,9 @@ Prerequisites:
 
 from __future__ import annotations
 
-from common.db import get_conn, source_id
 from common.glossary_repo import bump_sense_version, update_sense_status, write_human_rendering
 from review.sheets import authenticate, get_spreadsheet_id
+from storage.db import get_conn, source_id
 
 _REVIEW_TAB = "Review"
 

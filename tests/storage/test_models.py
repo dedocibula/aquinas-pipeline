@@ -1,22 +1,11 @@
-"""Unit tests for src/common/models.py — construction, from_row, as_dict round-trip."""
+"""Unit tests for src/storage/models.py — construction, from_row, as_dict round-trip."""
 
 from __future__ import annotations
 
-from common.models import (
-    ArticleResult,
-    CheckResult,
-    Constraint,
-    Resolution,
-    ReviewResult,
-    Segment,
-    SegmentOutcome,
-    Sense,
-    Term,
-    UsageInfo,
-)
+from storage.models import Constraint, Segment, Sense, Term
 
-# Column shapes mirror the live SQL helpers (glossary_repo._load_glossary,
-# _load_segments, loop.get_segment_with_texts, loop.get_locked_terms).
+# Column shapes mirror the live repository SQL (GlossaryRepository.load_glossary,
+# SegmentRepository.load_body_segments / get_segment, locked_terms).
 
 SENSE_ROW = {
     "sense_id": 7,
@@ -108,27 +97,11 @@ def test_constraint_from_row_and_prompt_dict():
     }
 
 
-def test_constraint_null_category_defaults_to_term():
+def test_constraint_null_category_preserved_raw_defaults_in_prompt():
     row = {**LOCKED_TERM_ROW, "category": None, "latin_surface": None}
     c = Constraint.from_row(row)
-    assert c.category == "term"
-    # with no surface, the prompt lemma falls back to the lemma itself
+    # the raw NULL category is preserved on the model …
+    assert c.category is None
+    # … and only defaulted to "term" at the prompt boundary.
     assert c.to_prompt_dict()["latin_lemma"] == "intellectus"
     assert c.to_prompt_dict()["category"] == "term"
-
-
-def test_reexports_are_the_canonical_types():
-    # Re-exported dataclasses are the same objects, not copies.
-    from common.pricing import UsageInfo as CanonicalUsageInfo
-    from ingest.resolution import Resolution as CanonicalResolution
-    from translate.loop import SegmentOutcome as CanonicalSegmentOutcome
-    from translate.prechecks import CheckResult as CanonicalCheckResult
-    from translate.reviewer import ReviewResult as CanonicalReviewResult
-    from translate.run import ArticleResult as CanonicalArticleResult
-
-    assert UsageInfo is CanonicalUsageInfo
-    assert Resolution is CanonicalResolution
-    assert SegmentOutcome is CanonicalSegmentOutcome
-    assert CheckResult is CanonicalCheckResult
-    assert ReviewResult is CanonicalReviewResult
-    assert ArticleResult is CanonicalArticleResult

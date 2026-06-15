@@ -21,7 +21,7 @@ import argparse
 from collections import Counter
 from pathlib import Path
 
-from common.db import get_conn
+from storage.db import get_conn
 
 _REPORTS_DIR = Path("reports")
 

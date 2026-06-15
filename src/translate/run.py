@@ -1,4 +1,4 @@
-"""M5 Prefect flows for full-corpus translation.
+"""Prefect flows for full-corpus translation.
 
 Usage
 -----
@@ -31,7 +31,6 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import psycopg2.extras
 from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
 
@@ -44,8 +43,9 @@ from common.corpus_db import (
     has_pending_segments,
     reset_translation_status,
 )
-from common.db import get_conn
 from common.pricing import UsageInfo
+from storage.db import get_conn
+from storage.repositories import RunRepository
 from translate.loop import translate_segment
 
 log = logging.getLogger(__name__)
@@ -124,13 +124,7 @@ def _prompt_hash() -> str:
 
 
 def _glossary_snapshot(conn) -> dict:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FILTER (WHERE status = 'approved'), max(version) "
-            "FROM glossary_sense"
-        )
-        approved, max_version = cur.fetchone()
-    return {"approved_senses": approved, "max_version": max_version}
+    return RunRepository(conn).glossary_snapshot()
 
 
 def _open_run(
@@ -152,29 +146,17 @@ def _open_run(
 
     with get_conn() as conn:
         snapshot = _glossary_snapshot(conn)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO translation_run
-                    (flow_name, git_sha, prompt_hash, glossary_snapshot,
-                     translator_model, reviewer_model, temperature,
-                     filters, max_workers)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING run_id
-                """,
-                (
-                    flow_name,
-                    _git_sha(),
-                    _prompt_hash(),
-                    psycopg2.extras.Json(snapshot),
-                    _DEEPSEEK_MODEL,
-                    _DEEPSEEK_R1_MODEL,
-                    TRANSLATOR_TEMPERATURE,
-                    psycopg2.extras.Json(filters) if filters else None,
-                    max_workers,
-                ),
-            )
-            run_id = cur.fetchone()[0]
+        run_id = RunRepository(conn).open_run(
+            flow_name=flow_name,
+            git_sha=_git_sha(),
+            prompt_hash=_prompt_hash(),
+            snapshot=snapshot,
+            translator_model=_DEEPSEEK_MODEL,
+            reviewer_model=_DEEPSEEK_R1_MODEL,
+            temperature=TRANSLATOR_TEMPERATURE,
+            filters=filters,
+            max_workers=max_workers,
+        )
     log.info("Opened translation_run %d (%s)", run_id, flow_name)
     return run_id
 
@@ -187,43 +169,15 @@ def _close_run(run_id: int, results: list[ArticleResult]) -> None:
     cost = _total_cost([u for r in results for u in r.usages])
 
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            psycopg2.extras.execute_values(
-                cur,
-                """
-                INSERT INTO run_segment
-                    (run_id, segment_id, final_status, iterations_used,
-                     chosen_iteration, cost_usd, failure_classes, last_feedback)
-                VALUES %s
-                """,
-                [
-                    (
-                        run_id,
-                        rec["segment_id"],
-                        rec["final_status"],
-                        rec["iterations_used"],
-                        rec["chosen_iteration"],
-                        rec["cost_usd"],
-                        psycopg2.extras.Json(rec["failure_classes"])
-                        if rec["failure_classes"]
-                        else None,
-                        rec["last_feedback"],
-                    )
-                    for rec in records
-                ],
-            )
-            cur.execute(
-                """
-                UPDATE translation_run
-                SET finished_at = now(),
-                    total_segments = %s,
-                    total_translated = %s,
-                    total_needs_human = %s,
-                    total_cost_usd = %s
-                WHERE run_id = %s
-                """,
-                (len(records), translated, needs_human, cost, run_id),
-            )
+        repo = RunRepository(conn)
+        repo.insert_run_segments(run_id, records)
+        repo.finalize_run(
+            run_id,
+            total_segments=len(records),
+            total_translated=translated,
+            total_needs_human=needs_human,
+            total_cost=cost,
+        )
     log.info("Closed translation_run %d (%d segments)", run_id, len(records))
 
 
@@ -544,7 +498,7 @@ def _fetch_needs_human_rows(conn, work_id: int = 1) -> list[dict]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    parser = argparse.ArgumentParser(description="M5 translation flows")
+    parser = argparse.ArgumentParser(description="Full-corpus translation flows")
     parser.add_argument(
         "--flow",
         choices=["translate_corpus", "rerun_stale", "retranslate_body"],

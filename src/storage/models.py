@@ -1,42 +1,25 @@
-"""Typed data structures for shared pipeline concepts.
+"""Typed persistence shapes for shared pipeline concepts.
 
-Frozen dataclasses replacing the ad-hoc dicts that flow between the glossary
-loader, resolver, and translation loop. This module is *additive*: the dicts are
-still produced by the current SQL helpers. Repositories (next phase) will return
-these models directly; until then, ``from_row``/``as_dict`` bridge the two
-representations so callers can migrate incrementally.
+Frozen dataclasses that the repository layer (``storage.repositories``) returns
+in place of ad-hoc dicts. ``from_row`` builds them from a SQL row; ``as_dict``
+emits the legacy dict shape for callers not yet migrated to the models.
 
-Existing dataclasses defined next to their behavior (Resolution, CheckResult,
-ReviewResult, UsageInfo, SegmentOutcome, ArticleResult) are re-exported here so
-there is a single import surface for shared shapes.
+This is a *leaf* module: it imports nothing from the rest of the pipeline, so the
+repository layer can depend on it without forming an import cycle. Result/return
+types that live next to their behavior (Resolution, SegmentOutcome, ArticleResult,
+CheckResult, ReviewResult, UsageInfo) are imported from their own modules, not
+re-exported here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# ── Re-exported dataclasses (defined alongside their behavior) ─────────────────
-# Imported here to give a single import surface; the canonical definitions stay
-# in their owning modules. Retyping their dict fields to the models below is
-# deferred to the repository phase, where the dict→model boundary flips.
-from common.pricing import UsageInfo
-from ingest.resolution import Resolution
-from translate.loop import SegmentOutcome
-from translate.prechecks import CheckResult
-from translate.reviewer import ReviewResult
-from translate.run import ArticleResult
-
 __all__ = [
     "Sense",
     "Term",
     "Segment",
     "Constraint",
-    "Resolution",
-    "CheckResult",
-    "ReviewResult",
-    "UsageInfo",
-    "SegmentOutcome",
-    "ArticleResult",
 ]
 
 
@@ -185,27 +168,28 @@ class Segment:
 class Constraint:
     """A locked Slovak term the translator must use for a Latin lemma.
 
-    Sourced from ``loop.get_locked_terms``. ``category`` defaults to "term" when
-    the glossary row has NULL, matching the prompt-building behavior in
+    Sourced from ``GlossaryRepository.locked_terms``. ``category`` is stored
+    exactly as the glossary row has it (NULL → None); the "term" default is
+    applied at the prompt boundary (``to_prompt_dict``), matching
     ``translate_segment``.
     """
 
     latin_lemma: str
     required_slovak: str
     context_label: str | None
-    category: str = "term"
+    category: str | None = None
     sense_id: int | None = None
     version: int | None = None
     latin_surface: str | None = None
 
     @classmethod
     def from_row(cls, row) -> Constraint:
-        """Build from a ``get_locked_terms`` row."""
+        """Build from a ``locked_terms`` row, preserving the raw category."""
         return cls(
             latin_lemma=row["latin_lemma"],
             required_slovak=row["required_slovak"],
             context_label=row["context_label"],
-            category=row["category"] or "term",
+            category=_get(row, "category"),
             sense_id=_get(row, "sense_id"),
             version=_get(row, "version"),
             latin_surface=_get(row, "latin_surface"),
@@ -215,13 +199,14 @@ class Constraint:
         """Return the constraint dict the translator prompt consumes.
 
         Matches ``translate_segment``: the lemma shown to the model is the Latin
-        surface form when one exists, else the lemma.
+        surface form when one exists, else the lemma; a NULL category becomes
+        "term".
         """
         return {
             "latin_lemma": self.latin_surface or self.latin_lemma,
             "required_slovak": self.required_slovak,
             "context_label": self.context_label,
-            "category": self.category,
+            "category": self.category or "term",
         }
 
 

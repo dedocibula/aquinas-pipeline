@@ -16,7 +16,7 @@ from pathlib import Path
 
 import psycopg2.extras
 
-from common.db import get_conn, work_id
+from storage.db import get_conn, work_id
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT_PATH = ROOT / "reports" / "m1_provenance.txt"

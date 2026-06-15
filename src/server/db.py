@@ -11,7 +11,7 @@ from __future__ import annotations
 import psycopg2
 import psycopg2.extras
 
-from common.db import source_id
+from storage.db import source_id
 
 
 def get_all_questions(conn: psycopg2.extensions.connection) -> list[dict]:

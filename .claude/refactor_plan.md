@@ -76,7 +76,8 @@ Explore agents + grep). Disposition per the user:
 |---|---|---|
 | 0 — Test net (unify/prune/baseline) | ✅ DONE | baseline green at 745; dead tests pruned; shared conftest added |
 | 1 — Typed models | ✅ DONE | `c126da6`; models.py + 7 tests; 752 passed; v_segment flag resolved |
-| 2 — Repository layer | ⏳ NEXT | |
+| 2 — Repository layer | ✅ DONE | new `src/storage/` (db+models+repositories) holds all SQL; old fns are wrappers; +30 tests; 781 passed; import cycle removed (storage is a leaf) |
+| 2b — Flip callers to models | ⏳ NEXT | resolver/loop consume models directly; retype Resolution.term/.sense; delete wrappers |
 | 3 — DeepSeek client | ☐ | |
 | 4 — Parser base class | ☐ | |
 | 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
@@ -109,18 +110,65 @@ Explore agents + grep). Disposition per the user:
     only when set, preserving each producer's exact dict shape.
   - `tests/common/test_models.py` (7 tests). Suite **752 passed** (745 + 7); ruff clean.
 
+#### Phase 2 — Repository layer (this commit)
+- **New `src/storage/` package** (the persistence boundary): `storage/db.py` (connection +
+  source/work lookups, moved from `common/db.py`), `storage/models.py` (the four pure dataclasses,
+  moved from `common/models.py`), `storage/repositories.py` (`GlossaryRepository`,
+  `SegmentRepository`, `TermUsageRepository`, `RunRepository`). **SQL moved verbatim**; only the
+  row→model mapping is new. Repos return models (`Term`/`Sense`/`Segment`/`Constraint`) or scalars.
+  All ~37 `common.{db,repositories,models}` import sites rewritten to `storage.*`.
+- Old module-level helpers are now **thin wrappers** delegating to the repos, preserving exact legacy
+  shapes for un-migrated callers: `glossary_repo._load_glossary/_load_segments/update_sense_status/
+  bump_sense_version/write_human_rendering`; all of `corpus_db.*`; `loop.get_segment_with_texts/
+  get_locked_terms/write_segment_text/update_translation_status/write_reviewer_notes/
+  update_sense_version_used`; `resolution._write_term_usage`; `run._glossary_snapshot/_open_run/
+  _close_run` delegate to `RunRepository`.
+- **Constraint model corrected**: `category` is now stored **raw** (NULL→None); the "term" default
+  is applied only in `to_prompt_dict`. The previous from_row default was lossy and conflicted with
+  `get_locked_terms`'s contract (`test_get_locked_terms_category_none_for_krystal_terms`). test_models
+  updated accordingly.
+- **Import cycle eliminated structurally** (no PEP-562 hack): the old `models.py` did double duty —
+  defining the pure persistence dataclasses *and* re-exporting high-level result types
+  (`Resolution`/`SegmentOutcome`/`ArticleResult`/…) from modules that depend on the repo layer. That
+  forward edge closed the loop. The re-export surface was **dead** (no production consumer; only one
+  test used it), so it was deleted. `storage/models.py` is now a verified **leaf** (imports nothing
+  from the pipeline); `storage.repositories` depends only on it. Result/return types are imported from
+  their owning modules, as every real consumer already did.
+- Tests live in `tests/storage/` (`test_models.py` moved here; `test_glossary/segment/term_usage.py`
+  + `test_run_repo.py` — the last renamed to dodge the pytest basename collision with
+  `tests/translate/test_run.py`). The dead `test_reexports_are_the_canonical_types` was dropped.
+  Suite **781 passed**; ruff clean.
+- M5 labels stripped from `translate/run.py` (touched-file rule).
+- **Transition shims still in `common/`**: `glossary_repo.py`, `corpus_db.py` (thin wrappers over
+  `storage.repositories`), and the inline `loop`/`resolution`/`run` DB helpers. Phase 2b deletes them.
+
+#### Phase 2b handoff (next) — flip callers to models, delete wrappers
+- `resolver.py`/`pipeline.py` consume `GlossaryRepository.load_glossary()` → `list[Term]` directly;
+  `resolution.py` voting uses `Term`/`Sense` attributes instead of dict subscripts. **Then** retype
+  `Resolution.term`/`.sense` from `dict` to `Term`/`Sense` (the deliberate Phase-1 deferral) and
+  `TermUsageRepository.write_term_usage` reads `res.sense.sense_id`/`.version`.
+- `loop.translate_segment` consumes `Constraint`/`Segment` models + `Constraint.to_prompt_dict`
+  instead of the dict wrappers; drop `get_segment_with_texts`/`get_locked_terms` shims.
+- `run.py`/`corpus_db` callers use `SegmentRepository` directly; delete `corpus_db.py` + the
+  `glossary_repo`/`loop` shims in a final cleanup commit.
+- **Still in import_approvals (not yet moved)**: `write_human_surface`, `get_current_sense`,
+  `get_la_surface`, and the inline `process_approval` UPDATEs → fold into `GlossaryRepository`
+  (process_approval contract is locked by tests — see §6; keep it).
+
 ---
 
 ## 4. Target architecture (end state)
 
 ```
 src/
+  storage/                 # NEW — persistence boundary (a leaf; no pipeline imports)
+    db.py                  # get_conn + source/work lookups (moved from common/db.py)
+    models.py              # Segment, Sense, Term, Constraint (pure dataclasses; moved from common/models.py)
+    repositories.py        # GlossaryRepository, SegmentRepository, TermUsageRepository, RunRepository
   common/
-    db.py                  # get_conn stays (clean context manager)
-    models.py              # NEW — Segment, Sense, Term, Constraint + re-exported dataclasses
-    repositories/          # NEW — GlossaryRepository, SegmentRepository, TermUsageRepository, RunRepository
     deepseek_client.py     # NEW — DeepSeekClient (one place for all requests.post)
     lemmatize.py, pricing.py
+    glossary_repo.py, corpus_db.py   # TRANSITION shims over storage.repositories — deleted in Phase 2b
   ingest/
     source_parser.py       # NEW — SourceParser ABC; parser_latin/bahounek/english subclass it
     resolution.py, resolver.py, gap_terms.py, sense_mining.py, krystal.py

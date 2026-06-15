@@ -46,7 +46,6 @@ import json
 import sys
 from pathlib import Path
 
-from common.db import get_conn, source_id, work_id
 from common.deepseek import _api_stats, _api_stats_lock, get_api_stats
 from common.glossary_repo import _load_glossary, _load_segments
 from ingest.gap_terms import (
@@ -61,6 +60,7 @@ from ingest.gap_terms import (
     _scan_gap_lemmas,
 )
 from ingest.resolution import _source_rank, _write_term_usage, resolve_segment
+from storage.db import get_conn, source_id, work_id
 
 ROOT = Path(__file__).resolve().parents[2]
 

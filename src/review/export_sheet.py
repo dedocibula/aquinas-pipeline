@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import psycopg2.extras
 
-from common.db import get_conn
 from review.sheets import (
     apply_checkbox_validation,
     authenticate,
@@ -27,6 +26,7 @@ from review.sheets import (
     read_existing_rows_from_data,
     write_header,
 )
+from storage.db import get_conn
 
 # Export SQL — fetches everything needed for the sheet in one query.
 # Wrapped as a CTE so the outer WHERE can reference the computed tu_agg columns.

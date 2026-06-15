@@ -26,8 +26,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from common.db import get_conn
 from common.pricing import UsageInfo
+from storage.db import get_conn
 from translate.loop import translate_segment
 from translate.prompt_logger import PromptLogger
 from translate.run import ArticleResult, _close_run, _open_run

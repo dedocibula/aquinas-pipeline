@@ -49,8 +49,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-from common.db import get_conn, source_id
 from common.lemmatize import lemmatize_czech
+from storage.db import get_conn, source_id
 
 # ── Mining knobs ──────────────────────────────────────────────────────────────
 

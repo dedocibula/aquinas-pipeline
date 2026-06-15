@@ -18,7 +18,7 @@ from pathlib import Path
 
 import psycopg2.extras
 
-from common.db import get_conn
+from storage.db import get_conn
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = ROOT / "reports"

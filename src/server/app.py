@@ -14,7 +14,6 @@ from flask import Flask, abort, jsonify, render_template, request
 
 load_dotenv()
 
-from common.db import get_conn  # noqa: E402 — must come after load_dotenv
 from server.db import (  # noqa: E402
     approve_segment,
     get_all_questions,
@@ -27,6 +26,7 @@ from server.db import (  # noqa: E402
     get_translation_progress,
     save_segment_text,
 )
+from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
 app = Flask(__name__)
 
