@@ -1,0 +1,350 @@
+# Aquinas Pipeline — Refactor Plan & Progress Log
+
+> Single source of truth for the typed/modular/step-based refactor. Read this first
+> when resuming. Plan approved; Phase 0 complete. Work happens on branch
+> `aquinas-refactor` in the worktree `.claude/worktrees/aquinas-refactor/`.
+
+---
+
+## 0. How to resume (environment)
+
+```bash
+# Worktree (branch aquinas-refactor, forked from main @ 93d7964)
+cd /Users/agalad/Workspace/python/aquinas-pipeline/.claude/worktrees/aquinas-refactor
+
+# One-time env setup (these are gitignored, not present in a fresh worktree):
+cp ../../../.env .env                 # DATABASE_URL etc.
+ln -s ../../../models models          # CLTK + MorphoDiTa models (large)
+# .venv is created automatically by `uv run` from uv.lock
+
+uv run pytest -q          # regression gate — MUST stay green (baseline: 745 passed)
+uv run ruff check         # lint — pre-commit hook enforces this on staged .py
+```
+
+- **pytest config**: `pythonpath = ["src", "."]` (so `import translate.loop`, `import common.db` work).
+- **DB access**: `psql` is NOT on PATH. Use `uv run python3` + `psycopg2`.
+  `DATABASE_URL=postgresql://aquinas:aquinas@localhost:5432/aquinas`.
+  `locator_path` is `ltree` — cast `locator_path::text` before string ops.
+- Tests are isolated (FakeConn/monkeypatch) — they do **not** touch the live DB.
+
+## 1. Guiding constraints (from CLAUDE.md — non-negotiable)
+
+- **No new runtime deps.** `dataclasses`, `typing`, `pytest`, `psycopg2`, `requests` already present.
+- **DDL-free** except: the consolidated schema snapshot (Phase 8, read-only `pg_dump`) and the
+  one-off habere data purge (Phase 9) → **dry-run + STOP for human approval before running.**
+- **Behavior-preserving.** Every commit keeps `uv run pytest` green (≥745) and `ruff` clean.
+- **Commit in small chunks**, conventional-commit messages, one logical change per commit.
+- **Fail loudly** — no silent `try/except` in parsers.
+- **Cross-cutting**: any file you touch gets its milestone refs (M0–M5) stripped from comments
+  (Phase 7 does a dedicated sweep of the rest).
+- Commit trailer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+
+---
+
+## 2. Why this refactor
+
+The pipeline (Latin→Slovak translation of the *Summa Theologiae*) works but grew as standalone
+scripts wired by convention. Structural problems:
+
+- DB access scattered across `common/db.py`, `common/glossary_repo.py`, `common/corpus_db.py`,
+  and inline helpers in `translate/loop.py`; same SQL shapes re-implemented per call site.
+- Untyped dicts for shared concepts (segment, term/sense, constraint) with different keys per module.
+- Duplicated `requests.post` API blocks (4 of them).
+- Repeated parser loop in 3 parsers.
+- No whole-pipeline step abstraction (only M2 has a bare-function runner); source verification
+  sits outside any pipeline; no interactive "where am I" driver.
+- Reporting is ad-hoc into a flat `reports/` dir.
+- Prompt-optimization ("DSPy-like") code scattered across repo root + `scripts/` + `src/translate/`.
+- Milestone labels leak into code comments; 7 incremental migrations, no single schema source of truth.
+
+### Verification finding (important)
+The original request named two "domain constraints to preserve": *modern-Slovak-suffix filtering*
+and *first-person-verb-form removal from the terminology DB*. **Neither exists** (confirmed by two
+Explore agents + grep). Disposition per the user:
+- `_oov_stem` (`src/translate/prechecks.py:34`) is the real suffix/stem logic → **keep**; propose a
+  cleaner alternative as an optional, non-blocking follow-up behind locked tests (Phase 9a).
+- `_drop_habere_ppp_constraints` (`src/translate/loop.py:159`) is a self-described temporary
+  read-time patch → **run once as a purge, harden the resolver, then delete** (Phase 9b).
+- Do **not** invent a "suffix filter" or "first-person remover" component. Building the latter would
+  corrupt the glossary (`intellego → intelekt` is a legitimate first-person headword).
+
+---
+
+## 3. Status summary
+
+| Phase | Status | Notes |
+|---|---|---|
+| 0 — Test net (unify/prune/baseline) | ✅ DONE | baseline green at 745; dead tests pruned; shared conftest added |
+| 1 — Typed models | ⏳ NEXT | shapes gathered (see §5); no code written yet |
+| 2 — Repository layer | ☐ | |
+| 3 — DeepSeek client | ☐ | |
+| 4 — Parser base class | ☐ | |
+| 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
+| 6 — Isolate optimize/ toolchain | ☐ | |
+| 7 — Strip milestone labels; rename milestone files | ☐ | |
+| 8 — Consolidate DB schema | ☐ | |
+| 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
+| 10/11 — Final gate + memory | ☐ | |
+
+### Commits so far (on `aquinas-refactor`)
+- `4c7e934` test: repair pre-existing test drift to establish a green baseline
+  - The suite on HEAD was **not** green: 1 failure + 2 uncollectable modules.
+  - Removed dead tests for removed functions: `_iteration_count`, `fetch_reviewer_notes`
+    (test_pilot.py); `get_model_rendering`, `get_term_flags` (test_import_approvals.py).
+  - Rewrote 6 stale `process_approval` tests to the current contract (see §6); fixed the stale
+    `find-and-replace` microedit assertion in test_loop.py.
+  - Result: **694 passed / 1 failed / 2 errors → 745 passed.**
+- `ef59519` test: add shared conftest fakes (FakeConn/FakeCursor, gspread)
+  - `tests/conftest.py` with shared `FakeConn`/`FakeCursor` + `FakeWorksheet`/`FakeSpreadsheet`
+    and `fake_conn`/`fake_worksheet`/`fake_spreadsheet` factory fixtures. Additive — existing
+    modules keep their local fakes. New repo/step tests should use these.
+
+---
+
+## 4. Target architecture (end state)
+
+```
+src/
+  common/
+    db.py                  # get_conn stays (clean context manager)
+    models.py              # NEW — Segment, Sense, Term, Constraint + re-exported dataclasses
+    repositories/          # NEW — GlossaryRepository, SegmentRepository, TermUsageRepository, RunRepository
+    deepseek_client.py     # NEW — DeepSeekClient (one place for all requests.post)
+    lemmatize.py, pricing.py
+  ingest/
+    source_parser.py       # NEW — SourceParser ABC; parser_latin/bahounek/english subclass it
+    resolution.py, resolver.py, gap_terms.py, sense_mining.py, krystal.py
+    coverage_report.py     # RENAMED from report_m2.py
+  translate/
+    loop.py, translator.py, reviewer.py, run.py, pilot.py, prechecks.py
+  pipeline/                # NEW
+    step.py, runner.py, context.py
+    reporting.py           # StepReport writer → reports/<stage>/
+    interactive.py         # python -m pipeline — state machine + numbered menu
+  optimize/                # NEW — moved DSPy-like toolchain
+    loop.py (port of optimize_loop.sh), reset_golden.py, run_compare.py,
+    build_sample.py, samples/pilot_sample_*.json, prompt_changelog.md
+db/schema.sql              # NEW — single annotated current-state schema
+migrations/archive/        # 001–007 moved here (historical only)
+scripts/purge_habere_ppp_usage.py  # NEW one-off
+```
+
+---
+
+## 5. Phase-by-phase plan
+
+### Phase 1 — Typed data structures → `src/common/models.py`  ⏳ NEXT
+Frozen dataclasses replacing ad-hoc dicts. **Recommended approach:** create `models.py` as a pure,
+additive module + unit tests + `from_row`/`as_dict` helpers, and migrate consumers in Phase 2 where
+the dict→model boundary naturally flips (repositories return models). This keeps Phase 1 low-risk.
+
+Exact shapes (verified from source):
+
+```python
+@dataclass(frozen=True)
+class Sense:
+    sense_id: int
+    context_label: str | None
+    version: int
+    cs_lemma: str | None
+    cs_content: str | None
+    en_cue: str | None
+    sk_content: str | None
+    la_surface: str | None
+
+@dataclass(frozen=True)
+class Term:
+    term_id: int
+    latin_lemma: str
+    is_multiword: bool
+    category: str | None
+    la_surface: str | None
+    senses: tuple[Sense, ...]      # was list; freeze for hashability
+
+@dataclass(frozen=True)
+class Segment:
+    segment_id: int
+    locator_path: str             # ltree cast to text
+    element_type: str
+    latin: str | None
+    czech: str | None
+    english: str | None
+    # get_segment_with_texts (v_segment) MAY also carry reply_to/translation_status — VERIFY
+    # the v_segment view columns before finalizing these optional fields.
+
+@dataclass(frozen=True)
+class Constraint:
+    latin_lemma: str
+    required_slovak: str
+    context_label: str | None
+    category: str                 # defaults to "term" when NULL
+    sense_id: int | None = None
+    version: int | None = None
+    latin_surface: str | None = None
+```
+
+- Source of `Term`/`Sense`: `glossary_repo._load_glossary` (`src/common/glossary_repo.py:24-104`).
+  Dict keys are exactly: term `{term_id, latin_lemma, is_multiword, category, la_surface, senses}`;
+  sense `{sense_id, context_label, version, cs_lemma, cs_content, en_cue, sk_content, la_surface}`.
+- Source of `Segment`: `glossary_repo._load_segments` (`:107-122`) returns
+  `{segment_id, locator_path, element_type, latin, czech, english}`.
+- Source of `Constraint`: `loop.get_locked_terms` SELECT returns
+  `{latin_lemma, category, latin_surface (= gt.la_surface), required_slovak (= sr.content),
+  sense_id, version, context_label}`; `loop.translate_segment` then builds the prompt constraint as
+  `{latin_lemma: latin_surface or latin_lemma, required_slovak, context_label, category or "term"}`.
+- **Re-home / re-export** existing dataclasses into `models.py` (re-export from current modules to
+  avoid import churn): `Resolution` (`ingest/resolution.py`, type its `.term`/`.sense` as Term/Sense),
+  `CheckResult` (`translate/prechecks.py`), `ReviewResult` (`translate/reviewer.py`),
+  `UsageInfo` (`common/pricing.py`), `SegmentOutcome` (`translate/loop.py`),
+  `ArticleResult` (`translate/run.py`). Parser element dataclasses unify in Phase 4.
+- Add `from_row(row)` classmethods mirroring the SQL column order, and `as_dict()` only where a
+  consumer still needs a dict during transition.
+- Tests: `tests/common/test_models.py` — construction, from_row, as_dict round-trip.
+- **Acceptance:** suite green; models importable; no consumer behavior change yet.
+
+### Phase 2 — Repository layer → `src/common/repositories/`
+Consolidate all SQL behind cohesive repos returning typed models. **Move SQL verbatim; only the
+row→model mapping changes** (locked by existing tests: `test_glossary_repo.py`, `test_corpus_db.py`,
+plus loop/resolver tests).
+- `GlossaryRepository`: `load_glossary() -> (list[Term], list[Term])`;
+  `locked_terms(segment_id) -> list[Constraint]` (from `loop.get_locked_terms`);
+  `update_sense_status`, `bump_sense_version`, `write_human_rendering`, `write_human_surface`.
+- `SegmentRepository`: `get_segment`, `load_body_segments`, `write_segment_text`,
+  `update_translation_status`, `write_reviewer_notes`, `update_sense_version_used`, **plus the whole
+  `common/corpus_db.py` set** (article locators, pending/stale/human-edited, reset, flag_needs_human).
+- `TermUsageRepository`: `write_term_usage(segment_id, resolutions)`.
+- `RunRepository`: open/close run + insert run_segment (lift from `translate/run.py`).
+- Inline DB helpers currently in `loop.py` to move: `get_segment_with_texts`, `get_locked_terms`,
+  `write_segment_text`, `update_translation_status`, `write_reviewer_notes`, `update_sense_version_used`.
+- Old module-level functions (`glossary_repo._load_glossary`, `corpus_db.*`) become thin wrappers
+  during transition; delete in a final cleanup commit.
+- Tests: `tests/common/repositories/` using `conftest` fakes (canned rows → assert returned models).
+- **Acceptance:** suite green; all SQL lives in repositories; callers use models.
+
+### Phase 3 — DeepSeek client → `src/common/deepseek_client.py`
+One `DeepSeekClient` collapsing the 4 duplicated `requests.post` blocks:
+- `translator.call_translator_v3` (temp **0.3**, max_tokens 2048)
+- `reviewer.call_reviewer_r1` (deepseek-reasoner, max_tokens ~8000)
+- `deepseek._call_deepseek_batch` (gap classify, temp 0.0)
+- `sense_mining.call_deepseek_label` (temp 0.0, json_object)
+- `DeepSeekClient(model, url, api_key)` + `chat(messages, **opts) -> (text, UsageInfo)` using
+  `pricing.extract_usage`; role methods `translate/review/classify_gap_terms/label_senses`.
+- **Preserve exactly**: per-call temperature/max_tokens, and the **fail-loud
+  `RuntimeError`-after-retries** semantics (loop's `try/except RuntimeError` depends on it).
+- Tests: record representative responses to `tests/fixtures/api/` and replay.
+
+### Phase 4 — Parser base class → `src/ingest/source_parser.py`
+`SourceParser` ABC: abstract `parse(raw) -> list[ParsedElement]`; concrete `store()` via
+`SegmentRepository`; `run()` with fail-loud + gap/anomaly logging.
+- `parser_latin`, `parser_bahounek`, `ingest_english` become subclasses (override `parse`, declare
+  `(lang, source)`). Unify the 3 element dataclasses (`ParsedElement`, `BahounekElement`,
+  `EnglishElement`) into one `ParsedElement(locator, element_type, text)`.
+- Locked by existing parser tests.
+
+### Phase 5 — Pipeline: steps, runner, reporting, interactive → `src/pipeline/`
+- **5a** `PipelineStep` protocol (`name`, `run(ctx) -> StepResult`, optional `verify()`),
+  `PipelineContext` (work_id, repositories, knobs, reports dir), `Runner` (uniform
+  logging/timing/fail-loud — lift `ingest/pipeline.py::_STEP_FNS` loop).
+- **5b** Source verification as **prerequisite step 0**: wrap `acquire/verify.py`'s
+  `check_latin/bahounek/krystal/dominican/freddoso/db/env` into `VerifySourcesStep`; downstream
+  steps refuse to run if it fails. Acquire downloaders become steps. Root `verify_sources.py` → thin
+  shim. Each `python -m …` entry point becomes a thin shim instantiating its Step (CLIs preserved).
+- **5c** Reporting → `src/pipeline/reporting.py`: a `StepReport` writer every step uses; concise +
+  actionable (what changed, what needs human action, anomalies/gaps); written to per-stage folders
+  `reports/acquire|ingest|resolve|review|translate|optimize/`. Route PromptLogger deep-dive JSONL to
+  `reports/translate/debug/`.
+- **5d** Interactive driver → `src/pipeline/interactive.py` (`python -m pipeline`): shows flow
+  position (from DB status: pending/translated/needs_human counts, glossary proposed vs approved,
+  last run) + last command (persist to `.pipeline_state.json`, no DDL) + numbered menu invoking
+  Steps (recollect terms, mine senses/suggest labels+translations, re-export for review, import
+  approvals, translate/retranslate, rerun-stale). Menu items just call Steps — no logic duplication.
+
+### Phase 6 — Isolate prompt-optimization toolchain → `src/optimize/`
+- Move into `src/optimize/`: `reset_golden.py`, `run_compare.py`, `scripts/build_sample_200.py`,
+  `docs/pilot_sample_*.json` → `src/optimize/samples/`, `prompt_changelog.md`, and a ported loop
+  driver `optimize/loop.py` (`python -m optimize.loop`) from `optimize_loop.sh` (keep a thin root
+  `optimize_loop.sh` shim).
+- Factor `PILOT_SAMPLE` mode out of `translate/pilot.py` into `optimize/`; `pilot.py` keeps only
+  corpus-pilot duties. Shared translation goes through Phase 2/3 repos + client.
+- **Worktree workflow** (document + enforce in the driver): the loop runs in a dedicated worktree on
+  a `prompt-opt` branch; reset→pilot→compare→edit→commit happen there; vetted prompt changes merge
+  to `main` deliberately, never auto-pushed.
+
+### Phase 7 — Strip milestone labels; rename milestone-named files
+- Sweep `M0`–`M5`/"milestone" from comments & docstrings, rewording to describe behavior.
+  Files with refs (counts): `krystal.py`(6), `glossary_repo.py`(5), `report_m2.py`(4),
+  `resolver.py`(3), `report.py`(3), `run.py`(2), `pilot.py`(2), `sense_mining.py`(2),
+  `pipeline.py`(2), `parser_bahounek.py`(2), `acquire/verify.py`(2), `freddoso.py`(2),
+  `export_sheet.py`(1), `gap_terms.py`(1), `deepseek.py`(1), `corpus_db.py`(1) + all migration
+  headers + test files. (Design docs stay in `.claude/`.)
+- Rename `ingest/report_m2.py → ingest/coverage_report.py` (+ test + imports + pipeline step name).
+
+### Phase 8 — Consolidate DB schema → single annotated `db/schema.sql`
+- Generate `db/schema.sql` = `pg_dump --schema-only` of the live DB (currently at migration 007),
+  cleaned and **heavily commented per table/column** (purpose + consumer; complements
+  `.claude/database.md`). Migrations present: `001_initial`, `003_term_category`,
+  `004_translation_status`, `005_run_analytics`, `006_sense_rendering_la_lang`, `007_*` (002 appears
+  absent — verify). Move `001`–`007` to `migrations/archive/`. Header documents: fresh setup runs
+  `schema.sql`; archive is historical only.
+- **No DB change.** Verify `schema.sql` recreates an identical empty schema in a throwaway DB.
+
+### Phase 9 — Domain housekeeping (the only behavioral phase)
+- **9a `_oov_stem`**: encapsulate `_oov_stem` + `generate_slovak_forms` (`common/lemmatize.py`) into
+  one `SlovakTermMatcher` (`forms(lemma)`, `matches(token, lemma)`); behavior locked by
+  `test_prechecks.py`. Optional, non-blocking cleaner impl: MorphoDiTa generation first; for true OOV
+  derive stem from longest-common-prefix over generated variants, or a data-driven Slovak suffix
+  table (`-osť`, ň-stem). Adopt only if it removes known false positives (`milostivo↔milosť`,
+  `vás↔vášeň`) without regressing snapshots.
+- **9b `_drop_habere_ppp_constraints`**: run → harden → delete.
+  1. `scripts/purge_habere_ppp_usage.py`: find bogus `habitus` `term_usage` rows (same
+     `_HABERE_PPP_RE` + `lemmatize_latin` logic the read-time filter uses). **Dry-run, report, STOP
+     for human approval, then delete.**
+  2. Harden `resolution.resolve_segment` with `pos_tag_latin` (already in `common/lemmatize.py`) so a
+     perfect-passive participle + *esse* never maps to the noun term. New resolver test.
+  3. Delete `_drop_habere_ppp_constraints`, its call in `translate_segment`, and `_HABERE_PPP_RE`.
+     **Keep `_SUFFIX_RE`** (still used by `_build_surface_constraints`). Update loop tests.
+
+### Phase 10 — Final regression gate
+- `uv run pytest -q` matches the ≥745 baseline (zero regressions); `ruff` clean.
+- Re-run resolver + an optimize/pilot tiny sample; diff `term_usage`/`segment_text` writes vs a
+  pre-refactor snapshot — identical. Smoke-run every `python -m …` entry point. Confirm per-stage
+  `reports/` folders populate.
+
+### Phase 11 — Record conventions to permanent memory
+Write a `project`-type memory entry (Claude memory dir, indexed in `MEMORY.md`):
+- Folder map (§4) + rules: typed models over dicts; all SQL via repositories; all DeepSeek calls via
+  the client; every Step emits a concise `StepReport` into `reports/<stage>/`; new stages register as
+  a `PipelineStep` (+ menu entry); verification is prerequisite step 0; no milestone labels in code;
+  prompt-opt changes only via the `prompt-opt` worktree → reviewed merge.
+
+---
+
+## 6. Reference: current `process_approval` contract (locked by tests in `4c7e934`)
+`process_approval(conn, row, human_src_id) -> (status, version_bumped)`:
+- `NOT_FOUND` if sense missing → (NOT_FOUND, False)
+- `CONFLICT` only if `db_version` blank → (CONFLICT, False)  *(version mismatch no longer conflicts)*
+- `ALREADY_CONFIRMED` if status already 'approved' → (ALREADY_CONFIRMED, False)
+- otherwise (proposed): write human SK rendering; write context_label (empty→NULL, no own bump);
+  **always bump**; write la_surface if supplied & different; set status approved → (OK, True)
+
+## 7. Reference: test bloat / pruning candidates (Phase-by-phase, human-confirm deletions)
+Prune alongside the code each phase touches (criteria: delete framework-behavior tests and ones
+subsumed by characterization tests; collapse near-duplicates via `@pytest.mark.parametrize`; keep
+resolution/sense-voting, precheck OOV, verdict parsing, prompt building, parser locators, repository
+mappings, loop orchestration, run analytics, import/export semantics).
+- `test_loop.py` (1055) ↔ `test_resolver.py` (875) — overlap.
+- `test_freddoso.py` (349) — low-value 20%-coverage source.
+- `test_prompt_logger.py` (223); `test_glossary_repo_stubs.py` (109) — thin.
+- ~10 local FakeConn impls now superseded by `tests/conftest.py` — migrate opportunistically.
+
+## 8. Verification commands (every phase)
+```bash
+uv run pytest -q                                   # green, ≥745
+uv run ruff check
+# Phase 8: psql "$DATABASE_URL" -f db/schema.sql   # into a throwaway DB; confirm identical
+# Phase 9: uv run python -m scripts.purge_habere_ppp_usage --dry-run   # review → approve → run
+# Phase 5: uv run python -m pipeline                # interactive driver
+```
+
+---
+*The Claude Code plan file mirror lives at `~/.claude/plans/velvety-floating-conway.md`.*
