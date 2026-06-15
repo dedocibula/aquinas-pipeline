@@ -75,8 +75,8 @@ Explore agents + grep). Disposition per the user:
 | Phase | Status | Notes |
 |---|---|---|
 | 0 — Test net (unify/prune/baseline) | ✅ DONE | baseline green at 745; dead tests pruned; shared conftest added |
-| 1 — Typed models | ⏳ NEXT | shapes gathered (see §5); no code written yet |
-| 2 — Repository layer | ☐ | |
+| 1 — Typed models | ✅ DONE | `c126da6`; models.py + 7 tests; 752 passed; v_segment flag resolved |
+| 2 — Repository layer | ⏳ NEXT | |
 | 3 — DeepSeek client | ☐ | |
 | 4 — Parser base class | ☐ | |
 | 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
@@ -98,6 +98,16 @@ Explore agents + grep). Disposition per the user:
   - `tests/conftest.py` with shared `FakeConn`/`FakeCursor` + `FakeWorksheet`/`FakeSpreadsheet`
     and `fake_conn`/`fake_worksheet`/`fake_spreadsheet` factory fixtures. Additive — existing
     modules keep their local fakes. New repo/step tests should use these.
+- `c126da6` feat(models): typed dataclasses for shared pipeline shapes (Phase 1)
+  - `src/common/models.py`: frozen `Sense`/`Term`/`Segment`/`Constraint` with `from_row`/`as_dict`
+    bridges + `Constraint.to_prompt_dict`; re-exports `Resolution`, `CheckResult`, `ReviewResult`,
+    `UsageInfo`, `SegmentOutcome`, `ArticleResult`. Additive — no consumer touched.
+  - **v_segment flag RESOLVED**: `loop.get_segment_with_texts` SELECT carries `reply_to` +
+    `translation_status` (the actual `v_segment` view instead exposes `slovak_draft`/`slovak_final`,
+    not used by that loader). `_load_segments` carries only the six base columns. Both fields modeled
+    as optional on `Segment` (default `None`) so one model covers both producers; `as_dict` emits them
+    only when set, preserving each producer's exact dict shape.
+  - `tests/common/test_models.py` (7 tests). Suite **752 passed** (745 + 7); ruff clean.
 
 ---
 
