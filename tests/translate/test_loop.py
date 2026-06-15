@@ -598,7 +598,7 @@ def test_build_terminology_microedit_content():
     assert "rozum" in msg
     assert "<system_rejection>" in msg
     assert "inflect" in msg
-    assert "find-and-replace" in msg
+    assert "Do not change any other word" in msg
 
 
 # ── translate_segment — REVISION_NEEDED path ─────────────────────────────────

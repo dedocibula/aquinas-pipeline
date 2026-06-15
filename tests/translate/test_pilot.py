@@ -6,11 +6,9 @@ from unittest.mock import MagicMock, patch
 
 from translate.pilot import (
     _PILOT_QUESTIONS,
-    _iteration_count,
     _write_report,
     fetch_all_pilot_segments,
     fetch_pilot_segments,
-    fetch_reviewer_notes,
 )
 
 # Silence the corpus-char DB query that _write_report now issues.
@@ -115,51 +113,6 @@ def test_run_pilot_debug_mode_calls_fetch_debug_segments(monkeypatch):
 
     mock_debug.assert_called_once()
     mock_full.assert_not_called()
-
-
-# ── fetch_reviewer_notes ──────────────────────────────────────────────────────
-
-
-def test_fetch_reviewer_notes_returns_dict():
-    notes_data = {"iteration": 2, "raw": "looks good"}
-    conn, cur = _fake_conn([(notes_data,)])
-    result = fetch_reviewer_notes(conn, 1)
-    assert result == notes_data
-
-
-def test_fetch_reviewer_notes_returns_none_when_missing():
-    conn, cur = _fake_conn([])
-    result = fetch_reviewer_notes(conn, 999)
-    assert result is None
-
-
-def test_fetch_reviewer_notes_passes_segment_id():
-    conn, cur = _fake_conn([(None,)])
-    fetch_reviewer_notes(conn, 42)
-    _, params = cur.execute.call_args[0]
-    assert params == (42,)
-
-
-# ── _iteration_count ──────────────────────────────────────────────────────────
-
-
-def test_iteration_count_needs_human_always_3():
-    assert _iteration_count(None, "needs_human") == 3
-    assert _iteration_count({"iteration": 1}, "needs_human") == 3
-
-
-def test_iteration_count_uses_notes_iteration():
-    notes = {"iteration": 2, "raw": "some note"}
-    assert _iteration_count(notes, "translated") == 2
-
-
-def test_iteration_count_defaults_to_1_without_notes():
-    assert _iteration_count(None, "translated") == 1
-    assert _iteration_count({}, "translated") == 1
-
-
-def test_iteration_count_notes_with_no_iteration_key():
-    assert _iteration_count({"raw": "note only"}, "translated") == 1
 
 
 # ── _write_report ─────────────────────────────────────────────────────────────

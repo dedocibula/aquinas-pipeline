@@ -10,8 +10,6 @@ from review.import_approvals import (
     COLS,
     get_current_sense,
     get_la_surface,
-    get_model_rendering,
-    get_term_flags,
     load_approved_rows,
     process_approval,
     write_human_surface,
@@ -191,42 +189,6 @@ def test_get_current_sense_queries_correct_table():
     assert params == (5,)
 
 
-# ── get_model_rendering ───────────────────────────────────────────────────────
-
-
-def test_get_model_rendering_returns_content():
-    conn = FakeConn(fetchone_results=[("rozum",)])
-    result = get_model_rendering(conn, 101)
-    assert result == "rozum"
-
-
-def test_get_model_rendering_returns_none_when_missing():
-    conn = FakeConn(fetchone_results=[None])
-    result = get_model_rendering(conn, 101)
-    assert result is None
-
-
-def test_get_model_rendering_queries_for_model_source_preferred():
-    """SQL must prefer model source but fall back to any SK rendering."""
-    conn = FakeConn(fetchone_results=[("rozum",)])
-    get_model_rendering(conn, 55)
-    sql, params = conn.executed[0]
-    assert "sense_rendering" in sql
-    assert "source" in sql
-    # 'model' appears in ORDER BY CASE clause as the preferred source
-    assert "'model'" in sql
-    assert "'sk'" in sql
-    assert params == (55,)
-
-
-def test_get_model_rendering_fallback_via_order_by():
-    """SQL uses ORDER BY to prefer model; absence of LIMIT 1 check."""
-    conn = FakeConn(fetchone_results=[("krystal_value",)])
-    result = get_model_rendering(conn, 10)
-    # Should return whatever the DB returns (Krystal rendering for Krystal terms)
-    assert result == "krystal_value"
-
-
 # ── process_approval ─────────────────────────────────────────────────────────
 
 
@@ -240,22 +202,10 @@ def _row(sense_id=101, proposed_slovak="rozum", db_version=1, latin_lemma="ratio
     }
 
 
-def test_process_approval_ok_content_unchanged():
-    """Content matches reference → status updated, version NOT bumped."""
+def test_process_approval_ok_proposed_sense_bumps():
+    """Approving a proposed sense returns OK and always bumps the version."""
     conn = FakeConn(fetchone_results=[
         (101, 1, "proposed"),   # get_current_sense
-        ("rozum",),             # get_model_rendering (same content)
-    ])
-    status, bumped = process_approval(conn, _row(), human_src_id=6)
-    assert status == "OK"
-    assert bumped is False
-
-
-def test_process_approval_ok_content_changed():
-    """Content differs from reference → status updated, version IS bumped."""
-    conn = FakeConn(fetchone_results=[
-        (101, 1, "proposed"),   # get_current_sense
-        ("old_rozum",),         # get_model_rendering (different)
         (2,),                   # bump_sense_version RETURNING version
     ])
     status, bumped = process_approval(conn, _row(proposed_slovak="nový_rozum"), human_src_id=6)
@@ -263,15 +213,15 @@ def test_process_approval_ok_content_changed():
     assert bumped is True
 
 
-def test_process_approval_conflict_on_version_mismatch():
-    """DB version != sheet version AND status not approved → CONFLICT, no writes."""
+def test_process_approval_version_mismatch_proceeds():
+    """A version mismatch on a proposed sense is no longer a conflict — approval proceeds."""
     conn = FakeConn(fetchone_results=[
-        (101, 3, "proposed"),   # version 3, sheet has 1
+        (101, 3, "proposed"),   # DB version 3, sheet has 1 — mismatch, but still proposed
+        (4,),                   # bump_sense_version RETURNING version
     ])
     status, bumped = process_approval(conn, _row(db_version=1), human_src_id=6)
-    assert status == "CONFLICT"
-    assert bumped is False
-    assert len(conn.executed) == 1  # only get_current_sense
+    assert status == "OK"
+    assert bumped is True
 
 
 def test_process_approval_blank_db_version_is_conflict():
@@ -330,17 +280,6 @@ def test_process_approval_updates_status_to_approved():
     assert any("approved" in str(p) for p in status_params)
 
 
-def test_process_approval_krystal_term_no_bump_when_content_matches():
-    """Krystal term: get_model_rendering returns Krystal text. If unchanged → no bump."""
-    conn2 = FakeConn(fetchone_results=[
-        (101, 1, "proposed"),     # proposed, version 1 = sheet version 1
-        ("bytie",),               # Krystal rendering returned by get_model_rendering
-    ])
-    status, bumped = process_approval(conn2, _row(proposed_slovak="bytie", db_version=1), human_src_id=6)
-    assert status == "OK"
-    assert bumped is False  # content unchanged vs Krystal rendering → no bump
-
-
 def test_process_approval_krystal_term_bumps_when_reviewer_edits():
     """Krystal term: if reviewer changes proposed_slovak → version bumps."""
     conn = FakeConn(fetchone_results=[
@@ -351,19 +290,6 @@ def test_process_approval_krystal_term_bumps_when_reviewer_edits():
     status, bumped = process_approval(conn, _row(proposed_slovak="súcno", db_version=1), human_src_id=6)
     assert status == "OK"
     assert bumped is True
-
-
-def test_process_approval_idempotent_no_double_bump():
-    """Two calls with same content → no double-bump."""
-    def make_conn():
-        return FakeConn(fetchone_results=[
-            (101, 1, "proposed"),
-            ("rozum",),
-        ])
-    s1, b1 = process_approval(make_conn(), _row(), human_src_id=6)
-    s2, b2 = process_approval(make_conn(), _row(), human_src_id=6)
-    assert s1 == s2 == "OK"
-    assert b1 == b2 is False
 
 
 # ── process_approval — context_label write-back ───────────────────────────────
@@ -401,19 +327,6 @@ def test_process_approval_empty_context_label_writes_null():
     assert params[0] is None  # NULL, not ""
 
 
-def test_process_approval_context_label_does_not_bump_version():
-    """Setting context_label alone must not trigger a version bump."""
-    conn = FakeConn(fetchone_results=[
-        (101, 1, "proposed"),
-        ("rozum",),   # same content → no bump
-    ])
-    status, bumped = process_approval(
-        conn, _row(proposed_slovak="rozum", context_label="as rational faculty"), human_src_id=6
-    )
-    assert status == "OK"
-    assert bumped is False
-
-
 # ── get_la_surface ────────────────────────────────────────────────────────────
 
 
@@ -436,30 +349,6 @@ def test_get_la_surface_queries_glossary_term():
     assert "glossary_term" in sql
     assert "la_surface" in sql
     assert params == (55,)
-
-
-# ── get_term_flags ────────────────────────────────────────────────────────────
-
-
-def test_get_term_flags_returns_dict():
-    conn = FakeConn(fetchone_results=[(True, "formula")])
-    result = get_term_flags(conn, 101)
-    assert result == {"is_multiword": True, "category": "formula"}
-
-
-def test_get_term_flags_returns_none_when_missing():
-    conn = FakeConn(fetchone_results=[None])
-    result = get_term_flags(conn, 999)
-    assert result is None
-
-
-def test_get_term_flags_queries_correct_tables():
-    conn = FakeConn(fetchone_results=[(False, "term")])
-    get_term_flags(conn, 42)
-    sql, params = conn.executed[0]
-    assert "glossary_sense" in sql
-    assert "glossary_term" in sql
-    assert params == (42,)
 
 
 # ── write_human_surface ───────────────────────────────────────────────────────
@@ -526,21 +415,6 @@ def test_process_approval_latin_text_changed_writes_la_surface():
     assert len(updates_la) == 1
 
 
-def test_process_approval_latin_text_changed_singleword_no_bump():
-    """LA surface change for a singleword term must NOT trigger a version bump."""
-    conn = FakeConn(fetchone_results=[
-        (101, 1, "proposed"),
-        ("rozum",),         # same SK → no SK bump
-        ("old_ratio",),     # different LA surface
-        (False, "term"),    # singleword, not formula
-    ])
-    status, bumped = process_approval(conn, _row_with_surface(latin_text="ratio"), human_src_id=6)
-    assert status == "OK"
-    assert bumped is False
-    bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
-    assert len(bump_calls) == 0
-
-
 def test_process_approval_latin_text_changed_multiword_bumps_version():
     """LA surface change for a multiword term triggers a version bump."""
     conn = FakeConn(fetchone_results=[
@@ -595,8 +469,10 @@ def test_process_approval_empty_latin_text_skips_la_processing():
     row = _row_with_surface(latin_text="")
     status, bumped = process_approval(conn, row, human_src_id=6)
     assert status == "OK"
+    assert bumped is True
     # No LA surface queries or writes should have been made
     la_queries = [e for e in conn.executed if "la_surface" in e[0]]
     assert len(la_queries) == 0
+    # Approval always bumps once, regardless of LA processing being skipped.
     bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
-    assert len(bump_calls) == 0
+    assert len(bump_calls) == 1
