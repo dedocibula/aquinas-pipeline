@@ -1,7 +1,7 @@
 # Sources
 
 All raw source files live in `sources/` after M0 completes.
-`verify_sources.py` checks each entry and prints a status report.
+`python -m acquire.steps` (VerifySourcesStep) checks each entry and prints a status report.
 
 ---
 

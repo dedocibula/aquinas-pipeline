@@ -13,7 +13,7 @@ never discovers a missing input mid-build.*
 
 ## Objective
 Get the environment working and every source file in hand, verified. No schema,
-no parsing logic. This milestone is complete when `verify_sources.py` prints
+no parsing logic. This milestone is complete when `python -m acquire.steps` prints
 all green.
 
 ---
@@ -96,9 +96,9 @@ Confirm: `docker compose up -d` starts cleanly; `psql` connects; `CREATE EXTENSI
 - Already at `sources/czech/krystal/Teologicka__Suma_u_zus_-_verze_4.docx`
 - Verify: `python-docx` opens it cleanly; paragraph count reasonable
 
-### 5. `verify_sources.py`
-A script that checks every source and prints a status report. Run this at the
-end of M0 and paste the output as the milestone deliverable.
+### 5. Source verification (`python -m acquire.steps`)
+`acquire.steps.VerifySourcesStep` checks every source and prints a status
+report. Run it at the end of M0 and paste the output as the milestone deliverable.
 
 ```python
 # Checks to implement:
@@ -121,12 +121,12 @@ end of M0 and paste the output as the milestone deliverable.
 ## Deliverables
 - Working Docker Compose with Postgres 16 + pgvector
 - All source files on disk in `sources/`
-- `verify_sources.py` running and printing all green
+- `python -m acquire.steps` running and printing all green
 - `.env.example` and `pyproject.toml` committed
 
 ## Acceptance criteria
 - `docker compose up -d && psql $DATABASE_URL -c "SELECT 1"` succeeds
-- `python verify_sources.py` prints no failures
+- `python -m acquire.steps` prints no failures
 - `DEEPSEEK_API_KEY` passes a liveness probe (not merely present): a dead or
   unfunded key (HTTP 401/402) fails at verify time, not mid-run
 - Corpus Thomisticum article count confirmed ≥ 2,669

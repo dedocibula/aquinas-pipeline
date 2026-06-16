@@ -5,7 +5,7 @@ Each check returns True on pass, False on failure, and prints its own status
 line. Crashes loudly only for unexpected exceptions; expected failures are
 reported via _fail() and return False. The `CHECKS` list is consumed by
 `acquire.steps.VerifySourcesStep`, which drives them as prerequisite step 0 of
-the pipeline (the project-root verify_sources.py entry point).
+the pipeline. Entry point: `python -m acquire.steps`.
 """
 from __future__ import annotations
 
@@ -240,4 +240,4 @@ CHECKS = [
     (".env", check_env),
 ]
 # The acceptance run lives in acquire.steps.VerifySourcesStep, which drives
-# CHECKS through the pipeline Runner. Entry point: project-root verify_sources.py.
+# CHECKS through the pipeline Runner. Entry point: `python -m acquire.steps`.

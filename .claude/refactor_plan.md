@@ -166,12 +166,14 @@ timing/fail-loud loop in `ingest/pipeline.py` is gone.
   `ctx.knob_int/float` (no direct `os.environ`). Steps write reports under `ctx.reports_dir`
   (flat `reports/` for now; 5c routes to per-stage folders). `_step_pilot` unchanged (separate
   mode, not a runner step).
-- **Thin shims**: root `verify_sources.py` → `from acquire.steps import main; sys.exit(main())`.
-  Each `python -m …` entry point preserved.
+- **Entry points**: `python -m acquire.steps` is the source-verify entry point (steps.py has a
+  `__main__` → `main`); each `python -m …` entry point preserved. The redundant root
+  `verify_sources.py` shim was **deleted** (follow-up) — `python -m acquire.steps` is the
+  documented replacement; m0_setup.md / sources.md updated.
 - Tests: `test_pipeline.py` rewritten to the step/registry contract (patch `_build_steps` with
   fakes; assert order, stop-on-failure, failed-verify-blocks-ingest, not-ok→exit 1); +3 Runner
   verify-hook tests; +6 `VerifySourcesStep`/`steps.main` tests. Smoke-tested `--help`, bad-step
-  rejection, and `verify_sources.py` import. **782 passed; ruff clean.**
+  rejection, and `acquire.steps` import. **782 passed; ruff clean.**
 - **Next (5c)**: `src/pipeline/reporting.py` `StepReport` writer; route each step's `StepResult`
   details into per-stage `reports/<stage>/` (use `ctx.stage_reports_dir`); PromptLogger JSONL →
   `reports/translate/debug/`.
