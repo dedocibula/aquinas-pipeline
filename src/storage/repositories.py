@@ -141,6 +141,37 @@ class GlossaryRepository:
             )
             return [Constraint.from_row(r) for r in cur.fetchall()]
 
+    def get_current_sense(self, sense_id: int) -> dict | None:
+        """Fetch current version and status for a sense. Returns None if not found.
+
+        Returns a dict ``{sense_id, version, status}`` — the approval importer
+        only needs the status, but the full triple is kept for provenance.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT sense_id, version, status FROM glossary_sense WHERE sense_id = %s",
+                (sense_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {"sense_id": row[0], "version": row[1], "status": row[2]}
+
+    def get_la_surface(self, sense_id: int) -> str | None:
+        """Fetch la_surface for the term owning this sense. Returns None if absent."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT gt.la_surface
+                FROM glossary_sense gs
+                JOIN glossary_term gt ON gt.term_id = gs.term_id
+                WHERE gs.sense_id = %s
+                """,
+                (sense_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row is not None else None
+
     # ── Writes ─────────────────────────────────────────────────────────────────
 
     def update_sense_status(self, sense_id: int, status: str) -> None:
@@ -184,6 +215,28 @@ class GlossaryRepository:
                     SET content = EXCLUDED.content
                 """,
                 (sense_id, sk_text, src_id),
+            )
+
+    def write_context_label(self, sense_id: int, label: str | None) -> None:
+        """Set glossary_sense.context_label. Does NOT bump the sense version.
+
+        An empty label should be passed as None so it lands as SQL NULL.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE glossary_sense SET context_label = %s WHERE sense_id = %s",
+                (label, sense_id),
+            )
+
+    def write_human_surface(self, sense_id: int, surface: str) -> None:
+        """Write la_surface onto the glossary_term that owns this sense."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE glossary_term SET la_surface = %s
+                WHERE term_id = (SELECT term_id FROM glossary_sense WHERE sense_id = %s)
+                """,
+                (surface, sense_id),
             )
 
 

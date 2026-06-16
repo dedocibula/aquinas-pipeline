@@ -67,47 +67,6 @@ def load_approved_rows(worksheet) -> list[dict]:
     return result
 
 
-def get_current_sense(conn, sense_id_val: int) -> dict | None:
-    """Fetch current version and status for a sense. Returns None if not found."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT sense_id, version, status FROM glossary_sense WHERE sense_id = %s",
-            (sense_id_val,),
-        )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    return {"sense_id": row[0], "version": row[1], "status": row[2]}
-
-
-def get_la_surface(conn, sense_id_val: int) -> str | None:
-    """Fetch la_surface for the term owning this sense. Returns None if absent."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT gt.la_surface
-            FROM glossary_sense gs
-            JOIN glossary_term gt ON gt.term_id = gs.term_id
-            WHERE gs.sense_id = %s
-            """,
-            (sense_id_val,),
-        )
-        row = cur.fetchone()
-    return row[0] if row is not None else None
-
-
-def write_human_surface(conn, sense_id_val: int, surface: str, src_id: int) -> None:
-    """Write la_surface onto the glossary_term that owns this sense."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE glossary_term SET la_surface = %s
-            WHERE term_id = (SELECT term_id FROM glossary_sense WHERE sense_id = %s)
-            """,
-            (surface, sense_id_val),
-        )
-
-
 def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     """Apply one approved row to the DB.
 
@@ -122,7 +81,9 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     new_slovak = row["proposed_slovak"]
     sheet_version = row["db_version"]
 
-    current = get_current_sense(conn, sense_id_val)
+    glossary = GlossaryRepository(conn)
+
+    current = glossary.get_current_sense(sense_id_val)
     if current is None:
         return "NOT_FOUND", False
 
@@ -138,16 +99,11 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     # (e.g. sense-mining re-resolution). The human has seen this sense and explicitly
     # approved it, so proceed unconditionally.
 
-    glossary = GlossaryRepository(conn)
     glossary.write_human_rendering(sense_id_val, new_slovak, human_src_id)
 
     # Write context_label — empty string becomes NULL; does NOT bump version.
     raw_label = (row.get("context_label") or "").strip()
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE glossary_sense SET context_label = %s WHERE sense_id = %s",
-            (raw_label if raw_label else None, sense_id_val),
-        )
+    glossary.write_context_label(sense_id_val, raw_label if raw_label else None)
 
     # Always bump on approval: marks all term_usage rows using any prior version
     # as stale so rerun_stale picks them up.
@@ -156,9 +112,9 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     # LA surface — write if reviewer supplied one; approval bump already covers rerun.
     new_surface = (row.get("latin_text") or "").strip() or None
     if new_surface is not None:
-        current_surface = get_la_surface(conn, sense_id_val)
+        current_surface = glossary.get_la_surface(sense_id_val)
         if new_surface != current_surface:
-            write_human_surface(conn, sense_id_val, new_surface, human_src_id)
+            glossary.write_human_surface(sense_id_val, new_surface)
 
     glossary.update_sense_status(sense_id_val, "approved")
     return "OK", True

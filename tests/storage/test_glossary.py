@@ -157,3 +157,89 @@ def test_write_human_rendering_upserts(fake_conn):
     sql, params = conn.executed[-1]
     assert "INSERT INTO sense_rendering" in sql
     assert params == (42, "milosť", 9)
+
+
+# ── get_current_sense ────────────────────────────────────────────────────────
+
+
+def test_get_current_sense_returns_dict(fake_conn):
+    conn = fake_conn(fetchone_results=[(101, 2, "proposed")])
+    assert GlossaryRepository(conn).get_current_sense(101) == {
+        "sense_id": 101,
+        "version": 2,
+        "status": "proposed",
+    }
+
+
+def test_get_current_sense_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).get_current_sense(999) is None
+
+
+def test_get_current_sense_queries_correct_table(fake_conn):
+    conn = fake_conn(fetchone_results=[(1, 1, "proposed")])
+    GlossaryRepository(conn).get_current_sense(5)
+    sql, params = conn.executed[0]
+    assert "glossary_sense" in sql
+    assert params == (5,)
+
+
+# ── get_la_surface ───────────────────────────────────────────────────────────
+
+
+def test_get_la_surface_returns_content(fake_conn):
+    conn = fake_conn(fetchone_results=[("Sed contra",)])
+    assert GlossaryRepository(conn).get_la_surface(101) == "Sed contra"
+
+
+def test_get_la_surface_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).get_la_surface(101) is None
+
+
+def test_get_la_surface_queries_glossary_term(fake_conn):
+    conn = fake_conn(fetchone_results=[("Sed contra",)])
+    GlossaryRepository(conn).get_la_surface(55)
+    sql, params = conn.executed[0]
+    assert "glossary_term" in sql
+    assert "la_surface" in sql
+    assert params == (55,)
+
+
+# ── write_context_label ──────────────────────────────────────────────────────
+
+
+def test_write_context_label_updates_sense(fake_conn):
+    conn = fake_conn()
+    GlossaryRepository(conn).write_context_label(101, "sanctifying grace")
+    sql, params = conn.executed[-1]
+    assert "UPDATE glossary_sense SET context_label" in sql
+    assert params == ("sanctifying grace", 101)
+
+
+def test_write_context_label_none_writes_null(fake_conn):
+    conn = fake_conn()
+    GlossaryRepository(conn).write_context_label(101, None)
+    _, params = conn.executed[-1]
+    assert params[0] is None
+
+
+# ── write_human_surface ──────────────────────────────────────────────────────
+
+
+def test_write_human_surface_updates_glossary_term(fake_conn):
+    conn = fake_conn()
+    GlossaryRepository(conn).write_human_surface(101, "Respondeo dicendum quod")
+    sql, params = conn.executed[-1]
+    assert "UPDATE glossary_term" in sql
+    assert "la_surface" in sql
+    assert "Respondeo dicendum quod" in params
+    assert 101 in params
+
+
+def test_write_human_surface_targets_correct_term(fake_conn):
+    conn = fake_conn()
+    GlossaryRepository(conn).write_human_surface(55, "Sed contra")
+    sql, params = conn.executed[-1]
+    assert "glossary_sense" in sql  # subselect resolves sense_id → term_id
+    assert 55 in params

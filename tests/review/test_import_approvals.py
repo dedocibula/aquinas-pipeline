@@ -6,11 +6,8 @@ from __future__ import annotations
 
 from review.import_approvals import (
     COLS,
-    get_current_sense,
-    get_la_surface,
     load_approved_rows,
     process_approval,
-    write_human_surface,
 )
 from review.sheets import HEADER
 
@@ -120,29 +117,6 @@ def test_load_approved_rows_empty_context_label(fake_worksheet):
 def test_load_approved_rows_empty_sheet(fake_worksheet):
     ws = fake_worksheet(rows=[HEADER])
     assert load_approved_rows(ws) == []
-
-
-# ── get_current_sense ─────────────────────────────────────────────────────────
-
-
-def test_get_current_sense_returns_dict(fake_conn):
-    conn = fake_conn(fetchone_results=[(101, 2, "proposed")])
-    result = get_current_sense(conn, 101)
-    assert result == {"sense_id": 101, "version": 2, "status": "proposed"}
-
-
-def test_get_current_sense_returns_none_when_missing(fake_conn):
-    conn = fake_conn(fetchone_results=[None])
-    result = get_current_sense(conn, 999)
-    assert result is None
-
-
-def test_get_current_sense_queries_correct_table(fake_conn):
-    conn = fake_conn(fetchone_results=[(1, 1, "proposed")])
-    get_current_sense(conn, 5)
-    sql, params = conn.executed[0]
-    assert "glossary_sense" in sql
-    assert params == (5,)
 
 
 # ── process_approval ─────────────────────────────────────────────────────────
@@ -281,51 +255,6 @@ def test_process_approval_empty_context_label_writes_null(fake_conn):
     assert len(label_updates) == 1
     _, params = label_updates[0]
     assert params[0] is None  # NULL, not ""
-
-
-# ── get_la_surface ────────────────────────────────────────────────────────────
-
-
-def test_get_la_surface_returns_content(fake_conn):
-    conn = fake_conn(fetchone_results=[("Sed contra",)])
-    result = get_la_surface(conn, 101)
-    assert result == "Sed contra"
-
-
-def test_get_la_surface_returns_none_when_missing(fake_conn):
-    conn = fake_conn(fetchone_results=[None])
-    result = get_la_surface(conn, 101)
-    assert result is None
-
-
-def test_get_la_surface_queries_glossary_term(fake_conn):
-    conn = fake_conn(fetchone_results=[("Sed contra",)])
-    get_la_surface(conn, 55)
-    sql, params = conn.executed[0]
-    assert "glossary_term" in sql
-    assert "la_surface" in sql
-    assert params == (55,)
-
-
-# ── write_human_surface ───────────────────────────────────────────────────────
-
-
-def test_write_human_surface_updates_glossary_term(fake_conn):
-    conn = fake_conn()
-    write_human_surface(conn, 101, "Respondeo dicendum quod", 7)
-    sql, params = conn.executed[0]
-    assert "UPDATE glossary_term" in sql
-    assert "la_surface" in sql
-    assert "Respondeo dicendum quod" in params
-    assert 101 in params
-
-
-def test_write_human_surface_targets_correct_term(fake_conn):
-    conn = fake_conn()
-    write_human_surface(conn, 55, "Sed contra", 7)
-    sql, params = conn.executed[0]
-    assert "glossary_sense" in sql  # resolves sense_id → term_id
-    assert 55 in params
 
 
 # ── process_approval — latin_text import semantics ───────────────────────────
