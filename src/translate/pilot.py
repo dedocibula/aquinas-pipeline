@@ -1,16 +1,27 @@
-"""Pilot translation runner — translates Q1–Q6 of Prima Pars.
+"""Sample-driven pilot — measurement harness over a fixed subset of the corpus.
+
+The pilot translates exactly the segments named in a sample file (the same file
+the prompt-optimization loop feeds) and emits a measurement report: abort
+thresholds (rubric/prompt go/no-go), per-model cost, and a full-corpus cost
+extrapolation calibrated from the sample. It is NOT the production runner —
+`translate.run` orchestrates the full corpus (Prefect, retries, re-run flows).
 
 Usage:
-    uv run python -m translate.pilot
-    PILOT_FULL=1   uv run python -m translate.pilot   # full Q1-Q6
-    PILOT_TITLES=1 uv run python -m translate.pilot   # title segments only
-    PILOT_SAMPLE=1 uv run python -m translate.pilot   # 100-segment representative sample
+    PILOT_WORKERS=10 uv run python -m translate.pilot
+
+    # Point at a different sample (default: docs/pilot_sample_100.json):
+    PILOT_SAMPLE_FILE=docs/pilot_sample_200.json PILOT_WORKERS=10 \\
+        uv run python -m translate.pilot
+
+The sample file is JSON with a top-level "segments" list of {"segment_id": int}.
+Only segments still 'pending' are translated, so reset them first (see
+translate.reset_golden) when re-running for comparison.
 
 Abort conditions (exits 1):
     - needs_human / total > 0.20   → rubric too strict
     - sum(iterations) / total > 2.5 → translator prompt needs tuning
 
-Writes reports/m4_pilot.txt on completion.
+Writes reports/m4_sample.txt and a per-run prompt log to reports/debug_<ts>.jsonl.
 """
 
 from __future__ import annotations
@@ -41,12 +52,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_PILOT_QUESTIONS = ["I.q1", "I.q2", "I.q3", "I.q4", "I.q5", "I.q6"]
-_DEBUG_QUESTION = "I.q1"
-_DEBUG_LIMIT = 10
 _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SAMPLE_FILE = _REPO_ROOT / os.environ.get("PILOT_SAMPLE_FILE", "docs/pilot_sample_100.json")
+_REPORT_NAME = "m4_sample.txt"
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20
 _ABORT_AVG_ITERATIONS = 2.5
@@ -65,81 +74,28 @@ class SegmentStats:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 
 
-def fetch_pilot_segments(conn) -> list[dict]:
-    """Return pending segments in Q1–Q6 that have Latin text, ordered by locator_path.
+def fetch_sample_segments(conn) -> list[dict]:
+    """Return pending segments listed in $PILOT_SAMPLE_FILE, ordered by locator_path.
 
     article_title segments have English only (no Latin) and are included via the
     English fallback condition.
     """
-    sql = f"""
-        SELECT s.segment_id, s.locator_path::text, s.translation_status
-        FROM segment s
-        WHERE ({" OR ".join("s.locator_path <@ %s::ltree" for _ in _PILOT_QUESTIONS)})
-          AND s.translation_status = 'pending'
-          AND EXISTS (
-              SELECT 1 FROM segment_text st
-              WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
-          )
-        ORDER BY s.locator_path
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql, _PILOT_QUESTIONS)
-        return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
-
-
-def fetch_debug_segments(conn) -> list[dict]:
-    """Return first _DEBUG_LIMIT pending segments in _DEBUG_QUESTION that have Latin text."""
+    sample = json.loads(_SAMPLE_FILE.read_text())
+    ids = [s["segment_id"] for s in sample["segments"]]
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT s.segment_id, s.locator_path::text, s.translation_status
             FROM segment s
-            WHERE s.locator_path <@ %s::ltree
+            WHERE s.segment_id = ANY(%s)
               AND s.translation_status = 'pending'
               AND EXISTS (
                   SELECT 1 FROM segment_text st
-                  WHERE st.segment_id = s.segment_id AND st.lang = 'la'
+                  WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
               )
             ORDER BY s.locator_path
-            LIMIT %s
             """,
-            (_DEBUG_QUESTION, _DEBUG_LIMIT),
-        )
-        return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
-
-
-def fetch_all_pilot_segments(conn) -> list[dict]:
-    """Return ALL segments in Q1–Q6 (regardless of status) for progress report."""
-    sql = f"""
-        SELECT segment_id, translation_status
-        FROM segment
-        WHERE {" OR ".join("locator_path <@ %s::ltree" for _ in _PILOT_QUESTIONS)}
-        ORDER BY locator_path
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql, _PILOT_QUESTIONS)
-        return [{"segment_id": r[0], "status": r[1]} for r in cur.fetchall()]
-
-
-def fetch_title_segments(conn) -> list[dict]:
-    """Return all pending question_title and article_title segments across the full corpus.
-
-    These have English text only (no Latin) so R1 review is skipped — one
-    translator call each, no reviewer cost.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT s.segment_id, s.locator_path::text, s.translation_status
-            FROM segment s
-            WHERE s.element_type IN ('question_title', 'article_title')
-              AND s.translation_status = 'pending'
-              AND EXISTS (
-                  SELECT 1 FROM segment_text st
-                  WHERE st.segment_id = s.segment_id AND st.lang = 'en'
-              )
-            ORDER BY s.locator_path
-            """
+            (ids,),
         )
         return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
 
@@ -161,32 +117,10 @@ def fetch_segment_text_lengths(conn, segment_id: int) -> dict[str, int]:
         return {row[0]: row[1] for row in cur.fetchall()}
 
 
-def fetch_sample_segments(conn) -> list[dict]:
-    """Return pending segments listed in $PILOT_SAMPLE_FILE, ordered by locator_path."""
-    sample = json.loads(_SAMPLE_FILE.read_text())
-    ids = [s["segment_id"] for s in sample["segments"]]
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT s.segment_id, s.locator_path::text, s.translation_status
-            FROM segment s
-            WHERE s.segment_id = ANY(%s)
-              AND s.translation_status = 'pending'
-              AND EXISTS (
-                  SELECT 1 FROM segment_text st
-                  WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
-              )
-            ORDER BY s.locator_path
-            """,
-            (ids,),
-        )
-        return [{"segment_id": r[0], "locator_path": r[1], "status": r[2]} for r in cur.fetchall()]
-
-
 def fetch_corpus_char_counts(conn) -> dict[str, int]:
     """Return total character counts per lang across the full corpus.
 
-    Returns a dict with keys 'la', 'cs', 'en'; used for M5 cost extrapolation.
+    Returns a dict with keys 'la', 'cs', 'en'; used for full-corpus cost extrapolation.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -206,57 +140,16 @@ def fetch_corpus_char_counts(conn) -> dict[str, int]:
 def run_pilot() -> None:
     start = time.time()
     debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
-    full_mode = os.environ.get("PILOT_FULL", "").strip() == "1"
-    titles_mode = os.environ.get("PILOT_TITLES", "").strip() == "1"
-    sample_mode = os.environ.get("PILOT_SAMPLE", "").strip() == "1"
-
-    if titles_mode:
-        flow_name = "pilot_titles"
-    elif full_mode:
-        flow_name = "pilot_full"
-    elif sample_mode:
-        flow_name = "pilot_sample"
-    else:
-        flow_name = "pilot_debug"
 
     with get_conn() as conn:
-        if titles_mode:
-            pending = fetch_title_segments(conn)
-        elif full_mode:
-            pending = fetch_pilot_segments(conn)
-        elif sample_mode:
-            pending = fetch_sample_segments(conn)
-        else:
-            pending = fetch_debug_segments(conn)
+        pending = fetch_sample_segments(conn)
 
-    if titles_mode:
-        log.info(
-            "Titles mode: %d pending title segments (full corpus). Prompt log → %s",
-            len(pending),
-            debug_log_path,
-        )
-    elif full_mode:
-        log.info(
-            "Full pilot: %d pending segments across %s. Prompt log → %s",
-            len(pending),
-            _PILOT_QUESTIONS,
-            debug_log_path,
-        )
-    elif sample_mode:
-        log.info(
-            "Sample mode: %d pending segments from %s. Prompt log → %s",
-            len(pending),
-            _SAMPLE_FILE.name,
-            debug_log_path,
-        )
-    else:
-        log.info(
-            "Debug pilot: %d segments from %s (limit %d). Prompt log → %s",
-            len(pending),
-            _DEBUG_QUESTION,
-            _DEBUG_LIMIT,
-            debug_log_path,
-        )
+    log.info(
+        "Sample pilot: %d pending segments from %s. Prompt log → %s",
+        len(pending),
+        _SAMPLE_FILE.name,
+        debug_log_path,
+    )
 
     if not pending:
         log.info("No pending segments found — nothing to do.")
@@ -277,13 +170,13 @@ def run_pilot() -> None:
         n_workers = _DEFAULT_WORKERS
     log.info("Workers: %d", n_workers)
 
-    run_id = _open_run(flow_name, None, None, n_workers)
+    run_id = _open_run("pilot_sample", None, None, n_workers)
 
     translated_count = 0
     needs_human_count = 0
     iterations_list: list[int] = []
     stats_list: list[SegmentStats] = []
-    article_result = ArticleResult(locator=flow_name)
+    article_result = ArticleResult(locator="pilot_sample")
 
     def _translate_worker(
         seg: dict, pl: PromptLogger
@@ -372,12 +265,6 @@ def run_pilot() -> None:
     _close_run(run_id, [article_result])
 
     total_run = len(pending)
-    if titles_mode:
-        report_name = "m4_titles.txt"
-    elif sample_mode:
-        report_name = "m4_sample.txt"
-    else:
-        report_name = "m4_pilot.txt"
     _write_report(
         total_segments=total_run,
         translated=translated_count,
@@ -385,9 +272,6 @@ def run_pilot() -> None:
         iterations_list=iterations_list,
         stats_list=stats_list,
         elapsed=elapsed,
-        report_name=report_name,
-        titles_mode=titles_mode,
-        sample_mode=sample_mode,
     )
 
     avg_iters = sum(iterations_list) / total_run if iterations_list else 0.0
@@ -412,7 +296,7 @@ def run_pilot() -> None:
     if abort:
         sys.exit(1)
 
-    log.info("Pilot complete. Report written to reports/m4_pilot.txt")
+    log.info("Pilot complete. Report written to reports/%s", _REPORT_NAME)
 
 
 def _write_report(
@@ -423,9 +307,6 @@ def _write_report(
     iterations_list: list[int],
     stats_list: list[SegmentStats],
     elapsed: float,
-    report_name: str = "m4_pilot.txt",
-    titles_mode: bool = False,
-    sample_mode: bool = False,
 ) -> None:
     total_run = translated + needs_human
 
@@ -487,18 +368,9 @@ def _write_report(
     avg_cost_per_seg = total_cost / total_run if total_run else 0.0
 
     # ── Report lines ────────────────────────────────────────────────────────
-    if titles_mode:
-        mode_label = "TITLES RUN SUMMARY"
-        scope_line = "  Scope:             all question_title + article_title (full corpus)"
-    elif sample_mode:
-        mode_label = "SAMPLE RUN SUMMARY"
-        scope_line = f"  Scope:             {_SAMPLE_FILE.name} (100-segment representative sample)"
-    else:
-        mode_label = "PILOT RUN SUMMARY"
-        scope_line = f"  Pilot questions:   {', '.join(_PILOT_QUESTIONS)}"
     lines = [
-        mode_label,
-        scope_line,
+        "PILOT RUN SUMMARY",
+        f"  Sample file:       {_SAMPLE_FILE.name}",
         f"  Total segments:    {total_segments}",
         f"  Translated:        {translated}  ({pct(translated)})",
         f"  Needs human:       {needs_human}  ({pct(needs_human)})",
@@ -518,7 +390,7 @@ def _write_report(
         f"  ({total_hit:,} hit / {total_input:,} total input tokens)",
 
         "",
-        "M5 EXTRAPOLATION (calibrated from pilot)",
+        "FULL-CORPUS EXTRAPOLATION (calibrated from sample)",
         f"  Pilot segments:                 {total_run}",
         f"  Pilot input chars (la+cs+en):   {pilot_input_chars:,}",
         f"  Corpus chars — la:              {corpus_la:,}",
@@ -535,7 +407,7 @@ def _write_report(
     ]
 
     _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = _REPORTS_DIR / report_name
+    report_path = _REPORTS_DIR / _REPORT_NAME
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("Report written: %s", report_path)
 

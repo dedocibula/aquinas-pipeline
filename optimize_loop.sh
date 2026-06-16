@@ -20,8 +20,8 @@ for epoch in $(seq 1 "$EPOCHS"); do
     # 1. Reset golden set to pending
     uv run python -m translate.reset_golden
 
-    # 2. Full pilot on golden set
-    PILOT_SAMPLE=1 PILOT_WORKERS=5 uv run python -m translate.pilot
+    # 2. Pilot on golden set (sample file set above via PILOT_SAMPLE_FILE)
+    PILOT_WORKERS=5 uv run python -m translate.pilot
 
     # 3. Get the last two run IDs (newest first)
     RUN_IDS=$($DB_CMD -c \

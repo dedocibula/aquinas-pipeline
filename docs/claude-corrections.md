@@ -3,7 +3,7 @@ Read this file at the start of every session before doing any work.
 
 ### [Pilot translation: always run with parallel workers]
 - **Mistake:** Ran `uv run python -m translate.pilot` without setting `PILOT_WORKERS`, defaulting to 1 worker — extremely slow for batches of 40–80 segments.
-- **Correction:** Always set `PILOT_WORKERS=10` (or higher) when running the pilot. Example: `PILOT_FULL=1 PILOT_WORKERS=10 uv run python -m translate.pilot`
+- **Correction:** Always set `PILOT_WORKERS=10` (or higher) when running the pilot. Example: `PILOT_WORKERS=10 uv run python -m translate.pilot`
 - **Rule:** Never run the pilot with the default single worker. Always pass `PILOT_WORKERS=8` at minimum.
 
 ### [Parallel subagent dispatch for independent steps]

@@ -80,12 +80,39 @@ Explore agents + grep). Disposition per the user:
 | 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
-| 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
+| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 pilot consolidation DONE** (see below); steps/runner/reporting/interactive still ☐ |
 | 6 — Isolate optimize/ toolchain | ☐ | |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
 | 8 — Consolidate DB schema | ☐ | |
 | 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
 | 10/11 — Final gate + memory | ☐ | |
+
+#### Phase 5.0 — Pilot consolidation (sample-only) — DONE
+Decision (user-approved): the pilot and the production runner (`translate/run.py`) do **not** differ
+in translation — both call the same `translate_segment`. The pilot's value is its *measurement
+harness* (PromptLogger JSONL deep-dive, abort thresholds needs_human>20% / iters>2.5, cost
+calibration + full-corpus extrapolation). The redundancy was *inside* the pilot: 3 of its 4 modes
+(`debug` I.q1×10, `full` Q1–Q6, `titles`) were just hardcoded locator subsets that `run.py`
+filtering already covers. So pilot collapses to **sample-file-only** — translate exactly the segments
+named in `$PILOT_SAMPLE_FILE` (default `docs/pilot_sample_100.json`), the same file the prompt-opt
+loop feeds.
+- `src/translate/pilot.py`: removed `fetch_debug_segments`, `fetch_pilot_segments`,
+  `fetch_all_pilot_segments`, `fetch_title_segments`, `_PILOT_QUESTIONS`, `_DEBUG_*`, and the
+  `PILOT_FULL`/`PILOT_TITLES`/`PILOT_SAMPLE` env switches. `fetch_sample_segments` is the single
+  selector; the sample **is** the pilot (no flag). Run is always recorded as flow `pilot_sample`.
+  Measurement harness kept verbatim. `_write_report` signature simplified (dropped
+  `report_name`/`titles_mode`/`sample_mode`); single report **`reports/m4_sample.txt`** (the name
+  `optimize_loop.sh` already reads for its pass-rate row). Q1–Q6 calibration basis → the (more
+  representative) sample.
+- `optimize_loop.sh`: dropped the now-unneeded `PILOT_SAMPLE=1` (PILOT_SAMPLE_FILE still set).
+- `docs/claude-corrections.md`: example command de-references the removed `PILOT_FULL` flag.
+- `tests/translate/test_pilot.py`: rewrote the mode-routing/fetch tests around the single
+  sample selector; report tests assert `m4_sample.txt` + the new "Sample file:" line.
+- **758 passed** (760 − 2 intentionally-removed dead-mode tests; ≥745 baseline holds); ruff clean.
+- Sets up Phase 6 cleanly: pilot is now a self-contained sample-driven harness that relocates to
+  `src/optimize/` unchanged, fed by the unified sample-generation script (deferred to Phase 6).
+- **Note for the rest of Phase 5**: wrap this consolidated pilot as the translate-stage measurement
+  step; `_REPORT_NAME` should later route into `reports/translate/` per the reporting design.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
