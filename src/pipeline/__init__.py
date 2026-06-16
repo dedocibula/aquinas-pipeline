@@ -14,6 +14,6 @@ from __future__ import annotations
 
 from pipeline.context import PipelineContext
 from pipeline.runner import Runner
-from pipeline.step import PipelineStep, StepResult
+from pipeline.step import BaseStep, PipelineStep, StepResult
 
-__all__ = ["PipelineContext", "PipelineStep", "StepResult", "Runner"]
+__all__ = ["PipelineContext", "PipelineStep", "StepResult", "BaseStep", "Runner"]

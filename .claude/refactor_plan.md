@@ -80,7 +80,7 @@ Explore agents + grep). Disposition per the user:
 | 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
-| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 pilot consolidation + 5a core DONE** (see below); 5b source-verify / 5c reporting / 5d interactive still ☐ |
+| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 pilot consolidation + 5a core + 5b first-consumers DONE** (see below); 5c reporting / 5d interactive still ☐ |
 | 6 — Isolate optimize/ toolchain | ☐ | |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
 | 8 — Consolidate DB schema | ☐ | |
@@ -140,6 +140,41 @@ Additive only; no existing entry point rewired yet (5b flips the first real cons
   using the `verify()` hook); make `ingest/pipeline.py`'s `_STEP_FNS` the first real
   consumers of `Runner` (steps return `StepResult`); root `verify_sources.py`/`python -m`
   entry points become thin shims instantiating Steps.
+
+#### Phase 5b — First real consumers of the runner — DONE
+The ingest pipeline and source verification now run through `Runner`; the hand-rolled
+timing/fail-loud loop in `ingest/pipeline.py` is gone.
+- **Runner `verify()` precondition activated** (`runner.py`): before a step's `run`, the
+  runner calls `step.verify(ctx)` when present (BaseStep defaults it True; bare Protocol steps
+  without the method are unaffected via `getattr`). A False precondition → failed `StepResult`
+  (`"precondition not met"`) and, under default stop-on-failure, halts the run; an exception in
+  `verify` → `"precondition error: …"` (fail loud). This makes the dormant 5a hook real.
+- **`VerifySourcesStep`** → new `src/acquire/steps.py`: a `BaseStep` (`name="verify-sources"`)
+  whose `run` drives `acquire.verify.CHECKS` (injectable for tests), aggregating per-check
+  pass/fail into `StepResult.details["checks"]` and `ok = all-passed`. An exception in any check
+  is reported and counts as a failure (never crashes the runner). `acquire/verify.py` keeps the
+  pure `check_*` functions + `CHECKS`; its old `main()` loop is deleted (superseded by the step).
+  `steps.main()` runs the step via `Runner` and returns an exit code.
+- **`ingest/pipeline.py` flipped to steps**: `_step_latin/_bahounek/_english/_resolve/_report`
+  became `LatinStep/BahounekStep/EnglishStep/ResolveStep/ReportStep` (`BaseStep`, each returns a
+  `StepResult` with a summary + details; print progress kept verbatim). `_build_steps()` returns
+  the token→step registry; `_STEPS = ("verify","latin","bahounek","english","resolve","report")`
+  is the `--all` order (**verify is prerequisite step 0** — a failed verify stops the run via
+  stop-on-failure, so no ingest step touches the DB). `--step` accepts any single token (incl.
+  `verify`). `main()` builds a `PipelineContext` (reports_dir + GAP_* env knobs) and drives the
+  selected steps through `Runner`, exit 0 iff all `ok`. Resolve reads its knobs via
+  `ctx.knob_int/float` (no direct `os.environ`). Steps write reports under `ctx.reports_dir`
+  (flat `reports/` for now; 5c routes to per-stage folders). `_step_pilot` unchanged (separate
+  mode, not a runner step).
+- **Thin shims**: root `verify_sources.py` → `from acquire.steps import main; sys.exit(main())`.
+  Each `python -m …` entry point preserved.
+- Tests: `test_pipeline.py` rewritten to the step/registry contract (patch `_build_steps` with
+  fakes; assert order, stop-on-failure, failed-verify-blocks-ingest, not-ok→exit 1); +3 Runner
+  verify-hook tests; +6 `VerifySourcesStep`/`steps.main` tests. Smoke-tested `--help`, bad-step
+  rejection, and `verify_sources.py` import. **782 passed; ruff clean.**
+- **Next (5c)**: `src/pipeline/reporting.py` `StepReport` writer; route each step's `StepResult`
+  details into per-stage `reports/<stage>/` (use `ctx.stage_reports_dir`); PromptLogger JSONL →
+  `reports/translate/debug/`.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
@@ -407,7 +442,7 @@ risk first.
 - **5c** Reporting → `src/pipeline/reporting.py`: a `StepReport` writer every step uses; concise +
   actionable (what changed, what needs human action, anomalies/gaps); written to per-stage folders
   `reports/acquire|ingest|resolve|review|translate|optimize/`. Route PromptLogger deep-dive JSONL to
-  `reports/translate/debug/`.
+  `reports/common/`.
 - **5d** Interactive driver → `src/pipeline/interactive.py` (`python -m pipeline`): shows flow
   position (from DB status: pending/translated/needs_human counts, glossary proposed vs approved,
   last run) + last command (persist to `.pipeline_state.json`, no DDL) + numbered menu invoking

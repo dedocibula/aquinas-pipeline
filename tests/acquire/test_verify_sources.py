@@ -7,9 +7,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import acquire.steps as steps
 import acquire.verify as verify_sources  # noqa: F401 — tests use verify_sources.* names
+from acquire.steps import VerifySourcesStep
+from pipeline import PipelineContext
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _ctx(tmp_path) -> PipelineContext:
+    return PipelineContext(reports_dir=tmp_path)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -192,3 +199,44 @@ class TestCheckEnv:
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         assert verify_sources.check_env() is False
+
+
+# ── VerifySourcesStep (the pipeline wrapper) ──────────────────────────────────
+
+class TestVerifySourcesStep:
+    def test_ok_when_all_checks_pass(self, tmp_path):
+        step = VerifySourcesStep(checks=[("a", lambda: True), ("b", lambda: True)])
+        result = step.run(_ctx(tmp_path))
+        assert result.ok is True
+        assert result.name == "verify-sources"
+        assert result.summary == "2/2 source checks passed"
+        assert result.details["checks"] == {"a": True, "b": True}
+
+    def test_not_ok_when_a_check_fails(self, tmp_path):
+        step = VerifySourcesStep(checks=[("a", lambda: True), ("b", lambda: False)])
+        result = step.run(_ctx(tmp_path))
+        assert result.ok is False
+        assert result.summary == "1/2 source checks passed"
+
+    def test_check_exception_counts_as_failure(self, tmp_path):
+        def boom():
+            raise RuntimeError("no DB")
+
+        step = VerifySourcesStep(checks=[("a", lambda: True), ("db", boom)])
+        result = step.run(_ctx(tmp_path))
+        assert result.ok is False
+        assert result.details["checks"] == {"a": True, "db": False}
+
+    def test_default_checks_are_the_module_checks(self):
+        step = VerifySourcesStep()
+        assert step._checks == list(verify_sources.CHECKS)
+
+
+class TestStepsMain:
+    def test_main_returns_0_when_all_pass(self, monkeypatch):
+        monkeypatch.setattr(steps, "CHECKS", [("a", lambda: True)])
+        assert steps.main() == 0
+
+    def test_main_returns_1_when_a_check_fails(self, monkeypatch):
+        monkeypatch.setattr(steps, "CHECKS", [("a", lambda: False)])
+        assert steps.main() == 1

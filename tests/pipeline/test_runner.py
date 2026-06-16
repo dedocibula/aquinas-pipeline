@@ -87,6 +87,59 @@ class TestRunnerFailLoud:
         assert len(results) == 1  # stopped after the failure
 
 
+class _VerifyStep(BaseStep):
+    """Step exposing a verify() precondition, to exercise the runner gate."""
+
+    def __init__(self, name, *, verify_ok=True, verify_raises=None, log=None):
+        self.name = name
+        self._verify_ok = verify_ok
+        self._verify_raises = verify_raises
+        self._log = log
+
+    def verify(self, ctx):
+        if self._verify_raises is not None:
+            raise self._verify_raises
+        return self._verify_ok
+
+    def run(self, ctx):
+        if self._log is not None:
+            self._log.append(self.name)
+        return StepResult(name=self.name, ok=True, summary="ran")
+
+
+class TestRunnerVerifyHook:
+    def test_failed_precondition_skips_run_and_stops(self, tmp_path):
+        log: list[str] = []
+        err = io.StringIO()
+        runner = Runner(_ctx(tmp_path), out=io.StringIO(), err=err)
+        steps = [
+            _VerifyStep("gate", verify_ok=False, log=log),
+            _RecordingStep("after", log=log),
+        ]
+        results = runner.run(steps)
+        assert log == []  # neither gate.run nor after ran
+        assert results[0].ok is False
+        assert "precondition not met" in results[0].summary
+        assert "precondition not met" in err.getvalue()
+        assert len(results) == 1  # stopped after the failed gate
+
+    def test_passing_precondition_runs_step(self, tmp_path):
+        log: list[str] = []
+        steps = [_VerifyStep("gate", verify_ok=True, log=log)]
+        results = _runner(tmp_path).run(steps)
+        assert log == ["gate"]
+        assert results[0].ok is True
+
+    def test_precondition_exception_becomes_failed_result(self, tmp_path):
+        err = io.StringIO()
+        runner = Runner(_ctx(tmp_path), out=io.StringIO(), err=err)
+        steps = [_VerifyStep("gate", verify_raises=RuntimeError("DB down"))]
+        results = runner.run(steps)
+        assert results[0].ok is False
+        assert "precondition error" in results[0].summary
+        assert "DB down" in err.getvalue()
+
+
 class TestProtocolConformance:
     def test_recording_step_is_a_pipeline_step(self):
         assert isinstance(_RecordingStep("x"), PipelineStep)

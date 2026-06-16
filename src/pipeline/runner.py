@@ -4,6 +4,9 @@ Lifts the timing/logging/fail-loud loop that ``ingest/pipeline.py`` grew by
 hand so every stage gets identical behaviour:
 
   - a banner per step,
+  - an optional ``verify(ctx)`` precondition checked before ``run`` — a step
+    that declares one (e.g. "sources are present and the DB is reachable")
+    that returns False is turned into a failed `StepResult` and never runs,
   - wall-clock timing,
   - an uncaught exception is reported and turned into a failed `StepResult`
     (fail loud, but don't let one step's traceback swallow the run summary),
@@ -48,6 +51,20 @@ class Runner:
         print(f"\n{'=' * 60}", file=self._out)
         print(f"STEP: {name.upper()}", file=self._out)
         print(f"{'=' * 60}", file=self._out)
+
+        # Precondition gate. A step may declare verify(ctx) -> bool (BaseStep
+        # defaults it to True). A False precondition is a failure, so under the
+        # default stop-on-failure the rest of the run refuses to proceed.
+        verify = getattr(step, "verify", None)
+        if verify is not None:
+            try:
+                ok = verify(self.ctx)
+            except Exception as exc:  # fail loud
+                print(f"\nFAIL in step '{name}' precondition: {exc}", file=self._err)
+                return StepResult(name=name, ok=False, summary=f"precondition error: {exc}")
+            if not ok:
+                print(f"\nFAIL in step '{name}': precondition not met", file=self._err)
+                return StepResult(name=name, ok=False, summary="precondition not met")
 
         t0 = time.monotonic()
         try:

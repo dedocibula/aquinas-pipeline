@@ -1,10 +1,11 @@
 """
-M0 acceptance checks — one function per source.
+Source acceptance checks — one function per source.
 
-Called by the project-root verify_sources.py entry point.
-Each check returns True on pass, False on failure, and prints its own
-status line. Crashes loudly only for unexpected exceptions; expected
-failures are reported via _fail() and return False.
+Each check returns True on pass, False on failure, and prints its own status
+line. Crashes loudly only for unexpected exceptions; expected failures are
+reported via _fail() and return False. The `CHECKS` list is consumed by
+`acquire.steps.VerifySourcesStep`, which drives them as prerequisite step 0 of
+the pipeline (the project-root verify_sources.py entry point).
 """
 from __future__ import annotations
 
@@ -238,30 +239,5 @@ CHECKS = [
     ("Database", check_db),
     (".env", check_env),
 ]
-
-
-def main() -> None:
-    print("=== verify_sources.py ===\n")
-
-    results = []
-    for label, fn in CHECKS:
-        try:
-            passed = fn()
-        except Exception as exc:
-            _fail(label, f"unexpected error: {exc}")
-            passed = False
-        results.append(passed)
-
-    print()
-    total = len(results)
-    passed_count = sum(results)
-    if all(results):
-        print(f"All {total} checks passed. M0 complete.")
-        sys.exit(0)
-    else:
-        print(
-            f"{passed_count}/{total} checks passed. "
-            f"{total - passed_count} failure(s) above.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+# The acceptance run lives in acquire.steps.VerifySourcesStep, which drives
+# CHECKS through the pipeline Runner. Entry point: project-root verify_sources.py.

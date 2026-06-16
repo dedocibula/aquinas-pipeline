@@ -1,15 +1,21 @@
 """
-M2 ingestion pipeline — single entry point.
+Ingestion pipeline — single entry point.
 
-Each step calls the existing module's run() function. Individual modules
-remain directly runnable via `python -m ingest.<module>`.
+Each step is a `PipelineStep` wrapping the existing module's run() function and
+returning a `StepResult`; the `Runner` drives them with uniform banners, timing,
+and fail-loud / stop-on-failure semantics. Individual modules remain directly
+runnable via `python -m ingest.<module>`.
+
+`verify-sources` runs as prerequisite step 0 of a full run: if the source tree,
+DB, or env is broken it fails, and stop-on-failure means no ingest step runs.
 
 Steps and their dependencies:
-  latin   — parse all 2,663 articles into segment + segment_text(la)
+  verify   — source acceptance checks (prerequisite for everything below)
+  latin    — parse all articles into segment + segment_text(la)
   bahounek — match Czech text to existing segments (requires: latin)
   english  — match English text to existing segments (requires: latin)
   resolve  — run term resolver, write term_usage (requires: latin + bahounek + english)
-  report   — produce m2_coverage.txt + m2_dedup_rollup.csv (requires: resolve)
+  report   — produce coverage report + dedup roll-up (requires: resolve)
 
 Usage:
   uv run python -m ingest.pipeline --step latin
@@ -24,75 +30,146 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
+from acquire.steps import VerifySourcesStep
+from pipeline import BaseStep, PipelineContext, PipelineStep, Runner, StepResult
+
 ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = ROOT / "reports"
 
-_STEPS = ("latin", "bahounek", "english", "resolve", "report")
+# Env knobs the resolve step reads (passed through PipelineContext).
+_KNOB_KEYS = (
+    "GAP_FREQ_FLOOR",
+    "GAP_BATCH_SIZE",
+    "GAP_MAX_WORKERS",
+    "GAP_FREQ_CEILING_PCT",
+)
 
 
-def _step_latin() -> None:
-    from ingest.parser_latin import run_full
-    anomaly_log = REPORTS_DIR / "m2_parser_anomalies.txt"
-    print(f"[latin] Ingesting full Latin corpus → anomalies logged to {anomaly_log}")
-    result = run_full(anomaly_log)
-    # Persist stats so coverage report can compute correct article totals
-    stats_path = REPORTS_DIR / "m2_latin_stats.json"
-    stats_path.parent.mkdir(parents=True, exist_ok=True)
-    stats_path.write_text(json.dumps(result, indent=2))
-    print(
-        f"[latin] Done: {result['ingested']}/{result['total']} articles ingested, "
-        f"{result['anomalies']} anomalies."
-    )
-    if result["anomalies"]:
+class LatinStep(BaseStep):
+    name = "latin"
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.parser_latin import run_full
+
+        anomaly_log = ctx.reports_dir / "m2_parser_anomalies.txt"
+        anomaly_log.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[latin] Ingesting full Latin corpus → anomalies logged to {anomaly_log}")
+        result = run_full(anomaly_log)
+        # Persist stats so the coverage report can compute correct article totals.
+        stats_path = ctx.reports_dir / "m2_latin_stats.json"
+        stats_path.write_text(json.dumps(result, indent=2))
         print(
-            f"[latin] WARNING: Review {anomaly_log} before proceeding. "
-            "Categorise anomalies by type and fix by category."
+            f"[latin] Done: {result['ingested']}/{result['total']} articles ingested, "
+            f"{result['anomalies']} anomalies."
+        )
+        if result["anomalies"]:
+            print(
+                f"[latin] WARNING: Review {anomaly_log} before proceeding. "
+                "Categorise anomalies by type and fix by category."
+            )
+        return StepResult(
+            name=self.name,
+            ok=True,
+            summary=(
+                f"{result['ingested']}/{result['total']} articles, "
+                f"{result['anomalies']} anomalies"
+            ),
+            details=result,
         )
 
 
-def _step_bahounek() -> None:
-    from ingest.parser_bahounek import run
-    gap_log = REPORTS_DIR / "m2_bahounek_gaps.txt"
-    gap_log.parent.mkdir(parents=True, exist_ok=True)
-    print(f"[bahounek] Ingesting Czech text → gaps logged to {gap_log}")
-    run(gap_log_path=gap_log)
-    print("[bahounek] Done.")
+class BahounekStep(BaseStep):
+    name = "bahounek"
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.parser_bahounek import run
+
+        gap_log = ctx.reports_dir / "m2_bahounek_gaps.txt"
+        gap_log.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[bahounek] Ingesting Czech text → gaps logged to {gap_log}")
+        run(gap_log_path=gap_log)
+        print("[bahounek] Done.")
+        return StepResult(name=self.name, ok=True, summary="Czech overlay ingested")
 
 
-def _step_english() -> None:
-    from ingest.ingest_english import run
-    print("[english] Ingesting English text...")
-    run()
-    print("[english] Done.")
+class EnglishStep(BaseStep):
+    name = "english"
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.ingest_english import run
+
+        print("[english] Ingesting English text...")
+        run()
+        print("[english] Done.")
+        return StepResult(name=self.name, ok=True, summary="English overlay ingested")
 
 
-def _step_resolve() -> None:
-    import os
+class ResolveStep(BaseStep):
+    name = "resolve"
 
-    from ingest.resolver import run
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.resolver import run
 
-    freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
-    batch_size = int(os.environ.get("GAP_BATCH_SIZE", "50"))
-    max_workers = int(os.environ.get("GAP_MAX_WORKERS", "10"))
-    freq_ceiling_pct = float(os.environ.get("GAP_FREQ_CEILING_PCT", "0.40"))
+        freq_floor = ctx.knob_int("GAP_FREQ_FLOOR", 10)
+        batch_size = ctx.knob_int("GAP_BATCH_SIZE", 50)
+        max_workers = ctx.knob_int("GAP_MAX_WORKERS", 10)
+        freq_ceiling_pct = ctx.knob_float("GAP_FREQ_CEILING_PCT", 0.40)
 
-    print(
-        f"[resolve] Running term resolver "
-        f"(freq_floor={freq_floor}, batch_size={batch_size}, max_workers={max_workers}, "
-        f"freq_ceiling_pct={freq_ceiling_pct})..."
-    )
-    run(freq_floor=freq_floor, batch_size=batch_size, max_workers=max_workers,
-        freq_ceiling_pct=freq_ceiling_pct)
-    print("[resolve] Done.")
+        print(
+            f"[resolve] Running term resolver "
+            f"(freq_floor={freq_floor}, batch_size={batch_size}, max_workers={max_workers}, "
+            f"freq_ceiling_pct={freq_ceiling_pct})..."
+        )
+        run(freq_floor=freq_floor, batch_size=batch_size, max_workers=max_workers,
+            freq_ceiling_pct=freq_ceiling_pct)
+        print("[resolve] Done.")
+        return StepResult(
+            name=self.name,
+            ok=True,
+            summary=f"resolver complete (batch_size={batch_size})",
+        )
+
+
+class ReportStep(BaseStep):
+    name = "report"
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.report_m2 import run
+
+        print("[report] Generating coverage report and dedup roll-up...")
+        run()
+        return StepResult(
+            name=self.name, ok=True, summary="coverage report + dedup roll-up written"
+        )
+
+
+def _build_steps() -> dict[str, PipelineStep]:
+    """The selectable steps, keyed by CLI token (also their run order)."""
+    return {
+        "verify": VerifySourcesStep(),
+        "latin": LatinStep(),
+        "bahounek": BahounekStep(),
+        "english": EnglishStep(),
+        "resolve": ResolveStep(),
+        "report": ReportStep(),
+    }
+
+
+# CLI tokens (order is the --all run order: verify first as prerequisite step 0).
+_STEPS = ("verify", "latin", "bahounek", "english", "resolve", "report")
+
+
+def _context() -> PipelineContext:
+    knobs = {k: os.environ[k] for k in _KNOB_KEYS if k in os.environ}
+    return PipelineContext(reports_dir=REPORTS_DIR, knobs=knobs)
 
 
 def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
-    import os
-
     from ingest.gap_terms import _load_ignored_lemmas, _scan_gap_lemmas, pilot_batch_sizes
     from storage.db import get_conn, work_id
     from storage.repositories import GlossaryRepository, SegmentRepository
@@ -126,24 +203,9 @@ def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
     )
 
 
-def _step_report() -> None:
-    from ingest.report_m2 import run
-    print("[report] Generating coverage report and dedup roll-up...")
-    run()
-
-
-_STEP_FNS: dict[str, callable] = {
-    "latin": _step_latin,
-    "bahounek": _step_bahounek,
-    "english": _step_english,
-    "resolve": _step_resolve,
-    "report": _step_report,
-}
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="M2 ingestion pipeline",
+        description="Ingestion pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -156,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument(
         "--all",
         action="store_true",
-        help="Run all steps in order (latin → bahounek + english → resolve → report)",
+        help="Run all steps in order (verify → latin → bahounek → english → resolve → report)",
     )
     group.add_argument(
         "--pilot",
@@ -187,22 +249,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[pilot] Completed in {elapsed:.1f}s")
         return 0
 
-    steps_to_run = list(_STEPS) if args.all else [args.step]
+    registry = _build_steps()
+    tokens = list(_STEPS) if args.all else [args.step]
+    steps = [registry[token] for token in tokens]
 
-    for step in steps_to_run:
-        t0 = time.monotonic()
-        print(f"\n{'=' * 60}")
-        print(f"STEP: {step.upper()}")
-        print(f"{'=' * 60}")
-        try:
-            _STEP_FNS[step]()
-        except Exception as exc:
-            print(f"\nFAIL in step '{step}': {exc}", file=sys.stderr)
-            return 1
-        elapsed = time.monotonic() - t0
-        print(f"[{step}] Completed in {elapsed:.1f}s")
-
-    return 0
+    results = Runner(_context()).run(steps)
+    return 0 if all(r.ok for r in results) else 1
 
 
 if __name__ == "__main__":

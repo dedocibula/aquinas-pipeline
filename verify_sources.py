@@ -1,5 +1,7 @@
-"""Entry point — delegates to src/acquire/verify.py."""
-from acquire.verify import main
+"""Entry point — verifies all sources via acquire.steps.VerifySourcesStep."""
+import sys
+
+from acquire.steps import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
