@@ -259,7 +259,17 @@ def _insert_article(
     cur = conn.cursor()
 
     # Wipe existing rows for this article (idempotency).
-    # Delete in FK dependency order: term_usage → segment_text → segment.
+    # Delete in FK dependency order: run_segment → term_usage → segment_text → segment.
+    cur.execute(
+        """
+        DELETE FROM run_segment
+        WHERE segment_id IN (
+            SELECT segment_id FROM segment
+            WHERE locator_path <@ %s::ltree AND work_id = %s
+        )
+        """,
+        (article_locator, work_id_val),
+    )
     cur.execute(
         """
         DELETE FROM term_usage
@@ -360,6 +370,78 @@ def _insert_article(
     cur.close()
 
 
+# ── Preamble helpers ─────────────────────────────────────────────────────────
+
+def _collect_preambles(html_path: Path) -> list[ParsedElement]:
+    """Return preamble elements from one CT HTML file."""
+    return [e for e in parse_html_file(html_path) if e.element_type == "preamble"]
+
+
+def _insert_preamble(
+    conn,
+    preamble_elem: ParsedElement,
+    work_id_val: int,
+    src_id: int,
+) -> None:
+    """Insert one preamble segment + Latin text row. Idempotent (delete-then-insert)."""
+    cur = conn.cursor()
+    locator = preamble_elem.locator
+    # Delete in FK dependency order: run_segment → term_usage → segment_text → segment.
+    cur.execute(
+        """
+        DELETE FROM run_segment
+        WHERE segment_id IN (
+            SELECT segment_id FROM segment
+            WHERE locator_path = %s::ltree AND work_id = %s
+        )
+        """,
+        (locator, work_id_val),
+    )
+    cur.execute(
+        """
+        DELETE FROM term_usage
+        WHERE segment_id IN (
+            SELECT segment_id FROM segment
+            WHERE locator_path = %s::ltree AND work_id = %s
+        )
+        """,
+        (locator, work_id_val),
+    )
+    cur.execute(
+        """
+        DELETE FROM segment_text
+        WHERE segment_id IN (
+            SELECT segment_id FROM segment
+            WHERE locator_path = %s::ltree AND work_id = %s
+        )
+        """,
+        (locator, work_id_val),
+    )
+    cur.execute(
+        "DELETE FROM segment WHERE locator_path = %s::ltree AND work_id = %s",
+        (locator, work_id_val),
+    )
+    cur.execute(
+        """
+        INSERT INTO segment (work_id, locator_path, element_type)
+        VALUES (%s, %s::ltree, 'preamble')
+        RETURNING segment_id
+        """,
+        (work_id_val, locator),
+    )
+    seg_id = cur.fetchone()[0]
+    if preamble_elem.latin_text:
+        cur.execute(
+            """
+            INSERT INTO segment_text (segment_id, lang, content, source_id)
+            VALUES (%s, 'la', %s, %s)
+            ON CONFLICT (segment_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
+            """,
+            (seg_id, preamble_elem.latin_text, src_id),
+        )
+    cur.close()
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def _article_to_html_locator(article_locator: str) -> tuple[str, int, int]:
@@ -453,15 +535,32 @@ def run(articles: list[str] | None = None) -> None:
                 _check_article(loc, elems)
                 all_elements[loc] = elems
 
-    print(f"\nInserting {len(all_elements)} articles...")
+    # Collect preambles for the parent questions of all test articles
+    parent_q_locs = {".".join(loc.split(".")[:2]) for loc in all_elements}
+    preamble_locs_needed = {q + ".preamble" for q in parent_q_locs}
+    found_preambles: dict[str, ParsedElement] = {}
+    for html_file in sorted(LATIN_DIR.glob("sth*.html")):
+        if html_file.stem == "sth0000":
+            continue
+        remaining = preamble_locs_needed - found_preambles.keys()
+        if not remaining:
+            break
+        for preamble in _collect_preambles(html_file):
+            if preamble.locator in remaining:
+                found_preambles[preamble.locator] = preamble
+
+    print(f"\nInserting {len(all_elements)} articles + {len(found_preambles)} preambles...")
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
         src = source_id(conn, "corpus_thomisticum")
         for locator, elems in all_elements.items():
             _insert_article(conn, locator, elems, wid, src)
             print(f"  ✓ {locator}")
+        for locator, preamble_elem in sorted(found_preambles.items()):
+            _insert_preamble(conn, preamble_elem, wid, src)
+            print(f"  ✓ {locator} (preamble)")
 
-    print(f"\nDone. {len(all_elements)} articles inserted.")
+    print(f"\nDone. {len(all_elements)} articles + {len(found_preambles)} preambles inserted.")
 
 
 def _group_elements_by_article(
@@ -493,9 +592,10 @@ def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
     anomaly_log.parent.mkdir(parents=True, exist_ok=True)
     source_dir = latin_dir or LATIN_DIR
 
-    # Collect all articles grouped by locator across all HTML files.
-    # Use a dict so later files can overwrite duplicates (deterministic: last wins).
+    # Collect articles and preambles in a single pass over all HTML files.
+    # Use dicts so later files can overwrite duplicates (deterministic: last wins).
     all_articles: dict[str, tuple[list[ParsedElement], str]] = {}  # locator → (elems, filename)
+    all_preambles: dict[str, tuple[ParsedElement, str]] = {}       # locator → (elem, filename)
 
     html_files = sorted(source_dir.glob("sth*.html"))
     for html_file in html_files:
@@ -504,10 +604,15 @@ def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
         file_elems = parse_html_file(html_file)
         for art_loc, art_elems in _group_elements_by_article(file_elems).items():
             all_articles[art_loc] = (art_elems, html_file.name)
+        for e in file_elems:
+            if e.element_type == "preamble":
+                all_preambles[e.locator] = (e, html_file.name)
 
     total = len(all_articles)
     ingested = 0
     anomalies = 0
+    preambles_ingested = 0
+    preambles_anomalies = 0
 
     with anomaly_log.open("w", encoding="utf-8") as log_f, get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
@@ -536,7 +641,44 @@ def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
                     flush=True,
                 )
 
-    return {"total": total, "ingested": ingested, "anomalies": anomalies}
+        print(f"\nInserting {len(all_preambles)} preambles...", flush=True)
+        for j, (locator, (preamble_elem, filename)) in enumerate(
+            sorted(all_preambles.items()), 1
+        ):
+            try:
+                _insert_preamble(conn, preamble_elem, wid, src)
+                conn.commit()
+                preambles_ingested += 1
+            except Exception as exc:
+                conn.rollback()
+                exc_type = type(exc).__name__
+                excerpt = str(exc)[:120].replace("\n", " ")
+                log_f.write(
+                    f"[PREAMBLE_ANOMALY] locator={locator} file={filename} "
+                    f"type={exc_type} excerpt={excerpt!r}\n"
+                )
+                preambles_anomalies += 1
+
+            if j % 100 == 0 or j == len(all_preambles):
+                print(
+                    f"  {j}/{len(all_preambles)} preambles processed  "
+                    f"({preambles_ingested} ingested, {preambles_anomalies} anomalies)",
+                    flush=True,
+                )
+
+        log_f.write(
+            f"PREAMBLE_SUMMARY: total={len(all_preambles)} "
+            f"ingested={preambles_ingested} anomalies={preambles_anomalies}\n"
+        )
+
+    return {
+        "total": total,
+        "ingested": ingested,
+        "anomalies": anomalies,
+        "preambles_total": len(all_preambles),
+        "preambles_ingested": preambles_ingested,
+        "preambles_anomalies": preambles_anomalies,
+    }
 
 
 if __name__ == "__main__":
@@ -555,7 +697,11 @@ if __name__ == "__main__":
             f"\nDone. {result['ingested']}/{result['total']} articles ingested. "
             f"{result['anomalies']} anomalies → {log_path}"
         )
-        if result["anomalies"]:
+        print(
+            f"      {result['preambles_ingested']}/{result['preambles_total']} preambles ingested. "
+            f"{result['preambles_anomalies']} preamble anomalies."
+        )
+        if result["anomalies"] or result["preambles_anomalies"]:
             print("Review anomaly log before proceeding to Bahounek/English ingest.")
     else:
         print("Parsing Corpus Thomisticum HTML for test articles...")
