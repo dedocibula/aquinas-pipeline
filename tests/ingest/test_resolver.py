@@ -320,7 +320,7 @@ class TestCallDeepseekBatch:
     def _fake_response(self, content: str):
         from unittest.mock import MagicMock
         mock = MagicMock()
-        mock.raise_for_status = lambda: None
+        mock.status_code = 200
         mock.json.return_value = {
             "choices": [{"message": {"content": content}}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 20},
@@ -337,7 +337,7 @@ class TestCallDeepseekBatch:
             '{"ratio": {"category": "term", "slovak": "rozum"}, '
             '"anima": {"category": "term", "slovak": "duša"}}'
         )
-        with patch("common.deepseek.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert result["ratio"] == {"category": "term", "slovak": "rozum"}
@@ -347,7 +347,7 @@ class TestCallDeepseekBatch:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "corpus", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '```json\n{"corpus": {"category": "term", "slovak": "telo"}}\n```'
-        with patch("common.deepseek.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert result == {"corpus": {"category": "term", "slovak": "telo"}}
@@ -356,7 +356,7 @@ class TestCallDeepseekBatch:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "a", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '{"a": {"category": "term", "slovak": "x"}, "b": {"slovak": ""}}'
-        with patch("common.deepseek.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             result = _call_deepseek_batch(batch)
         assert "a" in result and "b" not in result
@@ -364,7 +364,7 @@ class TestCallDeepseekBatch:
     def test_returns_empty_on_api_error(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         batch = [{"lemma": "virtus", "best_latin": "", "best_czech": "", "best_english": ""}]
-        with patch("common.deepseek.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.side_effect = Exception("timeout")
             result = _call_deepseek_batch(batch)
         assert result == {}
@@ -380,7 +380,7 @@ class TestCallDeepseekBatch:
         before = get_api_stats()["calls"]
         batch = [{"lemma": "pax", "best_latin": "", "best_czech": "", "best_english": ""}]
         content = '{"pax": {"category": "term", "slovak": "pokoj"}}'
-        with patch("common.deepseek.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = self._fake_response(content)
             _call_deepseek_batch(batch)
         assert get_api_stats()["calls"] == before + 1
@@ -756,8 +756,8 @@ class TestPilotBatchSizes:
             "choices": [{"message": {"content": content}}],
             "usage": {"prompt_tokens": 200, "completion_tokens": 10},
         }
-        with patch("common.deepseek.requests.post") as mock_post:
-            mock_post.return_value.raise_for_status = lambda: None
+        with patch("common.deepseek_client.requests.post") as mock_post:
+            mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = fake_resp
             results = pilot_batch_sizes(self._gap_data(2), top_n=2, batch_sizes=[10])
         r = results[0]

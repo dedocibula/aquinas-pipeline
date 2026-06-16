@@ -14,10 +14,10 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
 
-from common.pricing import UsageInfo, extract_usage
+from common.deepseek_client import DeepSeekClient
+from common.pricing import UsageInfo
 
 load_dotenv()
 
@@ -28,6 +28,8 @@ _DEEPSEEK_URL = os.environ.get(
 )
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 TRANSLATOR_TEMPERATURE = 0.3  # also recorded in translation_run for run comparison
+
+_client = DeepSeekClient(_DEEPSEEK_MODEL, url=_DEEPSEEK_URL, timeout=60)
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -58,44 +60,15 @@ def call_translator_v3(
     Raises:
         RuntimeError: On missing API key, 4xx/5xx HTTP errors, or empty response.
     """
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "DEEPSEEK_API_KEY is not set. "
-            "Export it or add it to .env before running the translator."
-        )
-
-    try:
-        resp = requests.post(
-            _DEEPSEEK_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _DEEPSEEK_MODEL,
-                "messages": messages,
-                "temperature": TRANSLATOR_TEMPERATURE,
-                "max_tokens": 2048,
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else None
-        raise RuntimeError(
-            f"DeepSeek translator HTTP {status}."
-        ) from exc
-
-    data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError("DeepSeek translator returned no choices.")
-    draft = choices[0]["message"]["content"].strip()
+    result = _client.chat(
+        messages,
+        temperature=TRANSLATOR_TEMPERATURE,
+        max_tokens=2048,
+    )
+    draft = result.content.strip()
     if not draft:
         raise RuntimeError("DeepSeek translator returned empty content.")
-    usage = extract_usage(_DEEPSEEK_MODEL, data)
-    return draft, usage
+    return draft, result.usage
 
 
 # ── Prompt builders ───────────────────────────────────────────────────────────

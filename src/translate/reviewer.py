@@ -8,10 +8,10 @@ import re as _re
 from dataclasses import dataclass
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
 
-from common.pricing import UsageInfo, extract_usage
+from common.deepseek_client import DeepSeekClient
+from common.pricing import UsageInfo
 
 load_dotenv()
 
@@ -19,6 +19,9 @@ _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
 _DEEPSEEK_R1_MODEL = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-reasoner")
+
+# R1 spends its token budget on reasoning + output; give it a long ceiling and timeout.
+_client = DeepSeekClient(_DEEPSEEK_R1_MODEL, url=_DEEPSEEK_URL, timeout=150)
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -86,52 +89,19 @@ def call_reviewer_r1(
         RuntimeError: If DEEPSEEK_API_KEY is not set, the API returns an
                       error status, or the verdict cannot be parsed.
     """
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "DEEPSEEK_API_KEY is not set. "
-            "Export it before running the reviewer."
-        )
-
     user_content = build_reviewer_turn(latin, draft, constraints, czech=czech, english=english)
 
-    try:
-        resp = requests.post(
-            _DEEPSEEK_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _DEEPSEEK_R1_MODEL,
-                "messages": [
-                    {"role": "system", "content": load_reviewer_system_prompt()},
-                    {"role": "user", "content": user_content},
-                ],
-                "temperature": 0.0,
-                "max_tokens": 8000,  # R1 reasoning + output share this budget; 1024 was too low
-            },
-            timeout=150,
-        )
-    except requests.RequestException as exc:
-        raise RuntimeError(f"DeepSeek R1 network error: {exc}") from exc
+    chat = _client.chat(
+        [
+            {"role": "system", "content": load_reviewer_system_prompt()},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.0,
+        max_tokens=8000,  # R1 reasoning + output share this budget; 1024 was too low
+    )
 
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"DeepSeek R1 API error (HTTP {resp.status_code}) — "
-            "check DEEPSEEK_API_KEY and account credits."
-        )
-
-    data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError(
-            "DeepSeek R1 returned no choices — API may have filtered the response."
-        )
-    content = choices[0]["message"]["content"].strip()
-
-    result = _parse_verdict(content)
-    result.usage = extract_usage(_DEEPSEEK_R1_MODEL, data)
+    result = _parse_verdict(chat.content.strip())
+    result.usage = chat.usage
     return result
 
 

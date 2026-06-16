@@ -7,7 +7,7 @@ import os
 import re
 import threading
 
-import requests
+from common.deepseek_client import DeepSeekAPIError, DeepSeekClient
 
 _api_stats: dict[str, int] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
 _api_stats_lock = threading.Lock()
@@ -16,6 +16,8 @@ _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+_client = DeepSeekClient(_DEEPSEEK_MODEL, url=_DEEPSEEK_URL, timeout=60)
 
 # Model-assigned gap-term categories (stored in glossary_term.category, overridable
 # in M3). 'term'/'name'/'formula' are kept-and-locked; 'prose' is ordinary vocab.
@@ -55,8 +57,9 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
     Returns {input_lemma: {"category": str|None, "slovak": str}}.
     Missing/malformed entries are omitted; the caller fills per-lemma fallbacks.
     """
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
+    # Fail loudly on a missing key before counting the call — a soft-failing batch
+    # (see the broad except below) must never silently swallow a misconfiguration.
+    if not os.environ.get("DEEPSEEK_API_KEY", ""):
         raise RuntimeError(
             "DEEPSEEK_API_KEY is not set. "
             "Export it before running the resolver."
@@ -90,26 +93,18 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
     with _api_stats_lock:
         _api_stats["calls"] += 1
     try:
-        resp = requests.post(
-            _DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": _DEEPSEEK_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": len(batch) * 60,
-                "temperature": 0.0,
-            },
-            timeout=60,
+        chat = _client.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=len(batch) * 60,
         )
-        resp.raise_for_status()
-        data = resp.json()
 
-        usage = data.get("usage", {})
+        usage = chat.raw.get("usage", {})
         with _api_stats_lock:
             _api_stats["input_tokens"] += usage.get("prompt_tokens", 0)
             _api_stats["output_tokens"] += usage.get("completion_tokens", 0)
 
-        content = data["choices"][0]["message"]["content"].strip()
+        content = chat.content.strip()
         # Strip markdown code fences if the model wraps the JSON
         content = re.sub(r"```(?:json)?\s*", "", content).replace("```", "").strip()
         result = json.loads(content)
@@ -124,14 +119,17 @@ def _call_deepseek_batch(batch: list[dict]) -> dict[str, dict]:
                 parsed[str(k)] = entry
         return parsed
 
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else None
-        if status in (401, 402, 403):
+    except DeepSeekAPIError as exc:
+        if exc.status_code in (401, 402, 403):
             raise RuntimeError(
-                f"DeepSeek API fatal error (HTTP {status}) — "
+                f"DeepSeek API fatal error (HTTP {exc.status_code}) — "
                 "check DEEPSEEK_API_KEY and account credits. Aborting."
             ) from exc
-        print(f"  [WARN] DeepSeek batch HTTP error {status} ({len(batch)} lemmas): {exc}", flush=True)
+        print(
+            f"  [WARN] DeepSeek batch HTTP error {exc.status_code} "
+            f"({len(batch)} lemmas): {exc}",
+            flush=True,
+        )
         return {}
     except Exception as exc:
         print(f"  [WARN] DeepSeek batch error ({len(batch)} lemmas): {exc}", flush=True)

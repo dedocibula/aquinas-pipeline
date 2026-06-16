@@ -41,7 +41,7 @@ def _fake_response(content: str, status_code: int = 200):
 class TestCallReviewerR1:
     def test_approved_verdict(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("APPROVED")
             result = call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
         assert result.verdict == "APPROVED"
@@ -52,7 +52,7 @@ class TestCallReviewerR1:
     def test_approved_with_notes_verdict(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         content = "APPROVED_WITH_NOTES: - Consider a more literal rendering of 'est'"
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response(content)
             result = call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
         assert result.verdict == "APPROVED_WITH_NOTES"
@@ -62,7 +62,7 @@ class TestCallReviewerR1:
     def test_revision_needed_verdict(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         content = "REVISION_NEEDED: - Required term 'Boh' is missing from draft"
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response(content)
             result = call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
         assert result.verdict == "REVISION_NEEDED"
@@ -71,7 +71,7 @@ class TestCallReviewerR1:
 
     def test_unrecognised_verdict_raises(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("LGTM")
             with pytest.raises(RuntimeError, match="No verdict found"):
                 call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
@@ -83,7 +83,7 @@ class TestCallReviewerR1:
 
     def test_raises_on_http_401(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "bad-key")
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("", status_code=401)
             with pytest.raises(RuntimeError, match="HTTP 401"):
                 call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
@@ -91,7 +91,7 @@ class TestCallReviewerR1:
     def test_raises_on_network_error(self, monkeypatch):
         import requests as req_mod
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.side_effect = req_mod.ConnectionError("timeout")
             with pytest.raises(RuntimeError, match="network error"):
                 call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
@@ -101,7 +101,7 @@ class TestCallReviewerR1:
         empty = MagicMock()
         empty.status_code = 200
         empty.json.return_value = {"choices": []}
-        with patch("translate.reviewer.requests.post", return_value=empty):
+        with patch("common.deepseek_client.requests.post", return_value=empty):
             with pytest.raises(RuntimeError, match="no choices"):
                 call_reviewer_r1(_LATIN, _DRAFT, _CONSTRAINTS)
 
@@ -126,7 +126,7 @@ class TestUserTurn:
     def _capture_user_content(self, monkeypatch, content: str = "APPROVED") -> str:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         captured = {}
-        with patch("translate.reviewer.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response(content)
 
             def capture(*args, **kwargs):

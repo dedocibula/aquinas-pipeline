@@ -47,8 +47,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
-
+from common.deepseek_client import DeepSeekClient
 from common.lemmatize import lemmatize_czech
 from storage.db import get_conn, source_id
 
@@ -260,6 +259,8 @@ _DEEPSEEK_URL = os.environ.get(
 )
 _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
+_client = DeepSeekClient(_DEEPSEEK_MODEL, url=_DEEPSEEK_URL, timeout=60)
+
 _LABEL_SYSTEM = """\
 You are a terminologist for a Latin→Slovak translation of Aquinas's Summa Theologiae.
 A Latin term is rendered by several distinct Czech words in a professional Czech
@@ -298,35 +299,23 @@ def _build_label_user_turn(
 
 def call_deepseek_label(system: str, user: str, retries: int = 3) -> dict:
     """One labeling call; returns the parsed JSON object. Raises after retries."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
+    if not os.environ.get("DEEPSEEK_API_KEY", ""):
         raise RuntimeError("DEEPSEEK_API_KEY is not set (load .env).")
 
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            resp = requests.post(
-                _DEEPSEEK_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _DEEPSEEK_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.0,
-                    "max_tokens": 1024,
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=60,
+            chat = _client.chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.0,
+                max_tokens=1024,
+                response_format={"type": "json_object"},
             )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return json.loads(content)
-        except (requests.RequestException, KeyError, json.JSONDecodeError) as exc:
+            return json.loads(chat.content)
+        except (RuntimeError, json.JSONDecodeError) as exc:
             last_exc = exc
             if attempt < retries:
                 time.sleep(2**attempt)

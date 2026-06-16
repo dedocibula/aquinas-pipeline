@@ -12,12 +12,7 @@ import pytest
 
 def _fake_response(content: str, status_code: int = 200):
     mock = MagicMock()
-    if status_code != 200:
-        http_err = __import__("requests").HTTPError(response=MagicMock(status_code=status_code))
-        http_err.response = MagicMock(status_code=status_code)
-        mock.raise_for_status.side_effect = http_err
-    else:
-        mock.raise_for_status = lambda: None
+    mock.status_code = status_code
     mock.json.return_value = {
         "choices": [{"message": {"content": content}}],
         "usage": {
@@ -61,7 +56,7 @@ class TestCallTranslatorV3:
     def test_returns_nonempty_string_on_success(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         expected = "Zdá sa, že Boh nejestvuje."
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response(expected)
             from translate.translator import call_translator_v3
             draft, usage = call_translator_v3(_initial_messages())
@@ -71,7 +66,7 @@ class TestCallTranslatorV3:
 
     def test_system_prompt_contains_do_not_block(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
             call_translator_v3(_initial_messages(_MINIMAL_SEG, []))
@@ -85,7 +80,7 @@ class TestCallTranslatorV3:
 
     def test_user_turn_contains_hard_term_constraints(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
             call_translator_v3(_initial_messages())
@@ -99,7 +94,7 @@ class TestCallTranslatorV3:
 
     def test_user_turn_contains_latin_text(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Preklad.")
             from translate.translator import call_translator_v3
             call_translator_v3(_initial_messages(_MINIMAL_SEG, []))
@@ -117,7 +112,7 @@ class TestCallTranslatorV3:
         msgs = _initial_messages()
         msgs.append({"role": "assistant", "content": prior_draft})
         msgs.append({"role": "user", "content": prior_feedback})
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("Revidovaný preklad.")
             from translate.translator import call_translator_v3
             call_translator_v3(msgs)
@@ -137,7 +132,7 @@ class TestCallTranslatorV3:
 
     def test_raises_runtime_error_on_http_401(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "bad-key")
-        with patch("translate.translator.requests.post") as mock_post:
+        with patch("common.deepseek_client.requests.post") as mock_post:
             mock_post.return_value = _fake_response("", status_code=401)
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="401"):
@@ -146,9 +141,9 @@ class TestCallTranslatorV3:
     def test_raises_runtime_error_on_empty_choices(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         empty_choices = MagicMock()
-        empty_choices.raise_for_status = lambda: None
+        empty_choices.status_code = 200
         empty_choices.json.return_value = {"choices": []}
-        with patch("translate.translator.requests.post", return_value=empty_choices):
+        with patch("common.deepseek_client.requests.post", return_value=empty_choices):
             from translate.translator import call_translator_v3
             with pytest.raises(RuntimeError, match="no choices"):
                 call_translator_v3(_initial_messages())
