@@ -1,0 +1,63 @@
+"""Executes an ordered sequence of steps against one context.
+
+Lifts the timing/logging/fail-loud loop that ``ingest/pipeline.py`` grew by
+hand so every stage gets identical behaviour:
+
+  - a banner per step,
+  - wall-clock timing,
+  - an uncaught exception is reported and turned into a failed `StepResult`
+    (fail loud, but don't let one step's traceback swallow the run summary),
+  - stop on the first failure by default.
+
+The runner returns the list of `StepResult`s it produced; CLIs map that to an
+exit code.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from typing import Sequence
+
+from pipeline.context import PipelineContext
+from pipeline.step import PipelineStep, StepResult
+
+
+class Runner:
+    def __init__(self, ctx: PipelineContext, *, out=None, err=None) -> None:
+        self.ctx = ctx
+        self._out = out if out is not None else sys.stdout
+        self._err = err if err is not None else sys.stderr
+
+    def run(
+        self,
+        steps: Sequence[PipelineStep],
+        *,
+        stop_on_failure: bool = True,
+    ) -> list[StepResult]:
+        results: list[StepResult] = []
+        for step in steps:
+            result = self._run_one(step)
+            results.append(result)
+            if not result.ok and stop_on_failure:
+                break
+        return results
+
+    def _run_one(self, step: PipelineStep) -> StepResult:
+        name = step.name
+        print(f"\n{'=' * 60}", file=self._out)
+        print(f"STEP: {name.upper()}", file=self._out)
+        print(f"{'=' * 60}", file=self._out)
+
+        t0 = time.monotonic()
+        try:
+            result = step.run(self.ctx)
+        except Exception as exc:  # fail loud, but keep the run summary intact
+            print(f"\nFAIL in step '{name}': {exc}", file=self._err)
+            return StepResult(name=name, ok=False, summary=str(exc))
+
+        elapsed = time.monotonic() - t0
+        status = "ok" if result.ok else "FAILED"
+        suffix = f" — {result.summary}" if result.summary else ""
+        print(f"[{name}] {status} in {elapsed:.1f}s{suffix}", file=self._out)
+        return result
