@@ -47,7 +47,6 @@ import sys
 from pathlib import Path
 
 from common.deepseek import _api_stats, _api_stats_lock, get_api_stats
-from common.glossary_repo import _load_glossary, _load_segments
 from ingest.gap_terms import (
     _GAP_BATCH_SIZE,
     _GAP_FREQ_CEILING_PCT,
@@ -59,8 +58,9 @@ from ingest.gap_terms import (
     _propose_gap_terms,
     _scan_gap_lemmas,
 )
-from ingest.resolution import _source_rank, _write_term_usage, resolve_segment
+from ingest.resolution import _source_rank, resolve_segment
 from storage.db import get_conn, source_id, work_id
+from storage.repositories import GlossaryRepository, SegmentRepository, TermUsageRepository
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -101,12 +101,12 @@ def run(
 
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
-        multiword_terms, singleword_terms = _load_glossary(conn)
-        segments = _load_segments(conn, wid)
+        multiword_terms, singleword_terms = GlossaryRepository(conn).load_glossary()
+        segments = SegmentRepository(conn).load_body_segments(wid)
         ignored_lemmas = _load_ignored_lemmas(conn)
 
-    lemma_to_term = {t["latin_lemma"]: t for t in singleword_terms}
-    krystal_lemmas = set(lemma_to_term.keys()) | {t["latin_lemma"] for t in multiword_terms}
+    lemma_to_term = {t.latin_lemma: t for t in singleword_terms}
+    krystal_lemmas = set(lemma_to_term.keys()) | {t.latin_lemma for t in multiword_terms}
     print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword Krystal terms")
     print(f"  Ignored (stopword): {len(ignored_lemmas)}")
     print(f"  Segments: {len(segments)} body segments to resolve")
@@ -160,16 +160,17 @@ def run(
         wid = work_id(conn, "summa_articulus")
         cs_rank = _source_rank(conn, "bahounek")
         en_rank = _source_rank(conn, "dominican")
-        multiword_terms, singleword_terms = _load_glossary(conn)
-        lemma_to_term = {t["latin_lemma"]: t for t in singleword_terms}
-        segments = _load_segments(conn, wid)
+        multiword_terms, singleword_terms = GlossaryRepository(conn).load_glossary()
+        lemma_to_term = {t.latin_lemma: t for t in singleword_terms}
+        segments = SegmentRepository(conn).load_body_segments(wid)
+        usage_repo = TermUsageRepository(conn)
 
         for i, seg in enumerate(segments, 1):
             resolutions = resolve_segment(
                 seg, multiword_terms, lemma_to_term,
                 cs_rank, en_rank, gap_terms_db, min_len,
             )
-            n = _write_term_usage(conn, seg["segment_id"], resolutions)
+            n = usage_repo.write_term_usage(seg.segment_id, resolutions)
             total_usages += n
             if i % 500 == 0 or i == len(segments):
                 conn.commit()  # checkpoint: crash can only lose the current 500-seg batch

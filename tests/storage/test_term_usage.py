@@ -9,7 +9,7 @@ from storage.repositories import TermUsageRepository
 
 def _res(sense_id=42, version=1, method="krystal_single", confidence="high", signals=None):
     return SimpleNamespace(
-        sense={"sense_id": sense_id, "version": version},
+        sense=SimpleNamespace(sense_id=sense_id, version=version),
         method=method,
         confidence=confidence,
         signals=signals,

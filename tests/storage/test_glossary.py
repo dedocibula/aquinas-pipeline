@@ -82,6 +82,33 @@ def test_load_glossary_sorted_by_lemma(fake_conn):
     assert [t.latin_lemma for t in singleword] == ["actus", "ratio"]
 
 
+def test_load_glossary_carries_category(fake_conn):
+    conn = fake_conn(fetchall_rows=[_gloss_row(category="formula")])
+    _, singleword = GlossaryRepository(conn).load_glossary()
+    assert singleword[0].category == "formula"
+
+
+def test_load_glossary_carries_la_surface_onto_term_and_sense(fake_conn):
+    conn = fake_conn(fetchall_rows=[_gloss_row(la_surface="Sed contra")])
+    _, singleword = GlossaryRepository(conn).load_glossary()
+    term = singleword[0]
+    assert term.la_surface == "Sed contra"
+    assert term.senses[0].la_surface == "Sed contra"
+
+
+def test_load_glossary_la_surface_none_stays_none(fake_conn):
+    conn = fake_conn(fetchall_rows=[_gloss_row(la_surface=None)])
+    _, singleword = GlossaryRepository(conn).load_glossary()
+    assert singleword[0].la_surface is None
+
+
+def test_load_glossary_multiword_carries_la_surface(fake_conn):
+    conn = fake_conn(fetchall_rows=[_gloss_row(is_multiword=True, la_surface="actus essendi")])
+    multiword, singleword = GlossaryRepository(conn).load_glossary()
+    assert singleword == []
+    assert multiword[0].la_surface == "actus essendi"
+
+
 # ── locked_terms ───────────────────────────────────────────────────────────────
 
 

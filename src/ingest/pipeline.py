@@ -93,9 +93,9 @@ def _step_resolve() -> None:
 def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
     import os
 
-    from common.glossary_repo import _load_glossary, _load_segments
     from ingest.gap_terms import _load_ignored_lemmas, _scan_gap_lemmas, pilot_batch_sizes
     from storage.db import get_conn, work_id
+    from storage.repositories import GlossaryRepository, SegmentRepository
 
     freq_floor = int(os.environ.get("GAP_FREQ_FLOOR", "10"))
     freq_ceiling_pct = float(os.environ.get("GAP_FREQ_CEILING_PCT", "0.40"))
@@ -103,13 +103,13 @@ def _step_pilot(top_n: int, batch_sizes: list[int]) -> None:
     print("[pilot] Loading segments and glossary...")
     with get_conn() as conn:
         wid = work_id(conn, "summa_articulus")
-        multiword_terms, singleword_terms = _load_glossary(conn)
-        segments = _load_segments(conn, wid)
+        multiword_terms, singleword_terms = GlossaryRepository(conn).load_glossary()
+        segments = SegmentRepository(conn).load_body_segments(wid)
         ignored_lemmas = _load_ignored_lemmas(conn)
 
     krystal_lemmas = (
-        {t["latin_lemma"] for t in singleword_terms}
-        | {t["latin_lemma"] for t in multiword_terms}
+        {t.latin_lemma for t in singleword_terms}
+        | {t.latin_lemma for t in multiword_terms}
     )
     print(f"[pilot] Scanning gap lemmas (freq_floor={freq_floor}, "
           f"freq_ceiling_pct={freq_ceiling_pct}, ignored={len(ignored_lemmas)})...")

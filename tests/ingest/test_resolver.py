@@ -22,38 +22,40 @@ from ingest.resolution import (
     phrase_match,
     resolve_segment,
 )
+from storage.models import Segment, Sense, Term
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _sense(sense_id: int, context_label: str | None = None,
-           cs_lemma: str = "", en_cue: str = "", sk_content: str = "") -> dict:
-    return {
-        "sense_id": sense_id,
-        "context_label": context_label,
-        "version": 1,
-        "cs_lemma": cs_lemma,
-        "cs_content": cs_lemma,
-        "en_cue": en_cue,
-        "sk_content": sk_content,
-    }
+           cs_lemma: str = "", en_cue: str = "", sk_content: str = "") -> Sense:
+    return Sense(
+        sense_id=sense_id,
+        context_label=context_label,
+        version=1,
+        cs_lemma=cs_lemma,
+        cs_content=cs_lemma,
+        en_cue=en_cue,
+        sk_content=sk_content,
+        la_surface=None,
+    )
 
 
 def _term(
     term_id: int,
     lemma: str,
-    senses: list[dict],
+    senses: list[Sense],
     is_multiword: bool = False,
     category: str = "term",
     la_surface: str | None = None,
-) -> dict:
-    return {
-        "term_id": term_id,
-        "latin_lemma": lemma,
-        "is_multiword": is_multiword,
-        "category": category,
-        "la_surface": la_surface,
-        "senses": senses,
-    }
+) -> Term:
+    return Term(
+        term_id=term_id,
+        latin_lemma=lemma,
+        is_multiword=is_multiword,
+        category=category,
+        la_surface=la_surface,
+        senses=tuple(senses),
+    )
 
 
 # ── phrase_match ──────────────────────────────────────────────────────────────
@@ -66,7 +68,7 @@ class TestPhraseMatch:
         term = self._mw_term("actus essendi")
         matches = phrase_match("Hoc est actus essendi in rebus.", [term])
         assert len(matches) == 1
-        assert matches[0][0]["latin_lemma"] == "actus essendi"
+        assert matches[0][0].latin_lemma == "actus essendi"
 
     def test_case_insensitive(self):
         term = self._mw_term("per se")
@@ -190,7 +192,7 @@ class TestResolveSingle:
         res = _resolve_single(term)
         assert res.method == "krystal_single"
         assert res.confidence == "auto"
-        assert res.sense["sense_id"] == 10
+        assert res.sense.sense_id == 10
 
     def test_no_signals(self):
         term = _term(1, "essentia", [_sense(10)])
@@ -213,7 +215,7 @@ class TestResolveMulti:
         res = _resolve_multi(term, "dychtění touhou", None, cs_rank=20, en_rank=30)
         assert res.method == "krystal_multi_voted"
         assert res.confidence == "auto"
-        assert res.sense["sense_id"] == 102
+        assert res.sense.sense_id == 102
 
     def test_voted_by_en_signal_with_strong_cs(self):
         # English says "passion" → sense 102; cs_rank=20 ≤ threshold → strong
@@ -221,7 +223,7 @@ class TestResolveMulti:
         # CS matches dychtění → sense_102 (rank 20 = strong threshold)
         res = _resolve_multi(term, "dychtění", "of passion", cs_rank=20, en_rank=30)
         assert res.method == "krystal_multi_voted"
-        assert res.sense["sense_id"] == 102
+        assert res.sense.sense_id == 102
 
     def test_flagged_when_no_signals(self):
         term = self._two_sense_term()
@@ -258,14 +260,14 @@ class TestResolveMulti:
         ])
         res = _resolve_multi(term, None, None, cs_rank=20, en_rank=30)
         assert res.method == "krystal_multi_flagged"
-        assert res.sense["sense_id"] == 201  # primary (context_label=None)
+        assert res.sense.sense_id == 201  # primary (context_label=None)
 
     def test_deterministic_with_same_input(self):
         term = self._two_sense_term()
         r1 = _resolve_multi(term, "dychtění", None, cs_rank=20, en_rank=30)
         r2 = _resolve_multi(term, "dychtění", None, cs_rank=20, en_rank=30)
         assert r1.method == r2.method
-        assert r1.sense["sense_id"] == r2.sense["sense_id"]
+        assert r1.sense.sense_id == r2.sense.sense_id
 
 
 # ── _call_deepseek_batch ──────────────────────────────────────────────────────
@@ -388,8 +390,8 @@ class TestCallDeepseekBatch:
 
 class TestScanGapLemmas:
     def _seg(self, latin="", czech="", english="", seg_id=1):
-        return {"segment_id": seg_id, "latin": latin, "czech": czech,
-                "english": english, "element_type": "arg", "locator_path": "I.q1.a1.arg1"}
+        return Segment(segment_id=seg_id, locator_path="I.q1.a1.arg1",
+                       element_type="arg", latin=latin, czech=czech, english=english)
 
     def test_respects_freq_floor(self):
         # 'virtus' appears in 2 segments, floor=3 → excluded
@@ -828,7 +830,8 @@ class TestResolveSegmentGap:
     lemmatizer passes through unchanged so gap_terms_db keys are deterministic."""
 
     def _seg(self, latin, czech=None, english=None):
-        return {"segment_id": 1, "latin": latin, "czech": czech, "english": english}
+        return Segment(segment_id=1, locator_path="I.q1.a1.arg1", element_type="arg",
+                       latin=latin, czech=czech, english=english)
 
     _GAP_METHODS = {"bahounek_derived", "english_derived", "model_proposed"}
 
@@ -847,7 +850,7 @@ class TestResolveSegmentGap:
         )
         gap = [r for r in res if r.method in self._GAP_METHODS]
         assert len(gap) == 1
-        assert gap[0].sense["sense_id"] == 7
+        assert gap[0].sense.sense_id == 7
         assert gap[0].method == "bahounek_derived"  # czech present
         assert gap[0].confidence == "needs_review"
 
@@ -856,7 +859,7 @@ class TestResolveSegmentGap:
         res = resolve_segment(seg, [], {}, cs_rank=20, en_rank=30, gap_terms_db={})
         assert res == []
         for r in res:
-            assert not str(r.sense.get("sk_content", "")).startswith("[")
+            assert not str(r.sense.sk_content or "").startswith("[")
 
     def test_method_reflects_available_context(self):
         gdb = self._gap_db("xyzzyword")
@@ -872,4 +875,4 @@ class TestResolveSegmentGap:
         res = resolve_segment(seg, [], {}, 20, 30, gdb)
         gap = [r for r in res if r.method in self._GAP_METHODS]
         assert len(gap) == 2
-        assert all(r.sense["sense_id"] == 9 for r in gap)
+        assert all(r.sense.sense_id == 9 for r in gap)

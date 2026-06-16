@@ -497,8 +497,8 @@ class TermUsageRepository:
                     """,
                     (
                         segment_id,
-                        res.sense["sense_id"],
-                        res.sense["version"],
+                        res.sense.sense_id,
+                        res.sense.version,
                         res.method,
                         res.confidence,
                         json.dumps(res.signals) if res.signals else None,

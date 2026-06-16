@@ -10,6 +10,7 @@ from cltk.stops.lat import STOPS as _CLTK_STOPS
 
 from common.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
 from common.lemmatize import lemmatize_latin
+from storage.models import Segment
 
 # ── Gap term proposal knobs ───────────────────────────────────────────────────
 # Override via run() parameters or GAP_* env vars read in pipeline.py.
@@ -38,7 +39,7 @@ def _load_ignored_lemmas(conn) -> frozenset[str]:
 
 
 def _scan_gap_lemmas(
-    segments: list[dict],
+    segments: list[Segment],
     krystal_lemmas: set[str],
     freq_floor: int,
     min_len: int = _GAP_MIN_LEN,
@@ -63,11 +64,11 @@ def _scan_gap_lemmas(
     total_segments = len(segments)
 
     for seg in segments:
-        latin = seg["latin"] or ""
+        latin = seg.latin or ""
         if not latin:
             continue
-        czech = seg["czech"] or ""
-        english = seg["english"] or ""
+        czech = seg.czech or ""
+        english = seg.english or ""
 
         seen_in_seg: set[str] = set()
         for token in re.findall(r"[a-zA-Z]+", latin):
