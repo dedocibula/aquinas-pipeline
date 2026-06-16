@@ -49,68 +49,6 @@ class SegmentOutcome:
     last_feedback: str | None = None
 
 
-# ── DB helpers ────────────────────────────────────────────────────────────────
-
-
-# These remain as a transition shim returning the legacy dict shapes. The SQL
-# now lives in SegmentRepository / GlossaryRepository.
-
-
-def get_segment_with_texts(conn, segment_id: int) -> dict | None:
-    """Return the v_segment row for the given segment_id, or None if not found."""
-    seg = SegmentRepository(conn).get_segment(segment_id)
-    if seg is None:
-        return None
-    # Preserve the full eight-key v_segment shape (reply_to/translation_status
-    # always present, even when NULL) that callers built dict(row) from.
-    return {
-        "segment_id": seg.segment_id,
-        "locator_path": seg.locator_path,
-        "element_type": seg.element_type,
-        "reply_to": seg.reply_to,
-        "translation_status": seg.translation_status,
-        "latin": seg.latin,
-        "czech": seg.czech,
-        "english": seg.english,
-    }
-
-
-def get_locked_terms(conn, segment_id: int) -> list[dict]:
-    """Return approved term constraints for a segment as legacy dicts.
-
-    Each entry: {latin_lemma, category, latin_surface, required_slovak, sense_id,
-    version, context_label}. Only approved senses with a SK rendering are included.
-    """
-    return [
-        {
-            "latin_lemma": c.latin_lemma,
-            "category": c.category,
-            "latin_surface": c.latin_surface,
-            "required_slovak": c.required_slovak,
-            "sense_id": c.sense_id,
-            "version": c.version,
-            "context_label": c.context_label,
-        }
-        for c in GlossaryRepository(conn).locked_terms(segment_id)
-    ]
-
-
-def write_segment_text(conn, segment_id: int, lang: str, src_id: int, content: str) -> None:
-    SegmentRepository(conn).write_segment_text(segment_id, lang, src_id, content)
-
-
-def update_translation_status(conn, segment_id: int, status: str) -> None:
-    SegmentRepository(conn).update_translation_status(segment_id, status)
-
-
-def write_reviewer_notes(conn, segment_id: int, notes: dict, iteration: int) -> None:
-    SegmentRepository(conn).write_reviewer_notes(segment_id, notes, iteration)
-
-
-def update_sense_version_used(conn, segment_id: int, sense_id: int, version: int) -> None:
-    SegmentRepository(conn).update_sense_version_used(segment_id, sense_id, version)
-
-
 # ── Term lookup ───────────────────────────────────────────────────────────────
 
 _SUFFIX_RE = re.compile(r"\d+$")
@@ -234,44 +172,37 @@ def translate_segment(
     Raises RuntimeError only if the segment is not found in DB.
     """
     outcome = SegmentOutcome(segment_id=segment_id)
-    seg = get_segment_with_texts(conn, segment_id)
+    seg_repo = SegmentRepository(conn)
+    seg = seg_repo.get_segment(segment_id)
     if seg is None:
         raise RuntimeError(f"segment_id={segment_id} not found in DB")
     _title_types = ("article_title", "question_title")
-    if not seg.get("latin") and not (seg.get("element_type") in _title_types and seg.get("english")):
+    if not seg.latin and not (seg.element_type in _title_types and seg.english):
         log.error("segment_id=%d: no Latin text in DB; flagging needs_human", segment_id)
-        update_translation_status(conn, segment_id, "needs_human")
+        seg_repo.update_translation_status(segment_id, "needs_human")
         conn.commit()
         outcome.failure_classes.append({"iter": 0, "class": "no_source_text"})
         return "needs_human", [], outcome
 
-    locked_terms = get_locked_terms(conn, segment_id)
-    constraints = [
-        {
-            # For formula terms, show the human-readable Latin surface (e.g.
-            # "Ad nonum sic proceditur") rather than the slug key.
-            "latin_lemma": t.get("latin_surface") or t["latin_lemma"],
-            "required_slovak": t["required_slovak"],
-            "context_label": t.get("context_label"),
-            "category": t.get("category") or "term",
-        }
-        for t in locked_terms
-    ]
+    locked_terms = GlossaryRepository(conn).locked_terms(segment_id)
+    # For formula terms, to_prompt_dict shows the human-readable Latin surface
+    # (e.g. "Ad nonum sic proceditur") rather than the slug key; NULL category → "term".
+    constraints = [c.to_prompt_dict() for c in locked_terms]
     # 'habitum est' is a form of habere, not the noun habitus — drop constraints
     # that have no other textual evidence, for translator, precheck and reviewer alike.
-    constraints = _drop_habere_ppp_constraints(seg.get("latin") or "", constraints)
+    constraints = _drop_habere_ppp_constraints(seg.latin or "", constraints)
     # Surface-form constraints for the translator: CLTK maps each approved lemma
     # to the inflected forms that actually appear in this segment's Latin text,
     # so the model sees e.g. 'rationem → rozum' rather than 'ratio → rozum'.
     # The reviewer still receives lemma-form constraints (more semantic for auditing).
-    translator_constraints = _build_surface_constraints(seg.get("latin") or "", constraints)
+    translator_constraints = _build_surface_constraints(seg.latin or "", constraints)
 
     src_model = source_id(conn, "model")
 
     # Multi-turn message history.  Starts as [system, user]; on each retry the
     # caller appends [assistant: prior_draft, user: feedback] so the model sees
     # its own output as a real assistant turn and the correction as a real user turn.
-    messages: list[dict] = build_initial_messages(seg, translator_constraints)
+    messages: list[dict] = build_initial_messages(seg.as_dict(), translator_constraints)
 
     last_feedback: str | None = None            # most-recent feedback; for reviewer_notes on exhausted path
     precheck_passing_draft: str | None = None   # last draft that cleared ALL pre-checks
@@ -279,7 +210,7 @@ def translate_segment(
     fallback_draft: str | None = None           # any draft produced; absolute last resort
     fallback_iter: int | None = None
     usages: list[UsageInfo] = []
-    locator = seg.get("locator_path", "")
+    locator = seg.locator_path
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         outcome.iterations_used = iteration
@@ -331,14 +262,14 @@ def translate_segment(
         precheck_passing_draft = draft
         precheck_passing_iter = iteration
 
-        latin = seg.get("latin") or ""
+        latin = seg.latin or ""
         if not latin:
-            if seg.get("element_type") in _title_types and precheck_passing_draft is not None:
+            if seg.element_type in _title_types and precheck_passing_draft is not None:
                 # Title segments have no Latin — accept the precheck-passing draft directly.
-                write_segment_text(conn, segment_id, "sk", src_model, precheck_passing_draft)
-                update_translation_status(conn, segment_id, "translated")
+                seg_repo.write_segment_text(segment_id, "sk", src_model, precheck_passing_draft)
+                seg_repo.update_translation_status(segment_id, "translated")
                 for term in locked_terms:
-                    update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
+                    seg_repo.update_sense_version_used(segment_id, term.sense_id, term.version)
                 conn.commit()
                 log.info("segment_id=%d title translated (reviewer skipped — no Latin)", segment_id)
                 outcome.chosen_iteration = iteration
@@ -346,8 +277,8 @@ def translate_segment(
             log.error("segment_id=%d iteration=%d: missing Latin text; skipping R1", segment_id, iteration)
             break
 
-        czech = seg.get("czech")
-        english = seg.get("english")
+        czech = seg.czech
+        english = seg.english
         reviewer_turn = build_reviewer_turn(latin, draft, constraints, czech=czech, english=english) if prompt_log else ""
 
         review = None
@@ -384,12 +315,12 @@ def translate_segment(
             )
 
         if review.verdict in ("APPROVED", "APPROVED_WITH_NOTES"):
-            write_segment_text(conn, segment_id, "sk", src_model, draft)
-            update_translation_status(conn, segment_id, "translated")
+            seg_repo.write_segment_text(segment_id, "sk", src_model, draft)
+            seg_repo.update_translation_status(segment_id, "translated")
             if review.notes:
-                write_reviewer_notes(conn, segment_id, review.notes, iteration)
+                seg_repo.write_reviewer_notes(segment_id, review.notes, iteration)
             for term in locked_terms:
-                update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
+                seg_repo.update_sense_version_used(segment_id, term.sense_id, term.version)
             conn.commit()
             log.info("segment_id=%d translated in %d iteration(s)", segment_id, iteration)
             if prompt_log:
@@ -421,7 +352,7 @@ def translate_segment(
         # No draft was ever produced (e.g., translator raised on every iteration).
         # Still mark needs_human so the segment doesn't stay stuck as 'pending'.
         log.error("segment_id=%d: no draft produced; marking needs_human", segment_id)
-        update_translation_status(conn, segment_id, "needs_human")
+        seg_repo.update_translation_status(segment_id, "needs_human")
         conn.commit()
         if prompt_log:
             prompt_log.log_final(
@@ -433,15 +364,15 @@ def translate_segment(
             )
         return "needs_human", usages, outcome
 
-    write_segment_text(conn, segment_id, "sk", src_model, final_draft)
-    update_translation_status(conn, segment_id, "needs_human")
+    seg_repo.write_segment_text(segment_id, "sk", src_model, final_draft)
+    seg_repo.update_translation_status(segment_id, "needs_human")
     notes_payload: dict = {}
     if last_feedback:
         notes_payload["last_feedback"] = last_feedback
     if notes_payload:
-        write_reviewer_notes(conn, segment_id, notes_payload, chosen_iter or MAX_ITERATIONS)
+        seg_repo.write_reviewer_notes(segment_id, notes_payload, chosen_iter or MAX_ITERATIONS)
     for term in locked_terms:
-        update_sense_version_used(conn, segment_id, term["sense_id"], term["version"])
+        seg_repo.update_sense_version_used(segment_id, term.sense_id, term.version)
     conn.commit()
     log.warning("segment_id=%d flagged needs_human after %d iterations", segment_id, MAX_ITERATIONS)
     if prompt_log:

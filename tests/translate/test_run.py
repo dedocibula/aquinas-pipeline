@@ -208,24 +208,31 @@ def test_write_needs_human_report_creates_file(tmp_path, monkeypatch):
 
 # ── rerun_stale human-edit guard ──────────────────────────────────────────────
 # rerun_stale.fn bypasses the Prefect engine so the flow body runs as plain Python.
+# Stale/human-edit/flag/reset queries are SegmentRepository methods; patching them
+# on the class means the mocks are called without `self`, so flag_needs_human args
+# are (segment_ids, note) and reset_translation_status args are (segment_ids,).
+_PATCH_STALE = "translate.run.SegmentRepository.get_stale_segments"
+_PATCH_HUMAN_EDITED = "translate.run.SegmentRepository.get_human_edited_segments"
+_PATCH_FLAG = "translate.run.SegmentRepository.flag_needs_human"
+_PATCH_RESET = "translate.run.SegmentRepository.reset_translation_status"
 
 
 def test_rerun_stale_guards_human_edited_segments():
     """Human-edited stale segments are flagged, the rest reset and re-translated."""
     with (
         patch("translate.run.get_conn"),
-        patch("translate.run.get_stale_segments", return_value=[1, 2, 3]),
-        patch("translate.run.get_human_edited_segments", return_value=[2]),
-        patch("translate.run.flag_needs_human") as mock_flag,
-        patch("translate.run.reset_translation_status") as mock_reset,
+        patch(_PATCH_STALE, return_value=[1, 2, 3]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[2]),
+        patch(_PATCH_FLAG) as mock_flag,
+        patch(_PATCH_RESET) as mock_reset,
         patch("translate.run.translate_corpus") as mock_translate,
     ):
         rerun_stale.fn(work_id=1)
 
-    flagged_ids = mock_flag.call_args.args[1]
+    flagged_ids = mock_flag.call_args.args[0]
     assert flagged_ids == [2]
-    assert "human edit" in mock_flag.call_args.args[2]
-    reset_ids = mock_reset.call_args.args[1]
+    assert "human edit" in mock_flag.call_args.args[1]
+    reset_ids = mock_reset.call_args.args[0]
     assert reset_ids == [1, 3]
     mock_translate.assert_called_once_with(1, flow_name="rerun_stale")
 
@@ -234,10 +241,10 @@ def test_rerun_stale_all_human_edited_skips_translation():
     """When every stale segment is human-edited, nothing is reset or re-translated."""
     with (
         patch("translate.run.get_conn"),
-        patch("translate.run.get_stale_segments", return_value=[2]),
-        patch("translate.run.get_human_edited_segments", return_value=[2]),
-        patch("translate.run.flag_needs_human") as mock_flag,
-        patch("translate.run.reset_translation_status") as mock_reset,
+        patch(_PATCH_STALE, return_value=[2]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[2]),
+        patch(_PATCH_FLAG) as mock_flag,
+        patch(_PATCH_RESET) as mock_reset,
         patch("translate.run.translate_corpus") as mock_translate,
     ):
         rerun_stale.fn(work_id=1)
@@ -251,9 +258,9 @@ def test_rerun_stale_no_stale_segments_noop():
     """No stale segments: no flagging, no reset, no translation."""
     with (
         patch("translate.run.get_conn"),
-        patch("translate.run.get_stale_segments", return_value=[]),
-        patch("translate.run.flag_needs_human") as mock_flag,
-        patch("translate.run.reset_translation_status") as mock_reset,
+        patch(_PATCH_STALE, return_value=[]),
+        patch(_PATCH_FLAG) as mock_flag,
+        patch(_PATCH_RESET) as mock_reset,
         patch("translate.run.translate_corpus") as mock_translate,
     ):
         rerun_stale.fn(work_id=1)
@@ -279,24 +286,30 @@ def test_prompt_hash_deterministic_and_sensitive(tmp_path, monkeypatch):
 
 
 def test_open_run_inserts_row_and_returns_id():
+    """_open_run delegates to RunRepository and returns its run_id.
+
+    The INSERT SQL itself is covered by tests/storage/test_run_repo.py.
+    """
     from translate.run import _open_run
 
     with (
-        patch("translate.run.get_conn") as mock_gc,
+        patch("translate.run.get_conn"),
         patch("translate.run._git_sha", return_value="abc1234"),
         patch("translate.run._prompt_hash", return_value="deadbeef"),
-        patch("translate.run._glossary_snapshot", return_value={"approved_senses": 10}),
+        patch("translate.run.RunRepository") as mock_repo_cls,
     ):
-        conn = mock_gc.return_value.__enter__.return_value
-        cur = conn.cursor.return_value.__enter__.return_value
-        cur.fetchone.return_value = (7,)
+        repo = mock_repo_cls.return_value
+        repo.glossary_snapshot.return_value = {"approved_senses": 10}
+        repo.open_run.return_value = 7
         run_id = _open_run("translate_corpus", ["I"], 20, max_workers=10)
 
     assert run_id == 7
-    sql, params = cur.execute.call_args.args
-    assert "INSERT INTO translation_run" in sql
-    assert params[0] == "translate_corpus"
-    assert params[1] == "abc1234"
+    kwargs = repo.open_run.call_args.kwargs
+    assert kwargs["flow_name"] == "translate_corpus"
+    assert kwargs["git_sha"] == "abc1234"
+    assert kwargs["prompt_hash"] == "deadbeef"
+    assert kwargs["snapshot"] == {"approved_senses": 10}
+    assert kwargs["filters"] == {"pars": ["I"], "max_question": 20}
 
 
 def test_close_run_bulk_inserts_segments_and_totals():
@@ -350,7 +363,7 @@ def test_translate_article_task_builds_segment_records():
     with (
         patch("translate.run.get_conn"),
         patch(
-            "translate.run.get_pending_segment_ids_for_article",
+            "translate.run.SegmentRepository.get_pending_segment_ids_for_article",
             return_value=[11],
         ),
         patch(

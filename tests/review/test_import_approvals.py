@@ -4,8 +4,6 @@ Tests for src/review/import_approvals.py — pure logic, no real gspread, no DB.
 
 from __future__ import annotations
 
-import re
-
 from review.import_approvals import (
     COLS,
     get_current_sense,
@@ -16,54 +14,12 @@ from review.import_approvals import (
 )
 from review.sheets import HEADER
 
-# ── Fake objects ──────────────────────────────────────────────────────────────
+# DB and worksheet fakes come from the shared fixtures in tests/conftest.py
+# (fake_conn / fake_worksheet). FakeConn shares one cursor across cursor()
+# calls, so executed/fetchone sequencing accumulates exactly as the real code
+# threads multiple cursors over one connection.
 
-
-def _norm(sql: str) -> str:
-    return re.sub(r"\s+", " ", sql).strip()
-
-
-class FakeCursor:
-    def __init__(self, results: list):
-        self._results = list(results)
-        self._idx = 0
-        self.executed: list[tuple] = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def execute(self, sql, params=None):
-        self.executed.append((_norm(sql), params or ()))
-
-    def fetchone(self):
-        if self._idx < len(self._results):
-            val = self._results[self._idx]
-            self._idx += 1
-            return val
-        return None
-
-
-class FakeConn:
-    def __init__(self, fetchone_results: list | None = None):
-        self._cursor = FakeCursor(fetchone_results or [])
-
-    def cursor(self):
-        return self._cursor
-
-    @property
-    def executed(self):
-        return self._cursor.executed
-
-
-class FakeWorksheet:
-    def __init__(self, rows: list[list]):
-        self._rows = rows
-
-    def get_all_values(self):
-        return list(self._rows)
+# ── Sheet row helper ──────────────────────────────────────────────────────────
 
 
 def _make_sheet_row(
@@ -89,14 +45,14 @@ def _make_sheet_row(
 # ── load_approved_rows ────────────────────────────────────────────────────────
 
 
-def test_load_approved_rows_skips_header():
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(approved="TRUE")])
+def test_load_approved_rows_skips_header(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(approved="TRUE")])
     rows = load_approved_rows(ws)
     assert len(rows) == 1
 
 
-def test_load_approved_rows_filters_unticked():
-    ws = FakeWorksheet(rows=[
+def test_load_approved_rows_filters_unticked(fake_worksheet):
+    ws = fake_worksheet(rows=[
         HEADER,
         _make_sheet_row(approved="TRUE", sense_id=1),
         _make_sheet_row(approved="FALSE", sense_id=2),
@@ -107,82 +63,82 @@ def test_load_approved_rows_filters_unticked():
     assert rows[0]["sense_id"] == 1
 
 
-def test_load_approved_rows_truthy_variants():
+def test_load_approved_rows_truthy_variants(fake_worksheet):
     for val in ("TRUE", "True", "true", "1", "YES", "yes"):
-        ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(approved=val, sense_id=99)])
+        ws = fake_worksheet(rows=[HEADER, _make_sheet_row(approved=val, sense_id=99)])
         rows = load_approved_rows(ws)
         assert len(rows) == 1, f"Expected 1 row for approved={val!r}"
 
 
-def test_load_approved_rows_no_dead_is_not_true_branch():
+def test_load_approved_rows_no_dead_is_not_true_branch(fake_worksheet):
     """Approved filtering uses only _TRUTHY set — no identity check on True."""
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(approved="FALSE", sense_id=5)])
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(approved="FALSE", sense_id=5)])
     rows = load_approved_rows(ws)
     assert rows == []
 
 
-def test_load_approved_rows_skips_blank_sense_id():
+def test_load_approved_rows_skips_blank_sense_id(fake_worksheet):
     row = _make_sheet_row(approved="TRUE")
     row[COLS["sense_id"]] = ""
-    ws = FakeWorksheet(rows=[HEADER, row])
+    ws = fake_worksheet(rows=[HEADER, row])
     assert load_approved_rows(ws) == []
 
 
-def test_load_approved_rows_parses_ints():
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(sense_id=42, db_version=3)])
+def test_load_approved_rows_parses_ints(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(sense_id=42, db_version=3)])
     rows = load_approved_rows(ws)
     assert rows[0]["sense_id"] == 42
     assert rows[0]["db_version"] == 3
 
 
-def test_load_approved_rows_blank_db_version_parses_as_none():
+def test_load_approved_rows_blank_db_version_parses_as_none(fake_worksheet):
     row = _make_sheet_row(approved="TRUE")
     row[COLS["db_version"]] = ""
-    ws = FakeWorksheet(rows=[HEADER, row])
+    ws = fake_worksheet(rows=[HEADER, row])
     rows = load_approved_rows(ws)
     assert rows[0]["db_version"] is None
 
 
-def test_load_approved_rows_returns_proposed_slovak():
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(proposed_slovak="milosť")])
+def test_load_approved_rows_returns_proposed_slovak(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(proposed_slovak="milosť")])
     rows = load_approved_rows(ws)
     assert rows[0]["proposed_slovak"] == "milosť"
 
 
-def test_load_approved_rows_returns_context_label():
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(context_label="sanctifying grace")])
+def test_load_approved_rows_returns_context_label(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(context_label="sanctifying grace")])
     rows = load_approved_rows(ws)
     assert rows[0]["context_label"] == "sanctifying grace"
 
 
-def test_load_approved_rows_empty_context_label():
-    ws = FakeWorksheet(rows=[HEADER, _make_sheet_row(context_label="")])
+def test_load_approved_rows_empty_context_label(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(context_label="")])
     rows = load_approved_rows(ws)
     assert rows[0]["context_label"] == ""
 
 
-def test_load_approved_rows_empty_sheet():
-    ws = FakeWorksheet(rows=[HEADER])
+def test_load_approved_rows_empty_sheet(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER])
     assert load_approved_rows(ws) == []
 
 
 # ── get_current_sense ─────────────────────────────────────────────────────────
 
 
-def test_get_current_sense_returns_dict():
-    conn = FakeConn(fetchone_results=[(101, 2, "proposed")])
+def test_get_current_sense_returns_dict(fake_conn):
+    conn = fake_conn(fetchone_results=[(101, 2, "proposed")])
     result = get_current_sense(conn, 101)
     assert result == {"sense_id": 101, "version": 2, "status": "proposed"}
 
 
-def test_get_current_sense_returns_none_when_missing():
-    conn = FakeConn(fetchone_results=[None])
+def test_get_current_sense_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
     result = get_current_sense(conn, 999)
     assert result is None
 
 
-def test_get_current_sense_queries_correct_table():
-    conn = FakeConn(fetchone_results=[(1, 1, "proposed")])
+def test_get_current_sense_queries_correct_table(fake_conn):
+    conn = fake_conn(fetchone_results=[(1, 1, "proposed")])
     get_current_sense(conn, 5)
     sql, params = conn.executed[0]
     assert "glossary_sense" in sql
@@ -202,9 +158,9 @@ def _row(sense_id=101, proposed_slovak="rozum", db_version=1, latin_lemma="ratio
     }
 
 
-def test_process_approval_ok_proposed_sense_bumps():
+def test_process_approval_ok_proposed_sense_bumps(fake_conn):
     """Approving a proposed sense returns OK and always bumps the version."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),   # get_current_sense
         (2,),                   # bump_sense_version RETURNING version
     ])
@@ -213,9 +169,9 @@ def test_process_approval_ok_proposed_sense_bumps():
     assert bumped is True
 
 
-def test_process_approval_version_mismatch_proceeds():
+def test_process_approval_version_mismatch_proceeds(fake_conn):
     """A version mismatch on a proposed sense is no longer a conflict — approval proceeds."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 3, "proposed"),   # DB version 3, sheet has 1 — mismatch, but still proposed
         (4,),                   # bump_sense_version RETURNING version
     ])
@@ -224,9 +180,9 @@ def test_process_approval_version_mismatch_proceeds():
     assert bumped is True
 
 
-def test_process_approval_blank_db_version_is_conflict():
+def test_process_approval_blank_db_version_is_conflict(fake_conn):
     """Blank db_version (None) must be treated as CONFLICT, not bypass."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
     ])
     status, bumped = process_approval(conn, _row(db_version=None), human_src_id=6)
@@ -235,9 +191,9 @@ def test_process_approval_blank_db_version_is_conflict():
     assert len(conn.executed) == 1
 
 
-def test_process_approval_already_confirmed_on_rerun():
+def test_process_approval_already_confirmed_on_rerun(fake_conn):
     """Re-run: version bumped by prior import → approved + version mismatch → ALREADY_CONFIRMED."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 2, "approved"),   # DB version 2, sheet still has 1 from before first import
     ])
     status, bumped = process_approval(conn, _row(db_version=1), human_src_id=6)
@@ -245,16 +201,16 @@ def test_process_approval_already_confirmed_on_rerun():
     assert bumped is False
 
 
-def test_process_approval_not_found():
-    conn = FakeConn(fetchone_results=[None])
+def test_process_approval_not_found(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
     status, bumped = process_approval(conn, _row(sense_id=999), human_src_id=6)
     assert status == "NOT_FOUND"
     assert bumped is False
     assert len(conn.executed) == 1
 
 
-def test_process_approval_writes_human_rendering():
-    conn = FakeConn(fetchone_results=[
+def test_process_approval_writes_human_rendering(fake_conn):
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),   # get_current_sense
         ("rozum",),             # get_model_rendering (same → no bump)
     ])
@@ -267,8 +223,8 @@ def test_process_approval_writes_human_rendering():
     assert 6 in params
 
 
-def test_process_approval_updates_status_to_approved():
-    conn = FakeConn(fetchone_results=[
+def test_process_approval_updates_status_to_approved(fake_conn):
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("rozum",),
     ])
@@ -280,9 +236,9 @@ def test_process_approval_updates_status_to_approved():
     assert any("approved" in str(p) for p in status_params)
 
 
-def test_process_approval_krystal_term_bumps_when_reviewer_edits():
+def test_process_approval_krystal_term_bumps_when_reviewer_edits(fake_conn):
     """Krystal term: if reviewer changes proposed_slovak → version bumps."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),     # version matches
         ("bytie",),               # Krystal rendering
         (2,),                     # bump_sense_version RETURNING
@@ -295,9 +251,9 @@ def test_process_approval_krystal_term_bumps_when_reviewer_edits():
 # ── process_approval — context_label write-back ───────────────────────────────
 
 
-def test_process_approval_writes_context_label():
+def test_process_approval_writes_context_label(fake_conn):
     """A non-empty context_label in the row is written to glossary_sense."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("rozum",),
     ])
@@ -311,9 +267,9 @@ def test_process_approval_writes_context_label():
     assert params == ("sanctifying grace", 101)
 
 
-def test_process_approval_empty_context_label_writes_null():
+def test_process_approval_empty_context_label_writes_null(fake_conn):
     """Empty string context_label writes NULL, not empty string."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("rozum",),
     ])
@@ -330,20 +286,20 @@ def test_process_approval_empty_context_label_writes_null():
 # ── get_la_surface ────────────────────────────────────────────────────────────
 
 
-def test_get_la_surface_returns_content():
-    conn = FakeConn(fetchone_results=[("Sed contra",)])
+def test_get_la_surface_returns_content(fake_conn):
+    conn = fake_conn(fetchone_results=[("Sed contra",)])
     result = get_la_surface(conn, 101)
     assert result == "Sed contra"
 
 
-def test_get_la_surface_returns_none_when_missing():
-    conn = FakeConn(fetchone_results=[None])
+def test_get_la_surface_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
     result = get_la_surface(conn, 101)
     assert result is None
 
 
-def test_get_la_surface_queries_glossary_term():
-    conn = FakeConn(fetchone_results=[("Sed contra",)])
+def test_get_la_surface_queries_glossary_term(fake_conn):
+    conn = fake_conn(fetchone_results=[("Sed contra",)])
     get_la_surface(conn, 55)
     sql, params = conn.executed[0]
     assert "glossary_term" in sql
@@ -354,8 +310,8 @@ def test_get_la_surface_queries_glossary_term():
 # ── write_human_surface ───────────────────────────────────────────────────────
 
 
-def test_write_human_surface_updates_glossary_term():
-    conn = FakeConn()
+def test_write_human_surface_updates_glossary_term(fake_conn):
+    conn = fake_conn()
     write_human_surface(conn, 101, "Respondeo dicendum quod", 7)
     sql, params = conn.executed[0]
     assert "UPDATE glossary_term" in sql
@@ -364,8 +320,8 @@ def test_write_human_surface_updates_glossary_term():
     assert 101 in params
 
 
-def test_write_human_surface_targets_correct_term():
-    conn = FakeConn()
+def test_write_human_surface_targets_correct_term(fake_conn):
+    conn = fake_conn()
     write_human_surface(conn, 55, "Sed contra", 7)
     sql, params = conn.executed[0]
     assert "glossary_sense" in sql  # resolves sense_id → term_id
@@ -388,9 +344,9 @@ def _row_with_surface(**overrides):
     return base
 
 
-def test_process_approval_latin_text_unchanged_no_surface_write():
+def test_process_approval_latin_text_unchanged_no_surface_write(fake_conn):
     """When latin_text matches current LA surface, no write is performed."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),   # get_current_sense
         ("rozum",),             # get_model_rendering (same SK content)
         ("ratio",),             # get_la_surface → same as latin_text
@@ -401,9 +357,9 @@ def test_process_approval_latin_text_unchanged_no_surface_write():
     assert len(updates_la) == 0
 
 
-def test_process_approval_latin_text_changed_writes_la_surface():
+def test_process_approval_latin_text_changed_writes_la_surface(fake_conn):
     """When latin_text differs from DB LA surface, glossary_term.la_surface is updated."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),                   # get_current_sense
         ("rozum",),                             # get_model_rendering (same → no SK bump)
         ("old_ratio",),                         # get_la_surface → different
@@ -415,9 +371,9 @@ def test_process_approval_latin_text_changed_writes_la_surface():
     assert len(updates_la) == 1
 
 
-def test_process_approval_latin_text_changed_multiword_bumps_version():
+def test_process_approval_latin_text_changed_multiword_bumps_version(fake_conn):
     """LA surface change for a multiword term triggers a version bump."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("actus essendi",), # same SK
         ("old surface",),   # different LA surface
@@ -429,9 +385,9 @@ def test_process_approval_latin_text_changed_multiword_bumps_version():
     assert bumped is True
 
 
-def test_process_approval_latin_text_changed_formula_bumps_version():
+def test_process_approval_latin_text_changed_formula_bumps_version(fake_conn):
     """LA surface change for a formula term triggers a version bump."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("Odpovedám",),         # same SK
         ("old formula",),       # different LA surface
@@ -443,9 +399,9 @@ def test_process_approval_latin_text_changed_formula_bumps_version():
     assert bumped is True
 
 
-def test_process_approval_sk_and_la_change_only_bumps_once():
+def test_process_approval_sk_and_la_change_only_bumps_once(fake_conn):
     """If both SK and LA changed, version is bumped once (SK bump already covers it)."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("old_rozum",),         # different SK → SK bump
         (3,),                   # bump_sense_version RETURNING
@@ -460,9 +416,9 @@ def test_process_approval_sk_and_la_change_only_bumps_once():
     assert len(bump_calls) == 1
 
 
-def test_process_approval_empty_latin_text_skips_la_processing():
+def test_process_approval_empty_latin_text_skips_la_processing(fake_conn):
     """Empty or blank latin_text is treated as None — LA processing is skipped."""
-    conn = FakeConn(fetchone_results=[
+    conn = fake_conn(fetchone_results=[
         (101, 1, "proposed"),
         ("rozum",),
     ])

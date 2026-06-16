@@ -16,9 +16,9 @@ Prerequisites:
 
 from __future__ import annotations
 
-from common.glossary_repo import bump_sense_version, update_sense_status, write_human_rendering
 from review.sheets import authenticate, get_spreadsheet_id
 from storage.db import get_conn, source_id
+from storage.repositories import GlossaryRepository
 
 _REVIEW_TAB = "Review"
 
@@ -138,7 +138,8 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     # (e.g. sense-mining re-resolution). The human has seen this sense and explicitly
     # approved it, so proceed unconditionally.
 
-    write_human_rendering(conn, sense_id_val, new_slovak, human_src_id)
+    glossary = GlossaryRepository(conn)
+    glossary.write_human_rendering(sense_id_val, new_slovak, human_src_id)
 
     # Write context_label — empty string becomes NULL; does NOT bump version.
     raw_label = (row.get("context_label") or "").strip()
@@ -150,7 +151,7 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
 
     # Always bump on approval: marks all term_usage rows using any prior version
     # as stale so rerun_stale picks them up.
-    bump_sense_version(conn, sense_id_val)
+    glossary.bump_sense_version(sense_id_val)
 
     # LA surface — write if reviewer supplied one; approval bump already covers rerun.
     new_surface = (row.get("latin_text") or "").strip() or None
@@ -159,7 +160,7 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
         if new_surface != current_surface:
             write_human_surface(conn, sense_id_val, new_surface, human_src_id)
 
-    update_sense_status(conn, sense_id_val, "approved")
+    glossary.update_sense_status(sense_id_val, "approved")
     return "OK", True
 
 

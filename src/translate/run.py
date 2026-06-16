@@ -34,18 +34,9 @@ from pathlib import Path
 from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
 
-from common.corpus_db import (
-    flag_needs_human,
-    get_all_article_locators,
-    get_human_edited_segments,
-    get_pending_segment_ids_for_article,
-    get_stale_segments,
-    has_pending_segments,
-    reset_translation_status,
-)
 from common.pricing import UsageInfo
 from storage.db import get_conn
-from storage.repositories import RunRepository
+from storage.repositories import RunRepository, SegmentRepository
 from translate.loop import translate_segment
 
 log = logging.getLogger(__name__)
@@ -123,10 +114,6 @@ def _prompt_hash() -> str:
     return h.hexdigest()
 
 
-def _glossary_snapshot(conn) -> dict:
-    return RunRepository(conn).glossary_snapshot()
-
-
 def _open_run(
     flow_name: str,
     pars: list[str] | None,
@@ -135,7 +122,8 @@ def _open_run(
 ) -> int:
     """Insert a translation_run row at flow start; return its run_id.
 
-    finished_at stays NULL until _close_run — a crashed run is recognizable.
+    finished_at stays NULL until _close_run — a crashed run is recognizable (the
+    run row carries a glossary snapshot of approved-sense count and max version).
     """
     from translate.reviewer import _DEEPSEEK_R1_MODEL
     from translate.translator import _DEEPSEEK_MODEL, TRANSLATOR_TEMPERATURE
@@ -145,8 +133,9 @@ def _open_run(
         filters = {"pars": pars, "max_question": max_question}
 
     with get_conn() as conn:
-        snapshot = _glossary_snapshot(conn)
-        run_id = RunRepository(conn).open_run(
+        repo = RunRepository(conn)
+        snapshot = repo.glossary_snapshot()
+        run_id = repo.open_run(
             flow_name=flow_name,
             git_sha=_git_sha(),
             prompt_hash=_prompt_hash(),
@@ -199,8 +188,8 @@ def translate_article_task(
     """
     result = ArticleResult(locator=locator_prefix)
     with get_conn() as conn:
-        segment_ids = get_pending_segment_ids_for_article(
-            conn, locator_prefix, work_id, segment_filter
+        segment_ids = SegmentRepository(conn).get_pending_segment_ids_for_article(
+            locator_prefix, work_id, segment_filter
         )
 
     for seg_id in segment_ids:
@@ -252,11 +241,12 @@ def translate_corpus(
     t_start = time.monotonic()
 
     with get_conn() as conn:
-        article_locators = get_all_article_locators(conn, work_id)
+        seg_repo = SegmentRepository(conn)
+        article_locators = seg_repo.get_all_article_locators(work_id)
         article_locators = _filter_locators(article_locators, pars, max_question)
         pending = [
             a for a in article_locators
-            if has_pending_segments(conn, a, work_id, segment_filter)
+            if seg_repo.has_pending_segments(a, work_id, segment_filter)
         ]
 
     log.info(
@@ -295,19 +285,19 @@ def rerun_stale(work_id: int = 1) -> None:
     holds under the updated term.
     """
     with get_conn() as conn:
-        stale = get_stale_segments(conn, work_id)
+        seg_repo = SegmentRepository(conn)
+        stale = seg_repo.get_stale_segments(work_id)
         if not stale:
             log.info("No stale segments — nothing to do.")
             return
 
-        human_edited = set(get_human_edited_segments(conn, stale))
+        human_edited = set(seg_repo.get_human_edited_segments(stale))
         if human_edited:
             log.info(
                 "Guarding %d human-edited stale segments (flagged needs_human, not reset)",
                 len(human_edited),
             )
-            flag_needs_human(
-                conn,
+            seg_repo.flag_needs_human(
                 sorted(human_edited),
                 "term updated after human edit — verify the edit still holds",
             )
@@ -317,7 +307,7 @@ def rerun_stale(work_id: int = 1) -> None:
             log.info("All stale segments are human-edited — nothing to re-translate.")
             return
         log.info("Resetting %d stale segments to pending", len(to_reset))
-        reset_translation_status(conn, to_reset)
+        seg_repo.reset_translation_status(to_reset)
 
     translate_corpus(work_id, flow_name="rerun_stale")
 
@@ -332,6 +322,7 @@ def retranslate_body(work_id: int = 1) -> None:
     the larger pool of never-translated pending segments.
     """
     with get_conn() as conn:
+        seg_repo = SegmentRepository(conn)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -349,14 +340,13 @@ def retranslate_body(work_id: int = 1) -> None:
             log.info("No translated body segments — nothing to do.")
             return
 
-        human_edited = set(get_human_edited_segments(conn, body_ids))
+        human_edited = set(seg_repo.get_human_edited_segments(body_ids))
         if human_edited:
             log.info(
                 "Guarding %d human-edited segments (flagged needs_human, not reset)",
                 len(human_edited),
             )
-            flag_needs_human(
-                conn,
+            seg_repo.flag_needs_human(
                 sorted(human_edited),
                 "retranslate_body: human edit preserved — verify under updated constraints",
             )
@@ -367,7 +357,7 @@ def retranslate_body(work_id: int = 1) -> None:
             return
 
         log.info("Resetting %d translated body segments to pending", len(to_reset))
-        reset_translation_status(conn, to_reset)
+        seg_repo.reset_translation_status(to_reset)
 
     translate_corpus(
         work_id,

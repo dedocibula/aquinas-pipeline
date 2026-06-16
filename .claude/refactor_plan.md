@@ -77,7 +77,7 @@ Explore agents + grep). Disposition per the user:
 | 0 — Test net (unify/prune/baseline) | ✅ DONE | baseline green at 745; dead tests pruned; shared conftest added |
 | 1 — Typed models | ✅ DONE | `c126da6`; models.py + 7 tests; 752 passed; v_segment flag resolved |
 | 2 — Repository layer | ✅ DONE | new `src/storage/` (db+models+repositories) holds all SQL; old fns are wrappers; +30 tests; 781 passed; import cycle removed (storage is a leaf) |
-| 2b — Flip callers to models | ⏳ NEXT | resolver/loop consume models directly; retype Resolution.term/.sense; delete wrappers |
+| 2b — Flip callers to models | ✅ DONE (uncommitted) | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. **739 passed; ruff clean.** Remaining (optional follow-up): fold import_approvals' local `get_current_sense`/`get_la_surface`/`write_human_surface` into GlossaryRepository. |
 | 3 — DeepSeek client | ☐ | |
 | 4 — Parser base class | ☐ | |
 | 5 — Pipeline steps + runner + reporting + interactive | ☐ | |

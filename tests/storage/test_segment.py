@@ -71,6 +71,16 @@ def test_update_sense_version_used(fake_conn):
     assert params == (2, 1, 42)
 
 
+def test_write_reviewer_notes_wraps_payload_with_iteration(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).write_reviewer_notes(1, {"raw": "looks good"}, iteration=2)
+    sql, params = conn.executed[-1]
+    assert "UPDATE segment SET reviewer_notes" in sql
+    # The payload is wrapped in psycopg2.extras.Json; iteration is folded in.
+    assert hasattr(params[0], "adapted") or hasattr(params[0], "dumps")
+    assert params[1] == 1
+
+
 # ── corpus-wide queries ────────────────────────────────────────────────────────
 
 

@@ -1,4 +1,9 @@
-"""Tests for src/translate/loop.py — DB helpers and translate_segment orchestration."""
+"""Tests for src/translate/loop.py — translate_segment orchestration.
+
+The DB helpers it used to expose now live in storage.repositories and are
+covered by tests/storage/. These tests patch the repository methods that
+translate_segment calls through SegmentRepository.
+"""
 
 from __future__ import annotations
 
@@ -11,44 +16,12 @@ from translate.loop import (
     _build_surface_constraints,
     _build_terminology_microedit,
     _drop_habere_ppp_constraints,
-    get_locked_terms,
-    get_segment_with_texts,
     translate_segment,
-    update_sense_version_used,
-    update_translation_status,
-    write_reviewer_notes,
-    write_segment_text,
 )
 from translate.prechecks import CheckResult
 from translate.reviewer import ReviewResult
 
 # ── Fake DB helpers ───────────────────────────────────────────────────────────
-
-
-def _fake_cursor(rows=None, *, as_dict=True):
-    """Return a context-manager-compatible cursor mock."""
-    cur = MagicMock()
-    cur.__enter__ = lambda s: s
-    cur.__exit__ = MagicMock(return_value=False)
-    if rows is not None:
-        if as_dict:
-            dict_rows = [dict(r) if not isinstance(r, dict) else r for r in rows]
-            cur.fetchone.return_value = dict_rows[0] if dict_rows else None
-            cur.fetchall.return_value = dict_rows
-        else:
-            cur.fetchone.return_value = rows[0] if rows else None
-            cur.fetchall.return_value = rows
-    else:
-        cur.fetchone.return_value = None
-        cur.fetchall.return_value = []
-    return cur
-
-
-def _fake_conn(rows=None):
-    cur = _fake_cursor(rows)
-    conn = MagicMock()
-    conn.cursor.return_value = cur
-    return conn, cur
 
 
 def _seg_row(**overrides) -> dict:
@@ -96,109 +69,6 @@ def _make_usage(model: str = "deepseek-chat") -> UsageInfo:
 def _t(text: str) -> tuple[str, UsageInfo]:
     """Wrap a draft string as the tuple that call_translator_v3 now returns."""
     return (text, _make_usage())
-
-
-# ── get_segment_with_texts ────────────────────────────────────────────────────
-
-
-def test_get_segment_with_texts_returns_dict():
-    row = _seg_row()
-    conn, cur = _fake_conn([row])
-    result = get_segment_with_texts(conn, 1)
-    assert result == row
-
-
-def test_get_segment_with_texts_returns_none_when_missing():
-    conn, cur = _fake_conn([])
-    result = get_segment_with_texts(conn, 999)
-    assert result is None
-
-
-def test_get_segment_with_texts_passes_segment_id():
-    conn, cur = _fake_conn([_seg_row()])
-    get_segment_with_texts(conn, 7)
-    sql, params = cur.execute.call_args[0]
-    assert params == (7,)
-
-
-# ── get_locked_terms ──────────────────────────────────────────────────────────
-
-
-def test_get_locked_terms_returns_list_of_dicts():
-    rows = [_term_row(), _term_row(latin_lemma="esse", required_slovak="bytie", sense_id=43)]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert len(result) == 2
-    assert result[0]["latin_lemma"] == "ratio"
-
-
-def test_get_locked_terms_empty_when_no_terms():
-    conn, cur = _fake_conn([])
-    result = get_locked_terms(conn, 1)
-    assert result == []
-
-
-def test_get_locked_terms_passes_segment_id():
-    conn, cur = _fake_conn([])
-    get_locked_terms(conn, 5)
-    _, params = cur.execute.call_args[0]
-    assert params == (5,)
-
-
-def test_get_locked_terms_includes_context_label():
-    rows = [_term_row(context_label="sanctifying grace")]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert result[0]["context_label"] == "sanctifying grace"
-
-
-def test_get_locked_terms_context_label_none_when_absent():
-    rows = [_term_row(context_label=None)]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert result[0]["context_label"] is None
-
-
-def test_get_locked_terms_includes_category():
-    """get_locked_terms must return the 'category' field from glossary_term."""
-    rows = [_term_row(category="term")]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert "category" in result[0]
-    assert result[0]["category"] == "term"
-
-
-def test_get_locked_terms_category_none_for_krystal_terms():
-    """category=None (Krystal-seeded terms) is returned unchanged."""
-    rows = [_term_row(category=None)]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert result[0]["category"] is None
-
-
-def test_get_locked_terms_category_formula():
-    """category='formula' is returned correctly for structural formula terms."""
-    rows = [_term_row(latin_lemma="respondeo", required_slovak="Odpovedám", category="formula")]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert result[0]["category"] == "formula"
-
-
-def test_get_locked_terms_includes_latin_surface():
-    """get_locked_terms must return the 'latin_surface' field."""
-    rows = [_term_row(latin_lemma="respondeo", category="formula", latin_surface="Respondeo dicendum quod")]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert "latin_surface" in result[0]
-    assert result[0]["latin_surface"] == "Respondeo dicendum quod"
-
-
-def test_get_locked_terms_latin_surface_none_when_absent():
-    """latin_surface=None is returned correctly when no LA rendering exists."""
-    rows = [_term_row(latin_surface=None)]
-    conn, cur = _fake_conn(rows)
-    result = get_locked_terms(conn, 1)
-    assert result[0]["latin_surface"] is None
 
 
 # ── _build_surface_constraints — context_label passthrough ───────────────────
@@ -293,71 +163,6 @@ def test_drop_habere_ppp_other_constraints_untouched():
     assert result[0]["latin_lemma"] == "gratia"
 
 
-# ── write_segment_text ────────────────────────────────────────────────────────
-
-
-def test_write_segment_text_executes_upsert():
-    conn = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = lambda s: s
-    cur.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cur
-
-    write_segment_text(conn, 1, "sk", 99, "Slovak text here")
-    sql, params = cur.execute.call_args[0]
-    assert "INSERT INTO segment_text" in sql
-    assert "ON CONFLICT" in sql
-    assert params == (1, "sk", "Slovak text here", 99)
-
-
-# ── update_translation_status ─────────────────────────────────────────────────
-
-
-def test_update_translation_status_executes_update():
-    conn = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = lambda s: s
-    cur.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cur
-
-    update_translation_status(conn, 1, "translated")
-    _, params = cur.execute.call_args[0]
-    assert params == ("translated", 1)
-
-
-# ── write_reviewer_notes ──────────────────────────────────────────────────────
-
-
-def test_write_reviewer_notes_includes_iteration():
-    conn = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = lambda s: s
-    cur.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cur
-
-    write_reviewer_notes(conn, 1, {"raw": "looks good"}, iteration=2)
-    _, params = cur.execute.call_args[0]
-    payload_arg = params[0]
-    assert hasattr(payload_arg, "adapted") or hasattr(payload_arg, "dumps")
-    # psycopg2.extras.Json wraps the dict; verify the underlying data
-    assert params[1] == 1
-
-
-# ── update_sense_version_used ─────────────────────────────────────────────────
-
-
-def test_update_sense_version_used_executes_update():
-    conn = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = lambda s: s
-    cur.__exit__ = MagicMock(return_value=False)
-    conn.cursor.return_value = cur
-
-    update_sense_version_used(conn, segment_id=1, sense_id=42, version=3)
-    _, params = cur.execute.call_args[0]
-    assert params == (3, 1, 42)
-
-
 # ── translate_segment — setup helpers ─────────────────────────────────────────
 
 
@@ -386,6 +191,15 @@ _PATCH_TRANSLATOR = "translate.loop.call_translator_v3"
 _PATCH_REVIEWER = "translate.loop.call_reviewer_r1"
 _PATCH_TERMINOLOGY = "translate.loop.check_terminology_lemma"
 _PATCH_SOURCE_ID = "translate.loop.source_id"
+
+# Writes go through SegmentRepository; patch the bound methods on the class.
+# Patched class methods do NOT receive `self`, so call_args reflect the
+# repository signature directly (no conn): write_segment_text(segment_id,
+# lang, src_id, content); update_sense_version_used(segment_id, sense_id,
+# version); write_reviewer_notes(segment_id, notes, iteration).
+_PATCH_WRITE_TEXT = "translate.loop.SegmentRepository.write_segment_text"
+_PATCH_WRITE_NOTES = "translate.loop.SegmentRepository.write_reviewer_notes"
+_PATCH_VSN = "translate.loop.SegmentRepository.update_sense_version_used"
 
 
 def _ok() -> CheckResult:
@@ -459,7 +273,7 @@ def test_translate_segment_approved_with_notes_writes_notes():
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved_notes()),
-        patch("translate.loop.write_reviewer_notes") as mock_notes,
+        patch(_PATCH_WRITE_NOTES) as mock_notes,
     ):
         status, _, _ = translate_segment(1, conn)
     assert status == "translated"
@@ -473,7 +287,7 @@ def test_translate_segment_approved_no_notes_skips_write_notes():
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
-        patch("translate.loop.write_reviewer_notes") as mock_notes,
+        patch(_PATCH_WRITE_NOTES) as mock_notes,
     ):
         translate_segment(1, conn)
     mock_notes.assert_not_called()
@@ -490,10 +304,10 @@ def test_translate_segment_updates_sense_version_on_success():
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_approved()),
-        patch("translate.loop.update_sense_version_used") as mock_vsn,
+        patch(_PATCH_VSN) as mock_vsn,
     ):
         translate_segment(1, conn)
-    mock_vsn.assert_called_once_with(conn, 1, 77, 3)
+    mock_vsn.assert_called_once_with(1, 77, 3)
 
 
 def test_translate_segment_updates_sense_version_on_needs_human():
@@ -504,11 +318,11 @@ def test_translate_segment_updates_sense_version_on_needs_human():
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
-        patch("translate.loop.update_sense_version_used") as mock_vsn,
+        patch(_PATCH_VSN) as mock_vsn,
     ):
         status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
-    mock_vsn.assert_called_once_with(conn, 1, 88, 2)
+    mock_vsn.assert_called_once_with(1, 88, 2)
 
 
 # ── translate_segment — pre-check failure skips R1 ───────────────────────────
@@ -638,11 +452,11 @@ def test_translate_segment_max_iterations_writes_best_draft():
         patch(_PATCH_TRANSLATOR, return_value=_t("Best draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
-        patch("translate.loop.write_segment_text") as mock_write,
+        patch(_PATCH_WRITE_TEXT) as mock_write,
     ):
         translate_segment(1, conn)
     mock_write.assert_called_once()
-    _, _, _, _, content = mock_write.call_args[0]
+    _, _, _, content = mock_write.call_args[0]
     assert content == "Best draft."
 
 
@@ -688,7 +502,7 @@ def test_translate_segment_translator_error_no_db_write():
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=RuntimeError("API down")),
-        patch("translate.loop.write_segment_text") as mock_write,
+        patch(_PATCH_WRITE_TEXT) as mock_write,
     ):
         translate_segment(1, conn)
     mock_write.assert_not_called()
@@ -723,11 +537,11 @@ def test_translate_segment_best_draft_is_last_precheck_pass():
         patch(_PATCH_TRANSLATOR, translator_mock),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision()),
-        patch("translate.loop.write_segment_text") as mock_write,
+        patch(_PATCH_WRITE_TEXT) as mock_write,
     ):
         translate_segment(1, conn)
 
-    _, _, _, _, written_content = mock_write.call_args[0]
+    _, _, _, written_content = mock_write.call_args[0]
     # The last draft that cleared pre-checks gets written
     assert "Draft" in written_content
 
@@ -739,12 +553,12 @@ def test_translate_segment_all_precheck_fail_writes_last_draft():
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Always failing draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_fail("missing term")),
-        patch("translate.loop.write_segment_text") as mock_write,
+        patch(_PATCH_WRITE_TEXT) as mock_write,
     ):
         status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     mock_write.assert_called_once()
-    _, _, _, _, content = mock_write.call_args[0]
+    _, _, _, content = mock_write.call_args[0]
     assert content == "Always failing draft."
 
 
@@ -913,13 +727,13 @@ def test_translate_segment_exhausted_writes_reviewer_notes():
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_ok()),
         patch(_PATCH_REVIEWER, return_value=_revision("R1 feedback message")),
-        patch("translate.loop.write_reviewer_notes") as mock_notes,
+        patch(_PATCH_WRITE_NOTES) as mock_notes,
     ):
         status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     mock_notes.assert_called_once()
-    # First arg is conn, second is segment_id, third is the notes dict
-    notes_dict = mock_notes.call_args[0][2]
+    # Args are (segment_id, notes, iteration) — notes dict is at index 1
+    notes_dict = mock_notes.call_args[0][1]
     assert "last_feedback" in notes_dict
     assert "R1 feedback message" in notes_dict["last_feedback"]
 
@@ -931,13 +745,13 @@ def test_translate_segment_exhausted_notes_omitted_when_no_feedback():
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, return_value=_t("Draft.")),
         patch(_PATCH_TERMINOLOGY, return_value=_fail(["missing term"])),
-        patch("translate.loop.write_reviewer_notes") as mock_notes,
+        patch(_PATCH_WRITE_NOTES) as mock_notes,
     ):
         status, _, _ = translate_segment(1, conn)
     assert status == "needs_human"
     # prior_feedback is set (precheck failure message), so notes ARE written
     mock_notes.assert_called_once()
-    notes_dict = mock_notes.call_args[0][2]
+    notes_dict = mock_notes.call_args[0][1]
     assert "last_feedback" in notes_dict
 
 
