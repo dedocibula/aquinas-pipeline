@@ -219,17 +219,28 @@ def parse_html_file(html_path: Path) -> list[ParsedElement]:
 
 # ── Article completeness check ────────────────────────────────────────────────
 
-_REQUIRED_ETYPES = {"arg", "sed_contra", "respondeo", "reply"}
+# Hard-required: raise if absent (article cannot be translated without these)
+_REQUIRED_ETYPES = {"arg", "reply"}
+# Soft-expected: warn if absent, but still ingest (Aquinas occasionally omits these)
+_OPTIONAL_ETYPES = {"sed_contra", "respondeo"}
 
 
-def _check_article(locator: str, elements: list[ParsedElement]) -> None:
-    """Crash loudly if the article is structurally incomplete."""
+def _check_article(locator: str, elements: list[ParsedElement]) -> str | None:
+    """Raise if hard-required elements are missing. Return a warning string for soft-expected
+    elements that are absent, or None if the article is fully standard."""
     etypes = {e.element_type for e in elements}
-    missing = _REQUIRED_ETYPES - etypes
-    if missing:
+    missing_hard = _REQUIRED_ETYPES - etypes
+    if missing_hard:
         raise RuntimeError(
-            f"FAIL: article {locator!r} is missing structural elements: {sorted(missing)}"
+            f"FAIL: article {locator!r} is missing structural elements: {sorted(missing_hard)}"
         )
+    missing_soft = _OPTIONAL_ETYPES - etypes
+    if missing_soft:
+        return (
+            f"WARNING: article {locator!r} omits optional elements: {sorted(missing_soft)} "
+            f"(ingested without them)"
+        )
+    return None
 
 
 # ── Edge-case selection ───────────────────────────────────────────────────────
@@ -620,7 +631,9 @@ def run_full(anomaly_log: Path, latin_dir: Path | None = None) -> dict:
 
         for i, (locator, (elems, filename)) in enumerate(sorted(all_articles.items()), 1):
             try:
-                _check_article(locator, elems)
+                warning = _check_article(locator, elems)
+                if warning:
+                    log_f.write(f"[WARNING] locator={locator} file={filename} msg={warning!r}\n")
                 _insert_article(conn, locator, elems, wid, src)
                 conn.commit()  # commit per article so rollback only affects current article
                 ingested += 1

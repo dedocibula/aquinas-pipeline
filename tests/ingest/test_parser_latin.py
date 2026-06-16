@@ -160,19 +160,26 @@ class TestCheckArticle:
             _elem("respondeo"),
             _elem("reply"),
         ]
-        _check_article("I.q3.a1", elements)  # no exception
+        assert _check_article("I.q3.a1", elements) is None
 
-    def test_missing_sed_contra_raises(self):
+    def test_missing_sed_contra_warns(self):
         elements = [_elem("arg"), _elem("respondeo"), _elem("reply")]
-        with pytest.raises(RuntimeError, match="I.q3.a1"):
-            _check_article("I.q3.a1", elements)
-        with pytest.raises(RuntimeError, match="sed_contra"):
-            _check_article("I.q3.a1", elements)
+        warning = _check_article("I.q3.a1", elements)
+        assert warning is not None
+        assert "sed_contra" in warning
 
-    def test_missing_respondeo_raises(self):
+    def test_missing_respondeo_warns(self):
         elements = [_elem("arg"), _elem("sed_contra"), _elem("reply")]
-        with pytest.raises(RuntimeError, match="respondeo"):
-            _check_article("I.q3.a1", elements)
+        warning = _check_article("I.q3.a1", elements)
+        assert warning is not None
+        assert "respondeo" in warning
+
+    def test_missing_both_optional_warns(self):
+        elements = [_elem("arg"), _elem("reply")]
+        warning = _check_article("I.q3.a1", elements)
+        assert warning is not None
+        assert "respondeo" in warning
+        assert "sed_contra" in warning
 
     def test_missing_arg_raises(self):
         elements = [_elem("sed_contra"), _elem("respondeo"), _elem("reply")]
@@ -185,7 +192,6 @@ class TestCheckArticle:
             _check_article("I.q3.a1", elements)
 
     def test_preamble_not_required(self):
-        # preamble is not a required structural element
         elements = [
             _elem("preamble"),
             _elem("arg"),
@@ -193,7 +199,7 @@ class TestCheckArticle:
             _elem("respondeo"),
             _elem("reply"),
         ]
-        _check_article("I.q3.a1", elements)  # no exception
+        assert _check_article("I.q3.a1", elements) is None
 
 
 # ── _group_elements_by_article ────────────────────────────────────────────────
