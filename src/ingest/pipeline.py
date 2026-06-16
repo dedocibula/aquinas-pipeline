@@ -153,6 +153,27 @@ class ReportStep(BaseStep):
         )
 
 
+class MineSensesStep(BaseStep):
+    """Mine polysemy candidates, label them via DeepSeek, write proposed senses.
+
+    Not part of the linear ingest `--all` flow (it spends API budget and feeds
+    the review surface, not the corpus build); it's exposed for the interactive
+    driver. Mines every minable term, labels candidates, and writes the result
+    as 'proposed' senses for review.
+    """
+
+    name = "mine-senses"
+    stage = "resolve"
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.sense_mining import run
+
+        run(terms_filter=None, do_label=True, do_write=True)
+        return StepResult(
+            name=self.name, ok=True, summary="senses mined, labeled, written as proposed"
+        )
+
+
 def _build_steps() -> dict[str, PipelineStep]:
     """The selectable steps, keyed by CLI token (also their run order)."""
     return {

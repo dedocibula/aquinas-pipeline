@@ -141,6 +141,17 @@ class GlossaryRepository:
             )
             return [Constraint.from_row(r) for r in cur.fetchall()]
 
+    def sense_status_counts(self) -> dict[str, int]:
+        """Return {status: count} across all glossary senses (proposed/flagged/approved).
+
+        Drives the interactive driver's flow-position display (how much of the
+        glossary is still proposed vs approved). Statuses absent from the
+        glossary are absent from the dict.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT status, count(*) FROM glossary_sense GROUP BY status")
+            return {status: count for status, count in cur.fetchall()}
+
     def get_current_sense(self, sense_id: int) -> dict | None:
         """Fetch current version and status for a sense. Returns None if not found.
 
@@ -425,6 +436,21 @@ class SegmentRepository:
 
     # ── Corpus-wide orchestration queries ──────────────────────────────────────
 
+    def translation_status_counts(self, work_id: int = 1) -> dict[str, int]:
+        """Return {translation_status: count} for the work's segments.
+
+        Drives the interactive driver's flow-position display (how many segments
+        are pending / translated / needs_human). Statuses absent from the corpus
+        are simply absent from the dict.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT translation_status, count(*) FROM segment "
+                "WHERE work_id = %s GROUP BY translation_status",
+                (work_id,),
+            )
+            return {status: count for status, count in cur.fetchall()}
+
     def get_all_article_locators(self, work_id: int = 1) -> list[str]:
         """Return distinct article-level locator prefixes (first 3 ltree components).
 
@@ -692,6 +718,21 @@ class RunRepository:
 
     def __init__(self, conn):
         self.conn = conn
+
+    def last_run(self) -> dict | None:
+        """Return the most recent translation_run as a dict, or None if no runs.
+
+        Drives the interactive driver's "last run" line. ``finished_at`` is NULL
+        for a run that is still in progress or crashed mid-flow.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT run_id, flow_name, started_at, finished_at, "
+                "total_segments, total_translated, total_needs_human, total_cost_usd "
+                "FROM translation_run ORDER BY run_id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+        return dict(row) if row is not None else None
 
     def glossary_snapshot(self) -> dict:
         """Return {approved_senses, max_version} for the run's provenance record."""

@@ -80,7 +80,7 @@ Explore agents + grep). Disposition per the user:
 | 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
-| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 + 5a + 5b + 5c reporting DONE** (see below); 5d interactive still ☐ |
+| 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below) |
 | 6 — Isolate optimize/ toolchain | ☐ | |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
 | 8 — Consolidate DB schema | ☐ | |
@@ -206,6 +206,38 @@ Every step the `Runner` executes now leaves a concise, uniform run summary in it
   reported). **792 passed; ruff clean.**
 - **Next (5d)**: interactive driver → `src/pipeline/interactive.py` (`python -m pipeline`) — flow position
   from DB status + last command (persist `.pipeline_state.json`) + numbered menu invoking Steps.
+
+#### Phase 5d — Interactive driver — DONE
+`python -m pipeline` shows where the corpus stands and a numbered menu whose every item invokes a
+`PipelineStep` through the `Runner` — no operation logic in the driver; each entry delegates to the Step
+that owns the work, so the driver and the per-stage CLIs share one implementation and each action gets the
+runner's timing + per-stage `StepReport` for free.
+- **New status SQL in the repositories** (Phase-2 invariant — all SQL in repos):
+  `SegmentRepository.translation_status_counts(work_id)` → `{status: count}`;
+  `GlossaryRepository.sense_status_counts()` → `{status: count}`;
+  `RunRepository.last_run()` → most-recent `translation_run` dict (or None). +6 repo tests.
+- **New step wrappers** (thin `BaseStep`s, each delegates to the module that owns the op; declare their
+  stage so the runner reports them): `review/steps.py` → `ExportReviewStep`/`ImportApprovalsStep` (stage
+  `review`); `translate/steps.py` → `TranslateCorpusStep`/`RerunStaleStep`/`RetranslateBodyStep` (stage
+  `translate`, work_id from ctx, default 1); `ingest/pipeline.py` → `MineSensesStep` (stage `resolve`,
+  mines+labels+writes proposed; **not** in the `--all` ingest flow — it spends API budget). +tests for each.
+- **`src/pipeline/interactive.py`** (`python -m pipeline` via new `pipeline/__main__.py`):
+  `StatusSnapshot` (segment counts / sense counts / last run) + `gather_status(ctx)` reading the three
+  repos through `ctx.connection()`; `render_status` shows the flow position + the persisted last command;
+  `.pipeline_state.json` (load/save, no DDL — gitignored) remembers the last command across invocations
+  (resolved at call time so it's monkeypatchable); `build_menu()` is the ordered menu (verify → latin →
+  bahounek → english → resolve → mine-senses → export → import → translate → rerun-stale → retranslate →
+  report), each item a Step factory (local imports so a broken optional dep in one stage doesn't kill the
+  whole menu); `run_loop(ctx, *, read, out, gather, make_runner)` is the fully-injectable menu loop
+  (number → run Step via `Runner`, save state; `r` refresh, `q`/`0`/EOF quit; bad input + failed step
+  surfaced, never fatal; a DB-unreachable status read is surfaced, not fatal). `--status` prints the
+  position once and exits.
+- Tests: `tests/pipeline/test_interactive.py` (+15: state roundtrip/corrupt, rendering incl. empty corpus
+  + unfinished run, menu numbering, loop quit/EOF/select/invalid/refresh/failed-step/status-unavailable,
+  gather wiring). Two new step test files renamed to unique basenames (`test_review_steps.py`,
+  `test_translate_steps.py`) to dodge the pytest no-`__init__` basename collision. **823 passed; ruff
+  clean.** Smoke-tested `python -m pipeline --help`, `--status` (live DB), and all menu imports.
+- **Phase 5 complete.** Next: Phase 6 — isolate the prompt-optimization toolchain into `src/optimize/`.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)

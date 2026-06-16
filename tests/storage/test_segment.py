@@ -215,3 +215,17 @@ def test_reset_translation_status(fake_conn):
     sql, params = conn.executed[-1]
     assert "translation_status = 'pending'" in sql
     assert params == ([7, 8],)
+
+
+def test_translation_status_counts(fake_conn):
+    conn = fake_conn(fetchall_rows=[("pending", 40), ("translated", 55), ("needs_human", 5)])
+    counts = SegmentRepository(conn).translation_status_counts(work_id=1)
+    assert counts == {"pending": 40, "translated": 55, "needs_human": 5}
+    sql, params = conn.executed[-1]
+    assert "GROUP BY translation_status" in sql
+    assert params == (1,)
+
+
+def test_translation_status_counts_empty(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    assert SegmentRepository(conn).translation_status_counts() == {}

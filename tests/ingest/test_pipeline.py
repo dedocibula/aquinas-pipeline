@@ -6,7 +6,7 @@ No DB, no filesystem side effects (steps are replaced with fakes).
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -161,3 +161,17 @@ class TestPilotMode:
         finally:
             pl._step_pilot = original
         assert result == 1
+
+
+class TestMineSensesStep:
+    def test_delegates_to_sense_mining(self, tmp_path):
+        from pipeline import PipelineContext
+
+        ctx = PipelineContext(reports_dir=tmp_path)
+        with patch("ingest.sense_mining.run") as run:
+            result = pl.MineSensesStep().run(ctx)
+        run.assert_called_once_with(terms_filter=None, do_label=True, do_write=True)
+        assert result.ok and result.name == "mine-senses"
+
+    def test_declares_resolve_stage(self):
+        assert pl.MineSensesStep.stage == "resolve"

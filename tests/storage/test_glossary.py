@@ -243,3 +243,16 @@ def test_write_human_surface_targets_correct_term(fake_conn):
     sql, params = conn.executed[-1]
     assert "glossary_sense" in sql  # subselect resolves sense_id → term_id
     assert 55 in params
+
+
+def test_sense_status_counts(fake_conn):
+    conn = fake_conn(fetchall_rows=[("proposed", 12), ("approved", 88)])
+    counts = GlossaryRepository(conn).sense_status_counts()
+    assert counts == {"proposed": 12, "approved": 88}
+    sql, _ = conn.executed[-1]
+    assert "FROM glossary_sense GROUP BY status" in sql
+
+
+def test_sense_status_counts_empty(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    assert GlossaryRepository(conn).sense_status_counts() == {}

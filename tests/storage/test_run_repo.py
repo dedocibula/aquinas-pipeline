@@ -69,3 +69,26 @@ def test_insert_run_segments_uses_execute_values(fake_conn):
     assert mock_psycopg2.extras.execute_values.called
     rows = mock_psycopg2.extras.execute_values.call_args.args[2]
     assert rows[0][0] == 7 and rows[0][1] == 1  # run_id, segment_id
+
+
+def test_last_run_returns_most_recent(fake_conn):
+    row = {
+        "run_id": 9,
+        "flow_name": "translate_corpus",
+        "started_at": "2026-06-17T10:00:00",
+        "finished_at": "2026-06-17T10:30:00",
+        "total_segments": 100,
+        "total_translated": 95,
+        "total_needs_human": 5,
+        "total_cost_usd": 1.23,
+    }
+    conn = fake_conn(fetchone_results=[row])
+    result = RunRepository(conn).last_run()
+    assert result == row
+    sql, _ = conn.executed[-1]
+    assert "FROM translation_run ORDER BY run_id DESC LIMIT 1" in sql
+
+
+def test_last_run_returns_none_when_no_runs(fake_conn):
+    conn = fake_conn(fetchone_results=[])
+    assert RunRepository(conn).last_run() is None

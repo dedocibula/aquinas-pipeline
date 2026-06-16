@@ -87,3 +87,6 @@ reports/ingest/
 reports/resolve/
 reports/review/
 reports/translate/
+
+# Interactive driver's last-command memory (per-checkout, not pipeline data)
+.pipeline_state.json
