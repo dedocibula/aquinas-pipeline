@@ -180,7 +180,7 @@ class TestExistingFile:
         _write_html(tmp_path / "1003.html")
         result = parse_english_for_articles(["I.q3.a1"])
         q_elem = next(e for e in result if e.locator == "I.q3")
-        assert not q_elem.english_text.lower().startswith("question")
+        assert not q_elem.text.lower().startswith("question")
 
     def test_no_skip_message_for_present_file(self, tmp_path, capsys, monkeypatch):
         """No [SKIP] message is printed when the file exists."""
@@ -225,7 +225,7 @@ class TestFreddosoRouting:
 
         result = parse_english_for_articles(["I.q3.a1"])
         respondeo = next(e for e in result if e.locator == "I.q3.a1.respondeo")
-        assert "FREDDOSO_RESPONDEO_MARKER" in respondeo.english_text
+        assert "FREDDOSO_RESPONDEO_MARKER" in respondeo.text
 
     def test_falls_back_to_dominican_when_freddoso_absent(self, tmp_path, monkeypatch):
         """Falls back to Dominican when no Freddoso file is present."""

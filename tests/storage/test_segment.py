@@ -45,6 +45,74 @@ def test_load_body_segments_returns_models(fake_conn):
     assert all(isinstance(s, Segment) for s in segs)
 
 
+# ── locator lookups (used by the overlay parsers) ───────────────────────────────
+
+
+def test_get_segment_id_by_locator_returns_id(fake_conn):
+    conn = fake_conn(fetchone_results=[(7,)])
+    assert SegmentRepository(conn).get_segment_id_by_locator("I.q1.a1") == 7
+    sql, params = conn.executed[-1]
+    assert "work_id" not in sql
+    assert params == ("I.q1.a1",)
+
+
+def test_get_segment_id_by_locator_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[])
+    assert SegmentRepository(conn).get_segment_id_by_locator("I.q9.a9") is None
+
+
+def test_get_segment_id_by_locator_scopes_to_work(fake_conn):
+    conn = fake_conn(fetchone_results=[(3,)])
+    assert SegmentRepository(conn).get_segment_id_by_locator("I.q1", work_id=1) == 3
+    sql, params = conn.executed[-1]
+    assert "work_id = %s" in sql
+    assert params == ("I.q1", 1)
+
+
+def test_get_article_title_locators(fake_conn):
+    conn = fake_conn(fetchall_rows=[("I.q1.a1",), ("I.q2.a3",)])
+    assert SegmentRepository(conn).get_article_title_locators() == ["I.q1.a1", "I.q2.a3"]
+    sql, _ = conn.executed[-1]
+    assert "element_type = 'article_title'" in sql
+
+
+# ── structural writes (Latin segment-graph creation) ────────────────────────────
+
+
+def test_wipe_article_deletes_in_fk_order(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).wipe_article("I.q1.a1", 1)
+    tables = [sql.split("DELETE FROM ")[1].split(" ")[0] for sql, _ in conn.executed]
+    assert tables == ["term_usage", "segment_text", "segment"]
+
+
+def test_create_segment_returns_new_id(fake_conn):
+    conn = fake_conn(fetchone_results=[(99,)])
+    seg_id = SegmentRepository(conn).create_segment(1, "I.q1.a1.arg1", "arg")
+    assert seg_id == 99
+    sql, params = conn.executed[-1]
+    assert "RETURNING segment_id" in sql
+    assert params == (1, "I.q1.a1.arg1", "arg")
+
+
+def test_set_reply_to(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).set_reply_to(10, 5)
+    sql, params = conn.executed[-1]
+    assert "UPDATE segment SET reply_to" in sql
+    assert params == (5, 10)
+
+
+def test_body_text_coverage(fake_conn):
+    conn = fake_conn(
+        fetchone_results=[(50,), (100,)],
+        fetchall_rows=[("I.q1.a1.arg1",), ("I.q1.a1.sed_contra",)],
+    )
+    with_text, total, missing = SegmentRepository(conn).body_text_coverage("cs")
+    assert (with_text, total) == (50, 100)
+    assert missing == ["I.q1.a1.arg1", "I.q1.a1.sed_contra"]
+
+
 # ── writes ─────────────────────────────────────────────────────────────────────
 
 

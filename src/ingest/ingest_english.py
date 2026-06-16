@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
 from ingest.parser_latin import TEST_ARTICLES
+from ingest.source_parser import OverlayElement, TextOverlayParser
 from storage.db import get_conn, source_id
+from storage.repositories import SegmentRepository
 
 ROOT = Path(__file__).resolve().parents[2]
 DOMINICAN_DIR = ROOT / "sources" / "english" / "dominican"
@@ -68,12 +69,6 @@ def _freddoso_file(pars_ltree: str, q_num: int) -> Path:
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
 
-@dataclass
-class EnglishElement:
-    locator: str
-    english_text: str
-
-
 def _question_file(pars_ltree: str, q_num: int) -> Path:
     digit = _PARS_DIGIT[pars_ltree]
     return DOMINICAN_DIR / f"{digit}{q_num:03d}.html"
@@ -92,9 +87,9 @@ def _parse_article(
     pars_ltree: str,
     q_num: int,
     a_num: int,
-) -> list[EnglishElement]:
+) -> list[OverlayElement]:
     """Extract English elements for one article from an already-parsed soup."""
-    elements: list[EnglishElement] = []
+    elements: list[OverlayElement] = []
     q_loc = f"{pars_ltree}.q{q_num}"
     a_loc = f"{q_loc}.a{a_num}"
 
@@ -110,7 +105,7 @@ def _parse_article(
         raw_title = h1.get_text(strip=True)
         # Strip "Question N. " prefix
         title_text = re.sub(r"^Question\s+\d+\.\s*", "", raw_title, flags=re.I)
-        elements.append(EnglishElement(q_loc, title_text))
+        elements.append(OverlayElement(q_loc, title_text))
 
     # ── Locate the article's <h2> ─────────────────────────────────────────────
     article_h2 = div.find("h2", id=f"article{a_num}")
@@ -123,22 +118,10 @@ def _parse_article(
     # Article title
     raw_art_title = article_h2.get_text(strip=True)
     art_title_text = re.sub(r"^Article\s+\d+\.\s*", "", raw_art_title, flags=re.I)
-    elements.append(EnglishElement(a_loc, art_title_text))
+    elements.append(OverlayElement(a_loc, art_title_text))
 
     # ── Collect body paragraphs until the next article or end ─────────────────
     next_h2 = article_h2.find_next_sibling("h2")
-
-    def _in_article(tag) -> bool:
-        if next_h2 is None:
-            return True
-        try:
-            # tag comes before next_h2 in document order
-            for sibling in tag.next_siblings:
-                if sibling is next_h2:
-                    return True
-            return False
-        except Exception:
-            return True
 
     for p in article_h2.find_next_siblings("p"):
         if next_h2 and p.find_previous_sibling("h2") is not article_h2:
@@ -155,23 +138,23 @@ def _parse_article(
         # Objection N.
         m = re.fullmatch(r"Objection\s+(\d+)\.", marker)
         if m:
-            elements.append(EnglishElement(f"{a_loc}.arg{m.group(1)}", text))
+            elements.append(OverlayElement(f"{a_loc}.arg{m.group(1)}", text))
             continue
 
         # On the contrary,
         if marker.lower().startswith("on the contrary"):
-            elements.append(EnglishElement(f"{a_loc}.sed_contra", text))
+            elements.append(OverlayElement(f"{a_loc}.sed_contra", text))
             continue
 
         # I answer that,
         if marker.lower().startswith("i answer that"):
-            elements.append(EnglishElement(f"{a_loc}.respondeo", text))
+            elements.append(OverlayElement(f"{a_loc}.respondeo", text))
             continue
 
         # Reply to Objection N.
         m = re.fullmatch(r"Reply to Objection\s+(\d+)\.", marker)
         if m:
-            elements.append(EnglishElement(f"{a_loc}.reply{m.group(1)}", text))
+            elements.append(OverlayElement(f"{a_loc}.reply{m.group(1)}", text))
             continue
 
     return elements
@@ -180,7 +163,7 @@ def _parse_article(
 def parse_english_for_articles(
     article_locators: list[str],
     coverage_gap_log: list[str] | None = None,
-) -> list[EnglishElement]:
+) -> list[OverlayElement]:
     """Parse English HTML for the given article locators.
 
     Uses Freddoso where a per-question HTML file is available, Dominican Province
@@ -198,7 +181,7 @@ def parse_english_for_articles(
         a_num = int(parts[2][1:])
         by_file[(pars_ltree, q_num)].append(a_num)
 
-    all_elements: list[EnglishElement] = []
+    all_elements: list[OverlayElement] = []
     seen_question_titles: set[str] = set()
 
     for (pars_ltree, q_num), article_nums in sorted(by_file.items()):
@@ -242,43 +225,36 @@ def parse_english_for_articles(
 
 # ── DB insertion ──────────────────────────────────────────────────────────────
 
+class EnglishParser(TextOverlayParser):
+    """English overlay parser: writes segment_text(en) from Dominican/Freddoso HTML."""
+
+    lang = "en"
+
+    def parse(self, article_locators: list[str]) -> list[OverlayElement]:
+        return parse_english_for_articles(article_locators)
+
+
+_ENGLISH = EnglishParser()
+
+
 def insert_english_texts(
     conn,
-    elements: list[EnglishElement],
+    elements: list[OverlayElement],
     src_id: int,
     gap_log: list[str] | None = None,
 ) -> int:
     """Insert segment_text(en, dominican) rows. Returns count inserted.
 
     Elements whose locator has no matching segment row (English has more args than
-    Latin for some articles) are logged to gap_log and skipped.
+    Latin for some articles) are logged to gap_log and skipped. With no gap_log,
+    a missing segment is skipped silently (English coverage may exceed Latin's).
     """
-    cur = conn.cursor()
-    inserted = 0
 
-    for elem in elements:
-        cur.execute(
-            "SELECT segment_id FROM segment WHERE locator_path = %s::ltree",
-            (elem.locator,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            if gap_log is not None:
-                gap_log.append(f"[NO_SEGMENT] locator={elem.locator}")
-            continue
-        seg_id = row[0]
-        cur.execute(
-            """
-            INSERT INTO segment_text (segment_id, lang, content, source_id)
-            VALUES (%s, 'en', %s, %s)
-            ON CONFLICT (segment_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
-            """,
-            (seg_id, elem.english_text, src_id),
-        )
-        inserted += 1
+    def on_missing(locator: str) -> None:
+        if gap_log is not None:
+            gap_log.append(f"[NO_SEGMENT] locator={locator}")
 
-    cur.close()
-    return inserted
+    return _ENGLISH.store(conn, elements, src_id, on_missing)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -286,11 +262,7 @@ def insert_english_texts(
 def _articles_from_db() -> list[str]:
     """Return all article locators that have been inserted into segment."""
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT locator_path::text FROM segment WHERE element_type = 'article_title' ORDER BY locator_path"
-            )
-            return [row[0] for row in cur.fetchall()]
+        return SegmentRepository(conn).get_article_title_locators()
 
 
 def run(articles: list[str] | None = None) -> None:
@@ -311,7 +283,7 @@ def run(articles: list[str] | None = None) -> None:
     print("\nTitle spot-check:")
     for elem in elements:
         if elem.locator.count(".") <= 1:  # question_title or article_title
-            print(f"  {elem.locator}: {elem.english_text[:70]!r}")
+            print(f"  {elem.locator}: {elem.text[:70]!r}")
 
     print("\nInserting into DB...")
     insert_gaps: list[str] = []

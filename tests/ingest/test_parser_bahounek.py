@@ -12,7 +12,7 @@ import pytest
 from bs4 import BeautifulSoup
 
 from ingest.parser_bahounek import (
-    BahouněkElement,
+    OverlayElement,
     _extract_question_titles,
     _parse_coord,
     insert_bahounek_texts,
@@ -76,20 +76,11 @@ class TestParseCoord:
         assert _parse_coord("III ot. 1 čl. 1 k 2") == "III.q1.a1.reply2"
 
 
-def _make_conn(fetchone_return):
-    """Return a mock connection whose cursor().fetchone() returns fetchone_return."""
-    cur = MagicMock()
-    cur.fetchone.return_value = fetchone_return
-    conn = MagicMock()
-    conn.cursor.return_value = cur
-    return conn, cur
-
-
 class TestInsertBahouněkTexts:
-    def test_gap_log_provided_writes_gap_and_skips(self):
+    def test_gap_log_provided_writes_gap_and_skips(self, fake_conn):
         """When gap_log is given and segment not found, writes [GAP] line and skips."""
-        conn, cur = _make_conn(None)  # fetchone returns None → not found
-        elem = BahouněkElement(locator="I.q99.a1.respondeo", czech_text="Odpověď.")
+        conn = fake_conn(fetchone_results=[])  # lookup returns None → not found
+        elem = OverlayElement(locator="I.q99.a1.respondeo", text="Odpověď.")
         gap_log = io.StringIO()
 
         count = insert_bahounek_texts(conn, [elem], src_id=1, gap_log=gap_log)
@@ -101,10 +92,10 @@ class TestInsertBahouněkTexts:
         assert "I.q99.a1.respondeo" in line
         assert "no_segment_match" in line
 
-    def test_gap_log_provided_inserts_when_found(self):
+    def test_gap_log_provided_inserts_when_found(self, fake_conn):
         """When gap_log is given but segment IS found, the row is inserted normally."""
-        conn, cur = _make_conn((42,))  # fetchone returns a segment_id
-        elem = BahouněkElement(locator="I.q3.a1.respondeo", czech_text="Odpověď.")
+        conn = fake_conn(fetchone_results=[(42,)])  # lookup returns a segment_id
+        elem = OverlayElement(locator="I.q3.a1.respondeo", text="Odpověď.")
         gap_log = io.StringIO()
 
         count = insert_bahounek_texts(conn, [elem], src_id=1, gap_log=gap_log)
@@ -113,10 +104,10 @@ class TestInsertBahouněkTexts:
         gap_log.seek(0)
         assert gap_log.read() == ""  # nothing written for a successful insert
 
-    def test_no_gap_log_raises_on_missing_segment(self):
+    def test_no_gap_log_raises_on_missing_segment(self, fake_conn):
         """Without gap_log, a missing segment must raise RuntimeError (fail-loudly)."""
-        conn, _cur = _make_conn(None)
-        elem = BahouněkElement(locator="I.q99.a1.respondeo", czech_text="Odpověď.")
+        conn = fake_conn(fetchone_results=[])
+        elem = OverlayElement(locator="I.q99.a1.respondeo", text="Odpověď.")
 
         with pytest.raises(RuntimeError, match="no matching segment"):
             insert_bahounek_texts(conn, [elem], src_id=1)
@@ -175,7 +166,7 @@ class TestExtractQuestionTitles:
         results = _extract_question_titles(self._soup(html), "I")
         assert len(results) == 1
         assert results[0].locator == "I.q1"
-        assert results[0].czech_text == "CO JE POSVÁTNÁ NAUKA"
+        assert results[0].text == "CO JE POSVÁTNÁ NAUKA"
 
     def test_extracts_multiple_titles(self):
         html = """
@@ -185,9 +176,9 @@ class TestExtractQuestionTitles:
         results = _extract_question_titles(self._soup(html), "I")
         assert len(results) == 2
         assert results[0].locator == "I.q1"
-        assert results[0].czech_text == "PRVNÍ OTÁZKA"
+        assert results[0].text == "PRVNÍ OTÁZKA"
         assert results[1].locator == "I.q2"
-        assert results[1].czech_text == "DRUHÁ OTÁZKA"
+        assert results[1].text == "DRUHÁ OTÁZKA"
 
     def test_ignores_span_without_br(self):
         html = "<p><span>1. SOME TITLE</span></p>"

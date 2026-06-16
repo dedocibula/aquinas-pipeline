@@ -27,6 +27,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from storage.db import get_conn, source_id, work_id
+from storage.repositories import SegmentRepository
 
 ROOT = Path(__file__).resolve().parents[2]
 LATIN_DIR = ROOT / "sources" / "latin"
@@ -44,7 +45,6 @@ TEST_ARTICLES: list[str] = [
     "II_II.q64.a7",
     "III.q1.a1",
     "III.q75.a4",
-    # edge cases — determined by count pass at runtime (see _choose_edge_cases)
 ]
 
 # ── TITLE attribute parsing ───────────────────────────────────────────────────
@@ -232,20 +232,6 @@ def _check_article(locator: str, elements: list[ParsedElement]) -> None:
         )
 
 
-# ── Edge-case selection ───────────────────────────────────────────────────────
-
-def _choose_edge_cases(all_elements: dict[str, list[ParsedElement]]) -> tuple[str, str]:
-    """Return (shortest_locator, longest_locator) based on segment count."""
-    body_types = {"arg", "sed_contra", "respondeo", "reply"}
-    counts = {
-        loc: sum(1 for e in elems if e.element_type in body_types)
-        for loc, elems in all_elements.items()
-    }
-    shortest = min(counts, key=counts.__getitem__)
-    longest = max(counts, key=counts.__getitem__)
-    return shortest, longest
-
-
 # ── DB insertion ─────────────────────────────────────────────────────────────
 
 def _insert_article(
@@ -256,71 +242,27 @@ def _insert_article(
     src_id: int,
 ) -> None:
     """Insert segment + segment_text rows for one article. Idempotent."""
-    cur = conn.cursor()
+    repo = SegmentRepository(conn)
 
-    # Wipe existing rows for this article (idempotency).
-    # Delete in FK dependency order: term_usage → segment_text → segment.
-    cur.execute(
-        """
-        DELETE FROM term_usage
-        WHERE segment_id IN (
-            SELECT segment_id FROM segment
-            WHERE locator_path <@ %s::ltree AND work_id = %s
-        )
-        """,
-        (article_locator, work_id_val),
-    )
-    cur.execute(
-        """
-        DELETE FROM segment_text
-        WHERE segment_id IN (
-            SELECT segment_id FROM segment
-            WHERE locator_path <@ %s::ltree AND work_id = %s
-        )
-        """,
-        (article_locator, work_id_val),
-    )
-    cur.execute(
-        "DELETE FROM segment WHERE locator_path <@ %s::ltree AND work_id = %s",
-        (article_locator, work_id_val),
-    )
+    # Wipe existing rows for this article (idempotency); FK order handled by repo.
+    repo.wipe_article(article_locator, work_id_val)
 
-    # Create placeholder title segments for this article (no text)
+    # Create placeholder title segments for this article (no text). The
+    # question_title is shared across articles in the same question, so only
+    # create it when absent.
     q_locator = ".".join(article_locator.split(".")[:2])  # e.g. I.q3
-
     for title_locator, title_etype in [
         (q_locator, "question_title"),
         (article_locator, "article_title"),
     ]:
-        # Only insert if not already present (shared across articles in same question)
-        cur.execute(
-            "SELECT 1 FROM segment WHERE locator_path = %s::ltree AND work_id = %s",
-            (title_locator, work_id_val),
-        )
-        if cur.fetchone() is None:
-            cur.execute(
-                """
-                INSERT INTO segment (work_id, locator_path, element_type)
-                VALUES (%s, %s::ltree, %s)
-                """,
-                (work_id_val, title_locator, title_etype),
-            )
+        if repo.get_segment_id_by_locator(title_locator, work_id_val) is None:
+            repo.create_segment(work_id_val, title_locator, title_etype)
 
-    # Map locator → segment_id for reply_to linking
-    locator_to_id: dict[str, int] = {}
-
-    # Insert body segments; collect segment_ids
-    for elem in elements:
-        cur.execute(
-            """
-            INSERT INTO segment (work_id, locator_path, element_type)
-            VALUES (%s, %s::ltree, %s)
-            RETURNING segment_id
-            """,
-            (work_id_val, elem.locator, elem.element_type),
-        )
-        seg_id = cur.fetchone()[0]
-        locator_to_id[elem.locator] = seg_id
+    # Insert body segments; map locator → segment_id for reply_to linking.
+    locator_to_id: dict[str, int] = {
+        elem.locator: repo.create_segment(work_id_val, elem.locator, elem.element_type)
+        for elem in elements
+    }
 
     # Set reply_to on reply segments
     for elem in elements:
@@ -339,25 +281,13 @@ def _insert_article(
                 flush=True,
             )
             continue
-        cur.execute(
-            "UPDATE segment SET reply_to = %s WHERE segment_id = %s",
-            (arg_seg_id, locator_to_id[elem.locator]),
-        )
+        repo.set_reply_to(locator_to_id[elem.locator], arg_seg_id)
 
     # Insert segment_text (Latin) for body elements
     for elem in elements:
         if not elem.latin_text:
             continue
-        cur.execute(
-            """
-            INSERT INTO segment_text (segment_id, lang, content, source_id)
-            VALUES (%s, 'la', %s, %s)
-            ON CONFLICT (segment_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
-            """,
-            (locator_to_id[elem.locator], elem.latin_text, src_id),
-        )
-
-    cur.close()
+        repo.write_segment_text(locator_to_id[elem.locator], "la", src_id, elem.latin_text)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

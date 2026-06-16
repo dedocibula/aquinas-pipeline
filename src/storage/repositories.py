@@ -277,6 +277,42 @@ class SegmentRepository:
             row = cur.fetchone()
         return Segment.from_row(row) if row else None
 
+    def get_segment_id_by_locator(self, locator: str, work_id: int | None = None) -> int | None:
+        """Return the segment_id at an exact locator, or None if absent.
+
+        Used by the text-overlay parsers (Czech/English) to attach text to an
+        existing segment, and by the Latin structural parser to test whether a
+        shared title placeholder already exists. When work_id is given the lookup
+        is scoped to that work.
+        """
+        with self.conn.cursor() as cur:
+            if work_id is None:
+                cur.execute(
+                    "SELECT segment_id FROM segment WHERE locator_path = %s::ltree",
+                    (locator,),
+                )
+            else:
+                cur.execute(
+                    "SELECT segment_id FROM segment "
+                    "WHERE locator_path = %s::ltree AND work_id = %s",
+                    (locator, work_id),
+                )
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def get_article_title_locators(self) -> list[str]:
+        """Return every article_title locator, ordered.
+
+        The text-overlay parsers use this as the default set of articles to
+        ingest when the caller passes none.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT locator_path::text FROM segment "
+                "WHERE element_type = 'article_title' ORDER BY locator_path"
+            )
+            return [row[0] for row in cur.fetchall()]
+
     def load_body_segments(self, work_id: int) -> list[Segment]:
         """Return body segments with la/cs/en text for the work, sorted by locator."""
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -309,6 +345,50 @@ class SegmentRepository:
                     SET content = EXCLUDED.content
                 """,
                 (segment_id, lang, content, src_id),
+            )
+
+    # ── Structural writes (Latin segment-graph creation) ───────────────────────
+
+    def wipe_article(self, article_locator: str, work_id: int) -> None:
+        """Delete every row under an article locator, in FK-dependency order.
+
+        term_usage → segment_text → segment. Makes the Latin parser idempotent:
+        re-parsing an article fully replaces its prior segment graph.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM term_usage WHERE segment_id IN ("
+                "SELECT segment_id FROM segment "
+                "WHERE locator_path <@ %s::ltree AND work_id = %s)",
+                (article_locator, work_id),
+            )
+            cur.execute(
+                "DELETE FROM segment_text WHERE segment_id IN ("
+                "SELECT segment_id FROM segment "
+                "WHERE locator_path <@ %s::ltree AND work_id = %s)",
+                (article_locator, work_id),
+            )
+            cur.execute(
+                "DELETE FROM segment WHERE locator_path <@ %s::ltree AND work_id = %s",
+                (article_locator, work_id),
+            )
+
+    def create_segment(self, work_id: int, locator: str, element_type: str) -> int:
+        """Insert a segment row and return its new segment_id."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO segment (work_id, locator_path, element_type) "
+                "VALUES (%s, %s::ltree, %s) RETURNING segment_id",
+                (work_id, locator, element_type),
+            )
+            return cur.fetchone()[0]
+
+    def set_reply_to(self, segment_id: int, reply_to: int) -> None:
+        """Link a reply segment to the objection segment it answers."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE segment SET reply_to = %s WHERE segment_id = %s",
+                (reply_to, segment_id),
             )
 
     def update_translation_status(self, segment_id: int, status: str) -> None:
@@ -355,6 +435,39 @@ class SegmentRepository:
                 (work_id,),
             )
             return [row[0] for row in cur.fetchall()]
+
+    def body_text_coverage(self, lang: str) -> tuple[int, int, list[str]]:
+        """Return (segments_with_text, total_body_segments, missing_locators) for lang.
+
+        Body segments are arg/sed_contra/respondeo/reply. Drives the per-source
+        coverage report (e.g. the Czech Bahounek ingest).
+        """
+        body_types = ["arg", "sed_contra", "respondeo", "reply"]
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(DISTINCT st.segment_id) FROM segment_text st "
+                "JOIN segment s ON st.segment_id = s.segment_id "
+                "WHERE st.lang = %s AND s.element_type = ANY(%s)",
+                (lang, body_types),
+            )
+            with_text = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT count(*) FROM segment WHERE element_type = ANY(%s)",
+                (body_types,),
+            )
+            total = cur.fetchone()[0]
+
+            cur.execute(
+                "SELECT s.locator_path::text FROM segment s "
+                "WHERE s.element_type = ANY(%s) AND NOT EXISTS ("
+                "SELECT 1 FROM segment_text st "
+                "WHERE st.segment_id = s.segment_id AND st.lang = %s) "
+                "ORDER BY s.locator_path",
+                (body_types, lang),
+            )
+            missing = [row[0] for row in cur.fetchall()]
+        return with_text, total, missing
 
     def get_pending_segment_ids_for_article(
         self,

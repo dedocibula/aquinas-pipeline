@@ -25,7 +25,6 @@ from __future__ import annotations
 import re
 import sys
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
@@ -33,7 +32,9 @@ import bs4
 from bs4 import BeautifulSoup
 
 from ingest.parser_latin import _PARS_CODE, TEST_ARTICLES
+from ingest.source_parser import OverlayElement, TextOverlayParser
 from storage.db import get_conn, source_id
+from storage.repositories import SegmentRepository
 
 # Bahounek HTML is XHTML served without the XML declaration BeautifulSoup expects.
 warnings.filterwarnings("ignore", category=bs4.XMLParsedAsHTMLWarning)
@@ -60,12 +61,6 @@ _FILE_PARS_LTREE: dict[str, str] = {
 _COORD_RE = re.compile(
     r"(I-II|II-II|III|I)\s+ot\.\s*(\d+)\s+(?:čl\.\s*(\d+)\s+(arg\.\s*\d+|protiarg\.|odp\.|k\s+\d+)|pr\.)"
 )
-
-
-@dataclass
-class BahouněkElement:
-    locator: str        # ltree locator (matches segment.locator_path)
-    czech_text: str
 
 
 def _parse_coord(raw: str) -> str | None:
@@ -108,13 +103,13 @@ def _parse_coord(raw: str) -> str | None:
 # ── HTML parsing ──────────────────────────────────────────────────────────────
 
 
-def _extract_question_titles(soup: BeautifulSoup, pars_ltree: str) -> list[BahouněkElement]:
+def _extract_question_titles(soup: BeautifulSoup, pars_ltree: str) -> list[OverlayElement]:
     """Extract Czech question title text from Bahounek pars HTML.
 
     Bahounek marks question titles as ``<p><span>N. TITLE TEXT<br/>...</span></p>``.
     The question number N is extracted and mapped to ``{pars_ltree}.qN.question_title``.
     """
-    results: list[BahouněkElement] = []
+    results: list[OverlayElement] = []
     for p in soup.find_all("p"):
         span = p.find("span")
         if span is None or span.find("br") is None:
@@ -141,11 +136,11 @@ def _extract_question_titles(soup: BeautifulSoup, pars_ltree: str) -> list[Bahou
             continue
         # The question_title segment lives at the question locator itself (e.g. I.q1),
         # not at a sub-locator — matching the schema set by parser_latin.
-        results.append(BahouněkElement(f"{pars_ltree}.q{q_num}", title_text))
+        results.append(OverlayElement(f"{pars_ltree}.q{q_num}", title_text))
     return results
 
 
-def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
+def _extract_elements_from_file(html_path: Path) -> list[OverlayElement]:
     """Extract all elements from one Bahounek HTML file.
 
     Returns question_title elements (from titled question headings) followed by
@@ -155,7 +150,7 @@ def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
     soup = BeautifulSoup(content, "lxml")
 
     pars_ltree = _FILE_PARS_LTREE.get(html_path.name, "")
-    elements: list[BahouněkElement] = []
+    elements: list[OverlayElement] = []
 
     if pars_ltree:
         elements.extend(_extract_question_titles(soup, pars_ltree))
@@ -171,7 +166,7 @@ def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
         if current_locator and text_lines:
             text = " ".join(t.strip() for t in text_lines if t.strip())
             if text:
-                elements.append(BahouněkElement(current_locator, text))
+                elements.append(OverlayElement(current_locator, text))
         current_locator = None
         text_lines = []
 
@@ -187,7 +182,7 @@ def _extract_elements_from_file(html_path: Path) -> list[BahouněkElement]:
     return elements
 
 
-def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkElement]:
+def parse_bahounek_for_articles(article_locators: list[str]) -> list[OverlayElement]:
     """Parse Bahounek HTML for the given article locators and return matched elements.
 
     Includes question_title elements for the parent question of each requested article.
@@ -202,7 +197,7 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkEl
     ltree_to_raw = {v: k for k, v in _PARS_CODE.items()}
 
     # Collect all elements from needed pars files
-    all_elements: dict[str, BahouněkElement] = {}  # locator → element
+    all_elements: dict[str, OverlayElement] = {}  # locator → element
     for pars_ltree in sorted(pars_needed):
         pars_raw = ltree_to_raw[pars_ltree]
         html_path = BAHOUNEK_DIR / _PARS_FILE[pars_raw]
@@ -215,7 +210,7 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkEl
         for elem in file_elements:
             all_elements[elem.locator] = elem
 
-    result: list[BahouněkElement] = []
+    result: list[OverlayElement] = []
 
     # Include Czech question titles for parent questions of requested articles.
     # These are stored at the question locator (e.g. I.q3), not a sub-locator.
@@ -236,9 +231,21 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[BahouněkEl
 
 # ── DB insertion ──────────────────────────────────────────────────────────────
 
+class BahounekParser(TextOverlayParser):
+    """Czech overlay parser: writes segment_text(cs) from Bahounek HTML."""
+
+    lang = "cs"
+
+    def parse(self, article_locators: list[str]) -> list[OverlayElement]:
+        return parse_bahounek_for_articles(article_locators)
+
+
+_BAHOUNEK = BahounekParser()
+
+
 def insert_bahounek_texts(
     conn,
-    elements: list[BahouněkElement],
+    elements: list[OverlayElement],
     src_id: int,
     gap_log: IO[str] | None = None,
 ) -> int:
@@ -246,39 +253,19 @@ def insert_bahounek_texts(
 
     When gap_log is provided, missing segments are logged and skipped rather
     than raising. When gap_log is None, a missing segment raises RuntimeError
-    (M1 test-mode behaviour — fail loudly).
+    (test-mode behaviour — fail loudly).
     """
-    cur = conn.cursor()
-    inserted = 0
 
-    for elem in elements:
-        # Look up the existing segment by locator_path
-        cur.execute(
-            "SELECT segment_id FROM segment WHERE locator_path = %s::ltree",
-            (elem.locator,),
+    def on_missing(locator: str) -> None:
+        if gap_log is not None:
+            gap_log.write(f"[GAP] locator={locator} reason=no_segment_match\n")
+            return
+        raise RuntimeError(
+            f"FAIL: Bahounek coordinate {locator!r} has no matching segment. "
+            "Run parser_latin.py first."
         )
-        row = cur.fetchone()
-        if row is None:
-            if gap_log is not None:
-                gap_log.write(f"[GAP] locator={elem.locator} reason=no_segment_match\n")
-                continue
-            raise RuntimeError(
-                f"FAIL: Bahounek coordinate {elem.locator!r} has no matching segment. "
-                "Run parser_latin.py first."
-            )
-        seg_id = row[0]
-        cur.execute(
-            """
-            INSERT INTO segment_text (segment_id, lang, content, source_id)
-            VALUES (%s, 'cs', %s, %s)
-            ON CONFLICT (segment_id, lang, source_id) DO UPDATE SET content = EXCLUDED.content
-            """,
-            (seg_id, elem.czech_text, src_id),
-        )
-        inserted += 1
 
-    cur.close()
-    return inserted
+    return _BAHOUNEK.store(conn, elements, src_id, on_missing)
 
 
 def write_bahounek_coverage(conn, gap_log: IO[str]) -> None:
@@ -288,37 +275,9 @@ def write_bahounek_coverage(conn, gap_log: IO[str]) -> None:
       COVERAGE: segments_with_czech=N total_body_segments=M pct=X%
       MISSING_CZECH: locator=... (one line per body segment without Czech text)
     """
-    body_types = ("arg", "sed_contra", "respondeo", "reply")
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(DISTINCT st.segment_id) FROM segment_text st "
-            "JOIN segment s ON st.segment_id = s.segment_id "
-            "WHERE st.lang = 'cs' AND s.element_type = ANY(%s)",
-            (list(body_types),),
-        )
-        segments_with_czech = cur.fetchone()[0]
-
-        cur.execute(
-            "SELECT count(*) FROM segment WHERE element_type = ANY(%s)",
-            (list(body_types),),
-        )
-        total_body_segments = cur.fetchone()[0]
-
-        # Per-locator map: body segments without Czech text
-        cur.execute(
-            """
-            SELECT s.locator_path::text
-            FROM segment s
-            WHERE s.element_type = ANY(%s)
-              AND NOT EXISTS (
-                  SELECT 1 FROM segment_text st
-                  WHERE st.segment_id = s.segment_id AND st.lang = 'cs'
-              )
-            ORDER BY s.locator_path
-            """,
-            (list(body_types),),
-        )
-        missing_locators = [row[0] for row in cur.fetchall()]
+    segments_with_czech, total_body_segments, missing_locators = (
+        SegmentRepository(conn).body_text_coverage("cs")
+    )
 
     if total_body_segments > 0:
         pct = round(100.0 * segments_with_czech / total_body_segments, 1)
@@ -339,14 +298,14 @@ def write_bahounek_coverage(conn, gap_log: IO[str]) -> None:
 _SPOT_CHECK_ARTICLES = ["I.q3.a1", "I.q13.a5", "I_II.q5.a1", "II_II.q23.a1", "III.q1.a1"]
 
 
-def spot_check(elements: list[BahouněkElement]) -> None:
+def spot_check(elements: list[OverlayElement]) -> None:
     """Print a sample of matched elements for manual verification."""
     print("\nSpot-check (5 articles):")
     shown: dict[str, int] = {}
     for elem in elements:
         art = ".".join(elem.locator.split(".")[:3])
         if art in _SPOT_CHECK_ARTICLES and shown.get(art, 0) < 2:
-            print(f"  {elem.locator}: {elem.czech_text[:80]!r}")
+            print(f"  {elem.locator}: {elem.text[:80]!r}")
             shown[art] = shown.get(art, 0) + 1
 
 
@@ -355,11 +314,7 @@ def spot_check(elements: list[BahouněkElement]) -> None:
 def _articles_from_db() -> list[str]:
     """Return all article locators that have been inserted into segment."""
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT locator_path::text FROM segment WHERE element_type = 'article_title' ORDER BY locator_path"
-            )
-            return [row[0] for row in cur.fetchall()]
+        return SegmentRepository(conn).get_article_title_locators()
 
 
 def run(articles: list[str] | None = None, gap_log_path: Path | None = None) -> None:
