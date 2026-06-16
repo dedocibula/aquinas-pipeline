@@ -77,9 +77,9 @@ Explore agents + grep). Disposition per the user:
 | 0 — Test net (unify/prune/baseline) | ✅ DONE | baseline green at 745; dead tests pruned; shared conftest added |
 | 1 — Typed models | ✅ DONE | `c126da6`; models.py + 7 tests; 752 passed; v_segment flag resolved |
 | 2 — Repository layer | ✅ DONE | new `src/storage/` (db+models+repositories) holds all SQL; old fns are wrappers; +30 tests; 781 passed; import cycle removed (storage is a leaf) |
-| 2b — Flip callers to models | ✅ DONE (uncommitted) | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. **739 passed; ruff clean.** Remaining (optional follow-up): fold import_approvals' local `get_current_sense`/`get_la_surface`/`write_human_surface` into GlossaryRepository. |
+| 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
-| 4 — Parser base class | ☐ | |
+| 4 — Parser base class | ☐ | **Design tension found — decide before building (see §5 Phase 4 note).** The shared `store()` fits only the two *text-overlay* parsers (bahounek `cs`, english `en`): both look up an existing segment by locator and upsert `segment_text`. `parser_latin` is the *structural* parser — it CREATES segment rows + reply_to links + idempotent wipes; it has no locator to look up. Forcing it under one `store()` is a risky rewrite of working code with zero dedup. Also: a literal `ParsedElement(locator, element_type, text)` collides with locked tests (`.czech_text`/`.english_text`, latin's 4-arg `(locator, etype, text, reply_number)`). |
 | 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
 | 6 — Isolate optimize/ toolchain | ☐ | |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
@@ -310,6 +310,37 @@ One `DeepSeekClient` collapsing the 4 duplicated `requests.post` blocks:
   `(lang, source)`). Unify the 3 element dataclasses (`ParsedElement`, `BahounekElement`,
   `EnglishElement`) into one `ParsedElement(locator, element_type, text)`.
 - Locked by existing parser tests.
+
+**Design tension found while scoping (decide before building):**
+The three parsers do NOT share one `store()` contract:
+- `parser_bahounek` (`insert_bahounek_texts`, lang `cs`) and `ingest_english` (`insert_english_texts`,
+  lang `en`) genuinely share the loop: *look up existing segment by `locator_path::ltree` → upsert
+  `segment_text(lang, content, source_id)`; missing segment → gap-log-and-skip, or RuntimeError when
+  no gap log (fail-loud).* This is the real, valuable dedup.
+- `parser_latin` is structurally different: it CREATES the segment graph (`_insert_article`: segment
+  rows + title placeholders + reply_to links + idempotent term_usage/segment wipes). It never "looks
+  up an existing segment by locator." `SegmentRepository` has no create-segment method. Forcing latin
+  under a shared text-overlay `store()` = a risky rewrite of working idempotent code for zero dedup.
+- Element dataclasses can't be unified naively: locked tests reference `.czech_text`, `.english_text`,
+  and latin's 4-positional `ParsedElement(locator, etype, text, reply_number)`; latin's insert needs
+  `reply_number` for reply_to linking.
+
+**Recommended scope** (honest + low-risk, all behavior-preserving):
+1. `src/ingest/source_parser.py`: a `TextOverlayParser` ABC for the two overlay parsers — class attr
+   `lang`; abstract `parse(...) -> list[ParsedElement]`; concrete `store(conn, elements, src_id,
+   gap_log)` holding the shared lookup-and-upsert loop with the fail-loud/gap-log policy. One unified
+   `ParsedElement(locator, text)` for these two (rename `czech_text`/`english_text` → `text`; update
+   ~6 test sites — mechanical, behavior-preserving).
+2. Add `SegmentRepository.get_segment_id_by_locator(locator) -> int | None` (the one new SQL) so the
+   shared `store()` goes through the repo layer (Phase-2 invariant: all SQL in repos).
+3. `parser_bahounek.insert_bahounek_texts` / `ingest_english.insert_english_texts` become thin
+   wrappers over the base `store()`, preserving their exact signatures/return for callers + tests.
+4. **Leave `parser_latin` as-is** (the structural parser). Optionally note in its docstring that it is
+   the segment-graph creator, distinct from the overlay parsers — but do NOT contort it into the ABC.
+
+If the user instead wants all three under one ABC, that's a larger behavioral change requiring a
+`SegmentRepository` create-segment surface and rewriting latin's idempotent insert — flag the added
+risk first.
 
 ### Phase 5 — Pipeline: steps, runner, reporting, interactive → `src/pipeline/`
 - **5a** `PipelineStep` protocol (`name`, `run(ctx) -> StepResult`, optional `verify()`),
