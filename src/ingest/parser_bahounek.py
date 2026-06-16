@@ -212,12 +212,14 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[OverlayElem
 
     result: list[OverlayElement] = []
 
-    # Include Czech question titles for parent questions of requested articles.
-    # These are stored at the question locator (e.g. I.q3), not a sub-locator.
+    # Include Czech question titles and preambles for parent questions of requested articles.
     parent_q_locs = {".".join(loc.split(".")[:2]) for loc in article_locators}
     for q_loc in sorted(parent_q_locs):
         if q_loc in all_elements:
             result.append(all_elements[q_loc])
+        preamble_loc = f"{q_loc}.preamble"
+        if preamble_loc in all_elements:
+            result.append(all_elements[preamble_loc])
 
     # Body segments for each requested article
     for art_loc in article_locators:

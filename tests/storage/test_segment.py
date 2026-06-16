@@ -83,7 +83,18 @@ def test_wipe_article_deletes_in_fk_order(fake_conn):
     conn = fake_conn()
     SegmentRepository(conn).wipe_article("I.q1.a1", 1)
     tables = [sql.split("DELETE FROM ")[1].split(" ")[0] for sql, _ in conn.executed]
-    assert tables == ["term_usage", "segment_text", "segment"]
+    assert tables == ["run_segment", "term_usage", "segment_text", "segment"]
+    # subtree match for an article (descendants included)
+    assert all("<@" in sql for sql, _ in conn.executed)
+
+
+def test_wipe_segment_exact_match_in_fk_order(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).wipe_segment("I.q1.preamble", 1)
+    tables = [sql.split("DELETE FROM ")[1].split(" ")[0] for sql, _ in conn.executed]
+    assert tables == ["run_segment", "term_usage", "segment_text", "segment"]
+    # exact match for a leaf segment (no subtree operator)
+    assert all("<@" not in sql for sql, _ in conn.executed)
 
 
 def test_create_segment_returns_new_id(fake_conn):

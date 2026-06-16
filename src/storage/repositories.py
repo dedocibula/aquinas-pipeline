@@ -352,25 +352,34 @@ class SegmentRepository:
     def wipe_article(self, article_locator: str, work_id: int) -> None:
         """Delete every row under an article locator, in FK-dependency order.
 
-        term_usage → segment_text → segment. Makes the Latin parser idempotent:
-        re-parsing an article fully replaces its prior segment graph.
+        run_segment → term_usage → segment_text → segment. Makes the Latin parser
+        idempotent: re-parsing an article fully replaces its prior segment graph.
         """
+        self._wipe(article_locator, work_id, match="<@")
+
+    def wipe_segment(self, locator: str, work_id: int) -> None:
+        """Delete a single segment and its dependents (exact-match locator).
+
+        Same FK-dependency order as ``wipe_article`` but matches one locator
+        exactly rather than a subtree — used for leaf segments like preambles.
+        """
+        self._wipe(locator, work_id, match="=")
+
+    def _wipe(self, locator: str, work_id: int, *, match: str) -> None:
+        """Delete a segment subtree (``match='<@'``) or a single segment
+        (``match='='``) and its dependents, in FK-dependency order:
+        run_segment → term_usage → segment_text → segment."""
+        selector = (
+            f"segment_id IN (SELECT segment_id FROM segment "
+            f"WHERE locator_path {match} %s::ltree AND work_id = %s)"
+        )
         with self.conn.cursor() as cur:
+            cur.execute(f"DELETE FROM run_segment WHERE {selector}", (locator, work_id))
+            cur.execute(f"DELETE FROM term_usage WHERE {selector}", (locator, work_id))
+            cur.execute(f"DELETE FROM segment_text WHERE {selector}", (locator, work_id))
             cur.execute(
-                "DELETE FROM term_usage WHERE segment_id IN ("
-                "SELECT segment_id FROM segment "
-                "WHERE locator_path <@ %s::ltree AND work_id = %s)",
-                (article_locator, work_id),
-            )
-            cur.execute(
-                "DELETE FROM segment_text WHERE segment_id IN ("
-                "SELECT segment_id FROM segment "
-                "WHERE locator_path <@ %s::ltree AND work_id = %s)",
-                (article_locator, work_id),
-            )
-            cur.execute(
-                "DELETE FROM segment WHERE locator_path <@ %s::ltree AND work_id = %s",
-                (article_locator, work_id),
+                f"DELETE FROM segment WHERE locator_path {match} %s::ltree AND work_id = %s",
+                (locator, work_id),
             )
 
     def create_segment(self, work_id: int, locator: str, element_type: str) -> int:
