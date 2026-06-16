@@ -78,7 +78,7 @@ Explore agents + grep). Disposition per the user:
 | 1 — Typed models | ✅ DONE | `c126da6`; models.py + 7 tests; 752 passed; v_segment flag resolved |
 | 2 — Repository layer | ✅ DONE | new `src/storage/` (db+models+repositories) holds all SQL; old fns are wrappers; +30 tests; 781 passed; import cycle removed (storage is a leaf) |
 | 2b — Flip callers to models | ✅ DONE (uncommitted) | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. **739 passed; ruff clean.** Remaining (optional follow-up): fold import_approvals' local `get_current_sense`/`get_la_surface`/`write_human_surface` into GlossaryRepository. |
-| 3 — DeepSeek client | ☐ | |
+| 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ☐ | |
 | 5 — Pipeline steps + runner + reporting + interactive | ☐ | |
 | 6 — Isolate optimize/ toolchain | ☐ | |
@@ -88,6 +88,18 @@ Explore agents + grep). Disposition per the user:
 | 10/11 — Final gate + memory | ☐ | |
 
 ### Commits so far (on `aquinas-refactor`)
+- `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
+  - `common/deepseek_client.py`: `DeepSeekClient(model, *, url, api_key, timeout)` with
+    `chat(messages, *, temperature, max_tokens, response_format=None, timeout=None) -> ChatResult`
+    (content/usage/raw). API key resolved lazily at call time (module-level clients build at import).
+    `DeepSeekAPIError(RuntimeError)` carries `.status_code`; transport/empty-choices → plain RuntimeError.
+  - Callers keep only their own policy: translator/reviewer fail loud; `_call_deepseek_batch`
+    soft-fails to `{}` except fatal 401/402/403 (via `exc.status_code`) + keeps `_api_stats`;
+    `call_deepseek_label` keeps retry-with-backoff (now catches `RuntimeError`/`JSONDecodeError`).
+    Each keeps its own api-key guard where it must raise before the soft-fail path.
+  - Tests repointed to patch `common.deepseek_client.requests.post`; fakes set `.status_code`
+    (client no longer calls `raise_for_status`). New `tests/common/test_deepseek_client.py` (+9).
+    **748 passed; ruff clean.**
 - `4c7e934` test: repair pre-existing test drift to establish a green baseline
   - The suite on HEAD was **not** green: 1 failure + 2 uncollectable modules.
   - Removed dead tests for removed functions: `_iteration_count`, `fetch_reviewer_notes`
