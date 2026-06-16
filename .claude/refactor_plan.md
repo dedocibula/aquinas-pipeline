@@ -80,7 +80,7 @@ Explore agents + grep). Disposition per the user:
 | 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
-| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 pilot consolidation + 5a core + 5b first-consumers DONE** (see below); 5c reporting / 5d interactive still ☐ |
+| 5 — Pipeline steps + runner + reporting + interactive | ◐ | **5.0 + 5a + 5b + 5c reporting DONE** (see below); 5d interactive still ☐ |
 | 6 — Isolate optimize/ toolchain | ☐ | |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
 | 8 — Consolidate DB schema | ☐ | |
@@ -177,6 +177,35 @@ timing/fail-loud loop in `ingest/pipeline.py` is gone.
 - **Next (5c)**: `src/pipeline/reporting.py` `StepReport` writer; route each step's `StepResult`
   details into per-stage `reports/<stage>/` (use `ctx.stage_reports_dir`); PromptLogger JSONL →
   `reports/translate/debug/`.
+
+#### Phase 5c — Per-stage reporting — DONE
+Every step the `Runner` executes now leaves a concise, uniform run summary in its stage folder.
+- **New `src/pipeline/reporting.py`**: `StepReport(stage, result, started_at, elapsed_s)` renders a
+  `StepResult` to Markdown — header (`# <stage> · <step>`), status/when/elapsed/summary, a `## details`
+  section (one level of nesting expanded: dicts → indented sub-items, lists → count + 5-item preview,
+  bools → pass/FAIL), and a `## action required` section that names failing `checks` or, for any other
+  failure, points at the summary. `write(stage_dir)` → `<stage_dir>/<step>.md`. Rendering is generic
+  (no per-stage template) so a new step gets a usable report for free. Exported from `pipeline`.
+- **Runner writes the report**: `_run_one` split into the banner/timing/report-writing shell and a new
+  `_execute` (precondition + body → `StepResult`). Timing now spans the whole step (verify + run). When
+  a step declares a `stage` class attr, the runner writes the `StepReport` into
+  `ctx.stage_reports_dir(stage)`; bare Protocol/test steps without `stage` are unaffected (no file).
+- **Steps declare their stage**: `VerifySourcesStep` → `acquire`; `LatinStep/BahounekStep/EnglishStep`
+  + `ReportStep` → `ingest`; `ResolveStep` → `resolve`. (The step-owned domain reports — `m2_coverage.txt`,
+  `m2_parser_anomalies.txt`, `m2_latin_stats.json`, gap logs — stay flat in `reports/` for now: they're
+  cross-consumer coupled (`report_m2.py` reads the stats+anomaly files `LatinStep` writes), so relocating
+  them is a separate, riskier change deferred out of this additive pass.)
+- **PromptLogger JSONL relocated**: pilot's per-run debug log → `reports/translate/debug/debug_<ts>.jsonl`
+  (PromptLogger already creates parents). Docstring updated.
+- **Test isolation fix**: `steps.main()` writes to the real `reports/acquire/` now that the runner emits a
+  report, so the two `TestStepsMain` cases monkeypatch `steps.ROOT` to `tmp_path`.
+- **.gitignore**: the per-stage runner summaries (`reports/{acquire,ingest,resolve,review,translate}/`) are
+  ephemeral run output → ignored.
+- Tests: new `tests/pipeline/test_reporting.py` (+8 render/write), `tests/pipeline/test_runner.py`
+  `TestRunnerReporting` (+3: report written into stage folder, no-stage→no-file, failed step still
+  reported). **792 passed; ruff clean.**
+- **Next (5d)**: interactive driver → `src/pipeline/interactive.py` (`python -m pipeline`) — flow position
+  from DB status + last command (persist `.pipeline_state.json`) + numbered menu invoking Steps.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)

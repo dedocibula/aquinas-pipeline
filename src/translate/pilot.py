@@ -21,7 +21,8 @@ Abort conditions (exits 1):
     - needs_human / total > 0.20   → rubric too strict
     - sum(iterations) / total > 2.5 → translator prompt needs tuning
 
-Writes reports/m4_sample.txt and a per-run prompt log to reports/debug_<ts>.jsonl.
+Writes reports/m4_sample.txt and a per-run prompt log to
+reports/translate/debug/debug_<ts>.jsonl.
 """
 
 from __future__ import annotations
@@ -139,7 +140,7 @@ def fetch_corpus_char_counts(conn) -> dict[str, int]:
 
 def run_pilot() -> None:
     start = time.time()
-    debug_log_path = _REPORTS_DIR / f"debug_{int(start)}.jsonl"
+    debug_log_path = _REPORTS_DIR / "translate" / "debug" / f"debug_{int(start)}.jsonl"
 
     with get_conn() as conn:
         pending = fetch_sample_segments(conn)

@@ -81,3 +81,9 @@ output/
 
 # ─── Pipeline debug / run logs ───────────────────────
 reports/debug_*
+# Per-step run summaries written by the pipeline Runner (ephemeral)
+reports/acquire/
+reports/ingest/
+reports/resolve/
+reports/review/
+reports/translate/

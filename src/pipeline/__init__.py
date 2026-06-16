@@ -13,7 +13,15 @@ modules live alongside their stage (ingest/, translate/, acquire/).
 from __future__ import annotations
 
 from pipeline.context import PipelineContext
+from pipeline.reporting import StepReport
 from pipeline.runner import Runner
 from pipeline.step import BaseStep, PipelineStep, StepResult
 
-__all__ = ["PipelineContext", "PipelineStep", "StepResult", "BaseStep", "Runner"]
+__all__ = [
+    "PipelineContext",
+    "PipelineStep",
+    "StepResult",
+    "BaseStep",
+    "Runner",
+    "StepReport",
+]

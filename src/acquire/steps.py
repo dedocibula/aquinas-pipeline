@@ -25,6 +25,7 @@ class VerifySourcesStep(BaseStep):
     """
 
     name = "verify-sources"
+    stage = "acquire"
 
     def __init__(self, checks: list[tuple[str, object]] | None = None) -> None:
         self._checks = list(CHECKS if checks is None else checks)

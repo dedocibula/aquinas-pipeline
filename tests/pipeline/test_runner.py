@@ -140,6 +140,47 @@ class TestRunnerVerifyHook:
         assert "DB down" in err.getvalue()
 
 
+class _StagedStep(BaseStep):
+    """Step that declares a stage folder, so the runner persists a report."""
+
+    def __init__(self, name, stage, *, ok=True, summary="", details=None):
+        self.name = name
+        self.stage = stage
+        self._ok = ok
+        self._summary = summary
+        self._details = details or {}
+
+    def run(self, ctx):
+        return StepResult(
+            name=self.name, ok=self._ok, summary=self._summary, details=self._details
+        )
+
+
+class TestRunnerReporting:
+    def test_writes_report_into_stage_folder(self, tmp_path):
+        step = _StagedStep("latin", "ingest", summary="60/60", details={"anomalies": 2})
+        _runner(tmp_path).run([step])
+        report = tmp_path / "ingest" / "latin.md"
+        assert report.is_file()
+        text = report.read_text(encoding="utf-8")
+        assert "# ingest · latin" in text
+        assert "- summary: 60/60" in text
+        assert "- anomalies: 2" in text
+
+    def test_no_stage_means_no_report(self, tmp_path):
+        # bare step without a `stage` attr (the test recorder) writes nothing
+        _runner(tmp_path).run([_RecordingStep("x")])
+        assert list(tmp_path.iterdir()) == []
+
+    def test_failed_step_still_reported(self, tmp_path):
+        step = _StagedStep("resolve", "resolve", ok=False, summary="boom")
+        runner = Runner(_ctx(tmp_path), out=io.StringIO(), err=io.StringIO())
+        runner.run([step])
+        text = (tmp_path / "resolve" / "resolve.md").read_text(encoding="utf-8")
+        assert "- status: FAILED" in text
+        assert "## action required" in text
+
+
 class TestProtocolConformance:
     def test_recording_step_is_a_pipeline_step(self):
         assert isinstance(_RecordingStep("x"), PipelineStep)

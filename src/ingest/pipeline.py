@@ -52,6 +52,7 @@ _KNOB_KEYS = (
 
 class LatinStep(BaseStep):
     name = "latin"
+    stage = "ingest"
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.parser_latin import run_full
@@ -85,6 +86,7 @@ class LatinStep(BaseStep):
 
 class BahounekStep(BaseStep):
     name = "bahounek"
+    stage = "ingest"
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.parser_bahounek import run
@@ -99,6 +101,7 @@ class BahounekStep(BaseStep):
 
 class EnglishStep(BaseStep):
     name = "english"
+    stage = "ingest"
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.ingest_english import run
@@ -111,6 +114,7 @@ class EnglishStep(BaseStep):
 
 class ResolveStep(BaseStep):
     name = "resolve"
+    stage = "resolve"
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.resolver import run
@@ -137,6 +141,7 @@ class ResolveStep(BaseStep):
 
 class ReportStep(BaseStep):
     name = "report"
+    stage = "ingest"
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.report_m2 import run

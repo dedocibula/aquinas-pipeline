@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import datetime
 from typing import Sequence
 
 from pipeline.context import PipelineContext
+from pipeline.reporting import StepReport
 from pipeline.step import PipelineStep, StepResult
 
 
@@ -52,6 +54,28 @@ class Runner:
         print(f"STEP: {name.upper()}", file=self._out)
         print(f"{'=' * 60}", file=self._out)
 
+        started_at = datetime.now()
+        t0 = time.monotonic()
+        result = self._execute(step)
+        elapsed = time.monotonic() - t0
+
+        status = "ok" if result.ok else "FAILED"
+        suffix = f" — {result.summary}" if result.summary else ""
+        print(f"[{name}] {status} in {elapsed:.1f}s{suffix}", file=self._out)
+
+        # Persist a concise per-step report when the step declares its stage
+        # folder. Bare Protocol/test steps without a `stage` are unaffected.
+        stage = getattr(step, "stage", None)
+        if stage:
+            StepReport(
+                stage=stage, result=result, started_at=started_at, elapsed_s=elapsed
+            ).write(self.ctx.stage_reports_dir(stage))
+        return result
+
+    def _execute(self, step: PipelineStep) -> StepResult:
+        """Run a step's precondition + body, turning any failure into a StepResult."""
+        name = step.name
+
         # Precondition gate. A step may declare verify(ctx) -> bool (BaseStep
         # defaults it to True). A False precondition is a failure, so under the
         # default stop-on-failure the rest of the run refuses to proceed.
@@ -66,15 +90,8 @@ class Runner:
                 print(f"\nFAIL in step '{name}': precondition not met", file=self._err)
                 return StepResult(name=name, ok=False, summary="precondition not met")
 
-        t0 = time.monotonic()
         try:
-            result = step.run(self.ctx)
+            return step.run(self.ctx)
         except Exception as exc:  # fail loud, but keep the run summary intact
             print(f"\nFAIL in step '{name}': {exc}", file=self._err)
             return StepResult(name=name, ok=False, summary=str(exc))
-
-        elapsed = time.monotonic() - t0
-        status = "ok" if result.ok else "FAILED"
-        suffix = f" — {result.summary}" if result.summary else ""
-        print(f"[{name}] {status} in {elapsed:.1f}s{suffix}", file=self._out)
-        return result

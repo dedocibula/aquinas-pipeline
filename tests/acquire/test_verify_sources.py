@@ -233,10 +233,13 @@ class TestVerifySourcesStep:
 
 
 class TestStepsMain:
-    def test_main_returns_0_when_all_pass(self, monkeypatch):
+    def test_main_returns_0_when_all_pass(self, monkeypatch, tmp_path):
+        # isolate the report destination so the run doesn't write into repo reports/
+        monkeypatch.setattr(steps, "ROOT", tmp_path)
         monkeypatch.setattr(steps, "CHECKS", [("a", lambda: True)])
         assert steps.main() == 0
 
-    def test_main_returns_1_when_a_check_fails(self, monkeypatch):
+    def test_main_returns_1_when_a_check_fails(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(steps, "ROOT", tmp_path)
         monkeypatch.setattr(steps, "CHECKS", [("a", lambda: False)])
         assert steps.main() == 1
