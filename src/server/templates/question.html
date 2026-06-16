@@ -9,11 +9,7 @@
 {% block content %}
 <h1>{{ question_title }}</h1>
 
-{% if title_seg %}
-{% set seg = title_seg %}
-{% set ts = seg.translation_status %}
-{% set needs_human = (ts == 'needs_human') %}
-{% set panel_id = 'detail-' ~ seg.segment_id %}
+{% if title_seg or preamble_seg %}
 <table class="parallel-text">
   <thead>
     <tr>
@@ -30,6 +26,12 @@
     </tr>
   </thead>
   <tbody>
+    {# --- Nadpis row --- #}
+    {% if title_seg %}
+    {% set seg = title_seg %}
+    {% set ts = seg.translation_status %}
+    {% set needs_human = (ts == 'needs_human') %}
+    {% set panel_id = 'detail-' ~ seg.segment_id %}
     <tr class="row-question_title{% if needs_human %} row-needs-human{% endif %}"
       data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
@@ -88,8 +90,76 @@
         {% endif %}
       </td>
     </tr>
+    {% endif %}
+
+    {# --- Preambula row --- #}
+    {% if preamble_seg %}
+    {% set seg = preamble_seg %}
+    {% set ts = seg.translation_status %}
+    {% set needs_human = (ts == 'needs_human') %}
+    {% set panel_id = 'detail-' ~ seg.segment_id %}
+    <tr class="row-preamble{% if needs_human %} row-needs-human{% endif %}"
+      data-segment-id="{{ seg.segment_id }}">
+      <td class="col-label">Preambula</td>
+      <td class="col-latin">
+        <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
+        <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
+        <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
+      </td>
+      <td class="col-slovak slovak">
+        {% if seg.slovak %}
+        <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
+        <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}" style="display:none"
+          rows="5">{{ seg.slovak }}</textarea>
+        <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
+          <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
+          <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+        </div>
+        {% else %}
+        <em class="awaiting">— awaiting translation —</em>
+        {% endif %}
+        {% if seg.slovak and ts in ('translated', 'needs_human') %}
+        <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
+        {% endif %}
+        {% if ts in ('translated', 'needs_human') %}
+        <button class="detail-toggle" data-target="{{ panel_id }}"
+          aria-expanded="{{ 'true' if needs_human else 'false' }}" aria-controls="{{ panel_id }}">&#9654;
+          details</button>
+        <div class="detail-panel" id="{{ panel_id }}" {% if not needs_human %}style="display:none" {% endif %}>
+          <div class="detail-section">
+            <span class="detail-label">Locked terms</span>
+            {% if preamble_constraints %}
+            <ul class="term-list">
+              {% for c in preamble_constraints %}
+              <li>
+                <code>{{ c.latin_lemma }}</code>
+                {% if c.context_label %}<span class="term-context">({{ c.context_label }})</span>{% endif %}
+                &rarr; <span class="term-slovak">{{ c.slovak }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <span class="detail-none">no term constraints</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </td>
+      <td class="col-status">
+        {% if ts == 'translated' %}
+        <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
+        {% elif needs_human %}
+        <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+        <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
+        {% else %}
+        <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endif %}
   </tbody>
 </table>
+<hr>
 {% endif %}
 
 <table class="article-list">
@@ -119,7 +189,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% if title_seg %}
+{% if title_seg or preamble_seg %}
 <script>
   (function () {
     var sel = document.getElementById('ref-lang-select');

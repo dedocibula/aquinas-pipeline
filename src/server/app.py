@@ -21,6 +21,7 @@ from server.db import (  # noqa: E402
     get_article_segments,
     get_prev_next_article,
     get_question_articles,
+    get_question_preamble_segment,
     get_question_title_segment,
     get_segment_constraints,
     get_structural_formulas,
@@ -152,10 +153,15 @@ def _question_view(ltree_path: str, st_locator: str):
     with get_conn() as conn:
         articles = get_question_articles(conn, ltree_path)
         title_seg = get_question_title_segment(conn, ltree_path)
-        title_constraints = (
-            get_segment_constraints(conn, [title_seg["segment_id"]])
-            if title_seg else {}
-        )
+        preamble_seg = get_question_preamble_segment(conn, ltree_path)
+        constraint_ids = []
+        if title_seg:
+            constraint_ids.append(title_seg["segment_id"])
+        if preamble_seg:
+            constraint_ids.append(preamble_seg["segment_id"])
+        all_constraints = get_segment_constraints(conn, constraint_ids) if constraint_ids else {}
+        title_constraints = all_constraints.get(title_seg["segment_id"], []) if title_seg else []
+        preamble_constraints = all_constraints.get(preamble_seg["segment_id"], []) if preamble_seg else []
 
     if not articles:
         abort(404)
@@ -172,6 +178,8 @@ def _question_view(ltree_path: str, st_locator: str):
         articles=articles,
         title_seg=title_seg,
         title_constraints=title_constraints,
+        preamble_seg=preamble_seg,
+        preamble_constraints=preamble_constraints,
     )
 
 
