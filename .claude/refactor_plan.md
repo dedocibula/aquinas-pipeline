@@ -83,8 +83,8 @@ Explore agents + grep). Disposition per the user:
 | 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below) |
 | 6 — Isolate optimize/ toolchain | ✅ DONE | new `src/optimize/` package; toolchain relocated; 823 passed; ruff clean (see below). **Re-verified this session: 795 passed, ruff clean, deliverables present, old paths gone.** |
 | 6.1 — report* review + gap-term dedup (user-requested side tasks) | ✅ DONE | see below |
-| 7 — Strip milestone labels; rename milestone files | ☐ NEXT | |
-| 8 — Consolidate DB schema | ☐ | |
+| 7 — Strip milestone labels; rename milestone files | ✅ DONE | `40ebe40`; report_m2 → coverage_report |
+| 8 — Consolidate DB schema | ✅ DONE | `db/schema.sql` (annotated, verified identical to live) + seed; migrations 001–007 → `migrations/archive/`; README setup step (see below) |
 | 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
 | 10/11 — Final gate + memory | ☐ | |
 
@@ -293,6 +293,35 @@ Two side tasks the user asked for after Phase 6.
   idempotently regenerated; OR in-place `lower()` rename where no lowercase twin exists). **Per
   CLAUDE.md: write as a `--dry-run` script, present the plan, STOP for approval before any DELETE.**
   Not yet started — decision surfaced to the user.
+
+#### Phase 8 — Consolidate DB schema → `db/schema.sql` — DONE
+Single annotated current-state schema; no DB change (read-only `pg_dump` used to verify).
+- **New `db/schema.sql`**: hand-organized, heavily commented consolidation equal to the live schema
+  after migrations 001–007. Dependency order: extensions → tables (work, source, segment,
+  segment_text, glossary_term, glossary_sense, sense_rendering, term_usage, translation_run,
+  run_segment) → supporting/partial indexes → views (`v_segment`, `v_sense`) → **seed data** (source
+  precedence rows + the Summa `work` row — required for a functional fresh install; `--schema-only`
+  omits it, so it's added back deliberately). Every table/column annotated with PRODUCER + CONSUMER
+  (drawn from `.claude/database.md`). Header documents: fresh setup loads this file; archive is
+  historical only.
+- **Verified identical**: loaded `db/schema.sql` into a throwaway DB (`schema_verify`) in the
+  `aquinas-pipeline-db-1` container; normalized `pg_dump --schema-only` of live vs throwaway → **byte
+  identical** (after fixing two initial misses: dropped `glossary_term.la_surface` from migration 007,
+  and the explicit `sense_rendering_sense_lang_source_unique` constraint name; column order
+  `notes, category, la_surface` matched to live). Seed `source`/`work` rows diffed identical too.
+  Throwaway DB dropped after verification.
+- **Migrations archived**: `git mv migrations/00{1..7}_*.sql migrations/archive/` (002 **is** present —
+  the plan's "verify 002" resolved). New `migrations/archive/README.md`: historical-only, do-not-replay,
+  table of what each migration did. No code (src/tests/scripts) referenced the migration paths — only
+  historical design docs in `.claude/`, left as-is.
+- **README**: added "4. Create the schema" step (`docker exec … psql < db/schema.sql`) — psql isn't on
+  PATH locally, so the documented path runs inside the db container.
+- **No DDL against the live DB.** **802 passed; ruff clean** (Phase 8 touched no Python).
+- **Next (Phase 9)**: domain housekeeping — the only behavioral phase. 9a `_oov_stem` encapsulation
+  (optional cleaner impl behind locked `test_prechecks.py`); 9b habere purge — write
+  `scripts/purge_habere_ppp_usage.py` as **--dry-run**, present plan, **STOP for human approval** before
+  any DELETE, then harden resolver + delete `_drop_habere_ppp_constraints`. Note the still-pending
+  gated gap-term existing-data cleanup from Phase 6.1 (also a destructive migration needing approval).
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)

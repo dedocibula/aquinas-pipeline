@@ -53,7 +53,18 @@ postgresql://aquinas:aquinas@localhost:5432/aquinas
 docker compose up -d
 ```
 
-This starts PostgreSQL 16 with the `pgvector` extension available. The `ltree` extension is enabled during M1 schema creation.
+This starts PostgreSQL 16 with the `pgvector` extension available.
+
+**4. Create the schema**
+
+```bash
+docker exec -i aquinas-pipeline-db-1 psql -U aquinas -d aquinas < db/schema.sql
+```
+
+`db/schema.sql` is the single source of truth for the database shape (extensions,
+tables, views, and the source/work seed data). The incremental migrations that
+originally built it live in `migrations/archive/` for provenance only — do not
+replay them on a fresh database.
 
 ```bash
 bash scripts/install-hooks.sh
