@@ -1,17 +1,14 @@
-"""Unit tests for the shared TextOverlayParser.store() loop."""
+"""Unit tests for the shared TextOverlayWriter.store() loop."""
 
 from __future__ import annotations
 
 import pytest
 
-from ingest.source_parser import OverlayElement, TextOverlayParser
+from ingest.source_parser import OverlayElement, TextOverlayWriter
 
 
-class _StubParser(TextOverlayParser):
+class _StubWriter(TextOverlayWriter):
     lang = "cs"
-
-    def parse(self, article_locators):  # pragma: no cover - not exercised here
-        return []
 
 
 def test_store_upserts_found_and_invokes_on_missing(fake_conn):
@@ -23,7 +20,7 @@ def test_store_upserts_found_and_invokes_on_missing(fake_conn):
     ]
     missed: list[str] = []
 
-    inserted = _StubParser().store(conn, elements, src_id=3, on_missing=missed.append)
+    inserted = _StubWriter().store(conn, elements, src_id=3, on_missing=missed.append)
 
     assert inserted == 1
     assert missed == ["I.q9.a9.respondeo"]
@@ -40,6 +37,6 @@ def test_store_propagates_on_missing_raise(fake_conn):
         raise RuntimeError(f"no segment for {locator}")
 
     with pytest.raises(RuntimeError, match="no segment for"):
-        _StubParser().store(
+        _StubWriter().store(
             conn, [OverlayElement("I.q9.a9.respondeo", "x")], src_id=1, on_missing=boom
         )

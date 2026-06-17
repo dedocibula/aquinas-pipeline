@@ -32,7 +32,7 @@ import bs4
 from bs4 import BeautifulSoup
 
 from ingest.parser_latin import _PARS_CODE, TEST_ARTICLES
-from ingest.source_parser import OverlayElement, TextOverlayParser
+from ingest.source_parser import OverlayElement, TextOverlayWriter
 from storage.db import get_conn, source_id
 from storage.repositories import SegmentRepository
 
@@ -233,16 +233,13 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[OverlayElem
 
 # ── DB insertion ──────────────────────────────────────────────────────────────
 
-class BahounekParser(TextOverlayParser):
-    """Czech overlay parser: writes segment_text(cs) from Bahounek HTML."""
+class BahounekWriter(TextOverlayWriter):
+    """Writes segment_text(cs) from parsed Bahounek elements."""
 
     lang = "cs"
 
-    def parse(self, article_locators: list[str]) -> list[OverlayElement]:
-        return parse_bahounek_for_articles(article_locators)
 
-
-_BAHOUNEK = BahounekParser()
+_BAHOUNEK = BahounekWriter()
 
 
 def insert_bahounek_texts(

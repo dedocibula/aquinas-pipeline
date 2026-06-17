@@ -29,7 +29,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Tag
 
 from ingest.parser_latin import TEST_ARTICLES
-from ingest.source_parser import OverlayElement, TextOverlayParser
+from ingest.source_parser import OverlayElement, TextOverlayWriter
 from storage.db import get_conn, source_id
 from storage.repositories import SegmentRepository
 
@@ -225,16 +225,13 @@ def parse_english_for_articles(
 
 # ── DB insertion ──────────────────────────────────────────────────────────────
 
-class EnglishParser(TextOverlayParser):
-    """English overlay parser: writes segment_text(en) from Dominican/Freddoso HTML."""
+class EnglishWriter(TextOverlayWriter):
+    """Writes segment_text(en) from parsed Dominican/Freddoso elements."""
 
     lang = "en"
 
-    def parse(self, article_locators: list[str]) -> list[OverlayElement]:
-        return parse_english_for_articles(article_locators)
 
-
-_ENGLISH = EnglishParser()
+_ENGLISH = EnglishWriter()
 
 
 def insert_english_texts(

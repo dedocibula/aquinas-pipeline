@@ -1,19 +1,23 @@
-"""Shared base for the text-overlay parsers (Czech Bahounek, English Dominican).
+"""Shared text-overlay writer for the Czech (Bahounek) and English (Dominican)
+sources.
 
-Both overlay an existing Latin-built segment graph: they parse a source into
-``OverlayElement``s, look each one up by its ltree locator, and upsert a
-``segment_text`` row in their language. They never create segments — that is the
-job of ``parser_latin`` (the structural parser), which is intentionally not part
-of this hierarchy.
+Both overlay an existing Latin-built segment graph: a source-specific function
+parses the source into ``OverlayElement``s, then ``TextOverlayWriter.store()``
+looks each one up by its ltree locator and upserts a ``segment_text`` row in the
+writer's language. They never create segments — that is the job of
+``parser_latin`` (the structural parser), which is intentionally not part of this
+hierarchy.
 
-The only behaviour that differs between the two overlay sources is the policy for
-a locator with no matching segment (fail-loud vs gap-log vs silent skip) and the
-exact gap-log sink. That decision is injected into ``store()`` via an
-``on_missing`` callback so the shared lookup-and-upsert loop lives in one place.
+Parsing is *not* shared (the two sources have unrelated HTML shapes), so it stays
+in per-source module functions (``parse_bahounek_for_articles`` /
+``parse_english_for_articles``); only the lookup-and-upsert loop is common. The
+one behaviour that differs between the two sources is the policy for a locator
+with no matching segment (fail-loud vs gap-log vs silent skip) and the exact gap-
+log sink. That decision is injected into ``store()`` via an ``on_missing``
+callback so the shared loop lives in one place.
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
 
@@ -28,14 +32,10 @@ class OverlayElement:
     text: str
 
 
-class TextOverlayParser(ABC):
-    """Base class for parsers that attach a language's text to existing segments."""
+class TextOverlayWriter:
+    """Writes a language's text onto existing segments. Subclass to set ``lang``."""
 
-    lang: str  # segment_text.lang this parser writes ('cs' | 'en')
-
-    @abstractmethod
-    def parse(self, article_locators: list[str]) -> list[OverlayElement]:
-        """Parse the source files into overlay elements for the given articles."""
+    lang: str  # segment_text.lang this writer targets ('cs' | 'en')
 
     def store(
         self,
