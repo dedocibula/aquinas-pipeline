@@ -1,8 +1,8 @@
 """Source verification as a pipeline step.
 
-Wraps the source acceptance checks (`acquire.verify`) as `VerifySourcesStep` so
-the ingest pipeline can run it as prerequisite step 0: if the source tree, DB,
-or env is broken, the runner stops before any ingest step touches the database.
+Wraps the source acceptance checks (`acquire.verify`) as `VerifySourcesStep` so a
+run can gate on it: if the source tree, DB, or env is broken, the runner stops
+before any downstream step touches the database.
 
 Entry point: ``python -m acquire.steps`` (drives `main`).
 """

@@ -1,6 +1,6 @@
 """Executes an ordered sequence of steps against one context.
 
-Lifts the timing/logging/fail-loud loop that ``ingest/pipeline.py`` grew by
+Lifts the timing/logging/fail-loud loop the ingest pipeline previously grew by
 hand so every stage gets identical behaviour:
 
   - a banner per step,

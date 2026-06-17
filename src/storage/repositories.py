@@ -4,7 +4,7 @@ Each repository wraps a live psycopg2 connection and exposes typed methods that
 return the dataclasses in ``storage.models`` (Term/Sense/Segment/Constraint) or
 plain scalars. The SQL was moved verbatim from the former scattered helpers
 (``glossary_repo``, ``corpus_db``, inline ``translate.loop`` / ``translate.run``
-helpers, ``ingest.resolution._write_term_usage``); only the row→model mapping is
+helpers, ``ingest.resolver._write_term_usage``); only the row→model mapping is
 new. Those former module-level functions remain as thin wrappers that delegate
 here while the dict→model boundary migrates.
 """

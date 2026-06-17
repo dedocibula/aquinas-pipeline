@@ -14,7 +14,7 @@ from ingest.gap_terms import (
     _strip_lemma_suffix,
     pilot_batch_sizes,
 )
-from ingest.resolution import (
+from ingest.resolver import (
     _match_pattern,
     _resolve_multi,
     _resolve_single,

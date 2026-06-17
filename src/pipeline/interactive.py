@@ -171,27 +171,27 @@ def build_menu() -> list[MenuItem]:
         return VerifySourcesStep()
 
     def _latin() -> PipelineStep:
-        from ingest.pipeline import LatinStep
+        from ingest.steps import LatinStep
 
         return LatinStep()
 
     def _bahounek() -> PipelineStep:
-        from ingest.pipeline import BahounekStep
+        from ingest.steps import BahounekStep
 
         return BahounekStep()
 
     def _english() -> PipelineStep:
-        from ingest.pipeline import EnglishStep
+        from ingest.steps import EnglishStep
 
         return EnglishStep()
 
     def _resolve() -> PipelineStep:
-        from ingest.pipeline import ResolveStep
+        from ingest.steps import ResolveStep
 
         return ResolveStep()
 
     def _mine() -> PipelineStep:
-        from ingest.pipeline import MineSensesStep
+        from ingest.steps import MineSensesStep
 
         return MineSensesStep()
 
@@ -221,7 +221,7 @@ def build_menu() -> list[MenuItem]:
         return RetranslateBodyStep()
 
     def _report() -> PipelineStep:
-        from ingest.pipeline import ReportStep
+        from ingest.steps import ReportStep
 
         return ReportStep()
 

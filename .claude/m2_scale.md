@@ -101,9 +101,9 @@ Populate `term_usage` corpus-wide.
   - `GAP_BATCH_SIZE`  — lemmas per DeepSeek call (default 25)
   - `GAP_MAX_WORKERS` — concurrent batch requests (default 10)
 
-Track and log: total API calls made, total cost incurred. Use the pilot to size batches
-before the full run: `uv run python -m ingest.pipeline --pilot N --batch-sizes 25,50`
-(prints per-batch-size cost and the category distribution).
+Track and log: total API calls made, total cost incurred. Size batches via the
+`GAP_BATCH_SIZE` knob before the full run (the resolver writes per-run API cost to
+`reports/m2_api_stats.json`).
 
 **Why dynamic categorization, not a static blocklist:**
 A hardcoded Latin blocklist is brittle, bakes Summa assumptions into Python, and — fatally —
