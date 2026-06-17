@@ -85,7 +85,7 @@ Explore agents + grep). Disposition per the user:
 | 6.1 — report* review + gap-term dedup (user-requested side tasks) | ✅ DONE | see below |
 | 7 — Strip milestone labels; rename milestone files | ✅ DONE | `40ebe40`; report_m2 → coverage_report |
 | 8 — Consolidate DB schema | ✅ DONE | `db/schema.sql` (annotated, verified identical to live) + seed; migrations 001–007 → `migrations/archive/`; README setup step (see below) |
-| 9 — Domain housekeeping (oov_stem, habere) | ◑ | 9a DONE (`b5a770d`); 9b (habere purge) pending — gated by approval |
+| 9 — Domain housekeeping (oov_stem, habere) | ✅ DONE | 9a (`b5a770d`); 9b — resolver root-cause fix + 492-row purge (user-approved, applied) + read-time patch deleted |
 | 10/11 — Final gate + memory | ☐ | |
 
 #### Phase 5.0 — Pilot consolidation (sample-only) — DONE
@@ -342,6 +342,32 @@ non-blocking and would risk the locked snapshots; the existing stem heuristic is
 - **Next (9b)**: habere purge — `scripts/purge_habere_ppp_usage.py` as **--dry-run**, present plan,
   **STOP for human approval** before any DELETE, then harden resolver (`pos_tag_latin`) + delete
   `_drop_habere_ppp_constraints` / its call / `_HABERE_PPP_RE` (keep `_SUFFIX_RE`).
+
+#### Phase 9b — Habere PPP: root-cause fix + purge + delete read-time patch — DONE
+The bogus *habitus* problem was bigger than expected. **Measured in the live DB: 492 of 1215 habitus
+term_usage rows (40%) were false positives** — CLTK lemmatizes the perfect-passive participle 'habitum'
+(in 'habitum est' / 'habita sunt', the stock scholastic "as has been said") to the noun *habitus*, an
+approved Krystal term. User chose the **full root-cause fix** (over purge-only / no-resolver-fix).
+- **Resolver root-cause fix** (`ingest/resolver._suppressed_habitus_tokens`, commit before purge):
+  detects the construction and suppresses the habitus mapping **at resolve time** (write path) so the
+  bogus row is never written. Finding that shaped the design: `pos_tag_latin` tags the participle
+  itself `'?'` for *both* the noun and the PPP, so it can't disambiguate the participle — the reliable
+  signal is the *esse* copula it precedes (tagged `'V'`). Suppress only when the construction is the
+  segment's **sole** habitus evidence ('habita' lemmatizes to 'habeo', so only 'habitum' leaks). Gated
+  behind a cheap regex so the POS tagger runs only when habitum/habita+esse is literally present.
+  +4 model-gated resolver tests. **This function is PERMANENT** — CLTK re-mislemmatizes on every run,
+  so removing it would regenerate the 492 rows. It is the fix, not a hack.
+- **Purge** (`scripts/purge_habere_ppp_usage.py`, dry-run by default, `--apply` to delete): reuses
+  `_suppressed_habitus_tokens` as the single source of truth for "bogus", so the script and resolver
+  agree by construction. Touches only `term_usage` (habitus term/senses untouched). Dry-run → 492 →
+  **STOPPED for approval → user approved → `--apply` deleted 492**; re-run dry-run confirmed
+  idempotent (723 genuine kept, 0 bogus).
+- **Read-time patch DELETED** (`translate/loop.py`): `_drop_habere_ppp_constraints` + `_HABERE_PPP_RE`
+  + the call in `translate_segment` removed (the temporary symptom-masking patch, now redundant);
+  `_SUFFIX_RE` kept (still used by `_build_surface_constraints`). 5 superseded loop tests removed.
+- End state: correction lives once on the **write path** (resolver, where the defect originates) instead
+  of running on every translation in the wrong module. **811 passed; ruff clean.** Commits: resolver fix,
+  dry-run purge script, read-time patch removal.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
