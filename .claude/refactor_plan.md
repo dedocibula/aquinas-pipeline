@@ -90,7 +90,7 @@ Explore agents + grep). Disposition per the user:
 | 8 — Consolidate DB schema | ✅ DONE | `db/schema.sql` (annotated, verified identical to live) + seed; migrations 001–007 → `migrations/archive/`; README setup step (see below) |
 | 9 — Domain housekeeping (oov_stem, habere) | ✅ DONE | 9a (`b5a770d`); 9b — resolver root-cause fix + 492-row purge (user-approved, applied) + read-time patch deleted |
 | 10 — Final regression gate | ✅ DONE | `1d646f9`; suite green at 811, ruff clean; every entry point smoke-tested; per-stage reports populate; resolver sample diff identical; tests unified onto one fake source (see below) |
-| 11 — Project memory entry | ☐ | folder map + conventions → permanent memory (the only remaining step) |
+| 11 — Project memory entry | ✅ DONE | `project-aquinas-architecture` memory written (folder map + conventions + dataclass/class-first/reuse/test-fake guidance), indexed in MEMORY.md |
 
 #### Phase 5.0 — Pilot consolidation (sample-only) — DONE
 Decision (user-approved): the pilot and the production runner (`translate/run.py`) do **not** differ
