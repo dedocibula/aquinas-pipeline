@@ -3,6 +3,11 @@
 > Single source of truth for the typed/modular/step-based refactor. Read this first
 > when resuming. Plan approved; Phase 0 complete. Work happens on branch
 > `aquinas-refactor` in the worktree `.claude/worktrees/aquinas-refactor/`.
+>
+> **⚠️ CURRENT ACTIVITY (resume here): pre-merge critical review.** All 11 phases are
+> implemented; we are now walking the branch phase-by-phase to catch issues before
+> merging to `main`. See **§10 — Pre-merge critical review** at the bottom for the
+> gated workflow, what's been reviewed, and the queued critiques for the next unit.
 
 ---
 
@@ -768,6 +773,75 @@ uv run ruff check
 # Phase 9: uv run python -m scripts.purge_habere_ppp_usage --dry-run   # review → approve → run
 # Phase 5: uv run python -m pipeline                # interactive driver
 ```
+
+---
+
+## 10. Pre-merge critical review (IN PROGRESS — resume here)
+
+All 11 phases are implemented and the branch is green (**811 passed, ruff clean**,
+working tree clean). Before merging `aquinas-refactor` → `main` we walk the branch
+**phase-by-phase**, being deliberately critical, to catch issues now.
+
+### Workflow (gated — honor this)
+- Review **one unit at a time**; present findings (verdict + "what could be improved").
+- **STOP after each unit for the user's explicit review.** Do not roll ahead to the next
+  unit without the user's go-ahead.
+- When the user approves a cleanup, implement it in a small commit (show diff, keep suite
+  green at ≥745 / ruff clean), then hand control back.
+- Verification per unit: `uv run pytest -q` + `uv run ruff check`.
+
+### Review units & status
+| Unit | Phases | Status |
+|---|---|---|
+| 1 | 0 (test net) + 1 (typed models) | ✅ REVIEWED + cleaned (commit `5adaa7d`) |
+| 2 | 2 + 2b (repository layer + caller flip) | ⏭️ NEXT |
+| 3 | 3 (DeepSeek client) | pending |
+| 4 | 4 (parser base class) | pending |
+| 5 | 5 (pipeline steps/runner/reporting/interactive) | pending |
+| 6 | 6 (optimize isolation) | pending |
+| 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
+| 8 | 9 (domain housekeeping — the only behavioral phase) | pending |
+| 9 | 10 + 11 (regression gate + memory) — overall merge verdict | pending |
+
+(Mirror of these units in the live task list, IDs #1–#9.)
+
+#### Unit 1 — DONE (commit `5adaa7d`)
+Verdict: solid foundation. Cleanups applied:
+- Removed `Term.as_dict` / `Sense.as_dict` — vestigial post-2b (no production consumer;
+  only each other + tests). Surviving dict adapters: `Segment.as_dict` (translator prompt,
+  `loop.py:157`) and `Constraint.to_prompt_dict` (`loop.py:145`).
+- `GlossaryRepository.load_glossary` now builds senses via `Sense.from_row` (was an inline
+  `Sense(...)`), so the row→model mapping lives in one place like `Term`.
+- Tests retargeted off the removed adapters onto attribute assertions.
+Noted-but-accepted (no change): `la_surface` is duplicated onto every `Sense` of a term
+(matches legacy dict shape; latent foot-gun only if anything ever writes it per-sense).
+
+#### Unit 2 — NEXT: queued critiques to investigate (Phase 2 + 2b)
+Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
+(resolver/resolution/loop/import_approvals; `corpus_db.py` + `glossary_repo.py` deleted).
+1. **Commit/transaction boundaries.** Repos never `commit()` — every write leaves it to the
+   caller. Verify each write path actually commits, and that the Latin parser's idempotent
+   multi-statement `_wipe`→`create_segment`→`set_reply_to` sequence stays in ONE transaction
+   (a partial commit would corrupt the segment graph). Check `_BODY_TYPES` duplicated in
+   repositories.py (line 23) vs resolution.py — intentional to avoid a circular import, but
+   confirm the two lists can't drift.
+2. **Reads returning dicts, not models.** `get_current_sense`, `RunRepository.last_run`,
+   `glossary_snapshot`, `translation_status_counts`, `sense_status_counts` return dicts/
+   scalars rather than typed models — slight inconsistency with the stated "repos return
+   models" goal. Decide: acceptable (these are projections, not aggregates) or wrap.
+3. **`SegmentRepository` breadth.** Spans per-segment I/O + Latin segment-graph creation +
+   corpus-wide orchestration queries. Decide whether that's one aggregate or should split.
+4. **`_wipe` f-string SQL.** The `match` operator (`<@` / `=`) is interpolated into the SQL
+   string (row values still parameterized). Confirm `match` is a controlled literal with no
+   injection surface (it is, from `wipe_article`/`wipe_segment`) — and that the f-string is
+   the cleanest expression.
+5. **2b completeness.** Confirm no transition shims survive (`corpus_db.py`/`glossary_repo.py`
+   gone; no dict-subscript access to Term/Sense remains in resolver/resolution voting).
+
+### Verification baseline for the review
+- Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`.
+- `uv run pytest -q` → 811 passed; `uv run ruff check` → clean.
+- Env in a fresh worktree: needs `.env`, `ln -s ../../../models models`, `ln -s ../../../sources sources` (§0).
 
 ---
 *The Claude Code plan file mirror lives at `~/.claude/plans/velvety-floating-conway.md`.*
