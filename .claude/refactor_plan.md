@@ -794,8 +794,8 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | Unit | Phases | Status |
 |---|---|---|
 | 1 | 0 (test net) + 1 (typed models) | ✅ REVIEWED + cleaned (commit `5adaa7d`) |
-| 2 | 2 + 2b (repository layer + caller flip) | ⏭️ NEXT |
-| 3 | 3 (DeepSeek client) | pending |
+| 2 | 2 + 2b (repository layer + caller flip) | ✅ REVIEWED + cleaned (commit `3ca09b3`) |
+| 3 | 3 (DeepSeek client) | ⏭️ NEXT |
 | 4 | 4 (parser base class) | pending |
 | 5 | 5 (pipeline steps/runner/reporting/interactive) | pending |
 | 6 | 6 (optimize isolation) | pending |
@@ -816,7 +816,40 @@ Verdict: solid foundation. Cleanups applied:
 Noted-but-accepted (no change): `la_surface` is duplicated onto every `Sense` of a term
 (matches legacy dict shape; latent foot-gun only if anything ever writes it per-sense).
 
-#### Unit 2 — NEXT: queued critiques to investigate (Phase 2 + 2b)
+#### Unit 2 — DONE (commit `3ca09b3`)
+Verdict: solid; the 2b flip is real and complete. Critique dispositions:
+1. **Transaction boundaries — correct.** Repos never commit; `get_conn()` owns the boundary.
+   Latin `_insert_article` runs wipe→create→set_reply_to on one conn, commit per-article after
+   the function returns, rollback on exception → no partial-commit corruption. Resolver
+   checkpoints every 500 segs.
+2. **Dict-returning reads — accepted, no change.** `get_current_sense`/`last_run`/
+   `glossary_snapshot`/`*_status_counts` are projections/aggregates, not entity loads.
+3. **`SegmentRepository` breadth — accepted as one aggregate** (everything touches
+   segment/segment_text; splitting threads the same conn for little gain).
+4. **`_wipe` f-string — safe.** `match` is only `<@`/`=` from wipe_article/wipe_segment;
+   row values parameterized; no injection surface.
+5. **2b completeness — verified.** corpus_db.py + glossary_repo.py gone; resolver voting uses
+   model attrs (no dict-subscripts); import_approvals fully on GlossaryRepository;
+   loop keeps the two intentional adapters (`seg.as_dict`/`c.to_prompt_dict`).
+
+Cleanups applied (commit `3ca09b3`, 813 passed / ruff clean):
+- **A:** moved run.py's last two raw `cur.execute` reads into
+  `SegmentRepository.get_translated_body_segment_ids` + `get_needs_human_segments`
+  (run.py was already flipped in 2b, so these were the only in-scope SQL leak). +2 repo tests.
+- **B:** fixed stale `_BODY_TYPES` comment (pointed at resolution.py, merged into resolver.py).
+- Out-of-scope SQL in coverage_report/server/krystal/gap_terms/sense_mining/export_sheet/
+  verify/optimize was never in Phase 2/2b scope — left as-is.
+
+#### Unit 3 — NEXT: queued critiques to investigate (Phase 3, DeepSeek client)
+Files: `src/common/deepseek_client.py` + the 4 flipped call sites (`translate/translator.py`,
+`translate/reviewer.py`, `common/deepseek.py::_call_deepseek_batch`,
+`ingest/sense_mining.py::call_deepseek_label`). Per §5/Phase-3, confirm: per-call
+temperature/max_tokens preserved exactly; fail-loud `RuntimeError`-after-retries semantics
+intact (loop's `try/except RuntimeError` depends on it); `_call_deepseek_batch` soft-fail vs
+fatal 401/402/403 via `exc.status_code`; api-key resolved lazily at call time; each caller keeps
+only its own policy (retry/backoff, `_api_stats`).
+
+#### Unit 2 — appendix: original queued critiques (investigated above)
 Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
 (resolver/resolution/loop/import_approvals; `corpus_db.py` + `glossary_repo.py` deleted).
 1. **Commit/transaction boundaries.** Repos never `commit()` — every write leaves it to the
