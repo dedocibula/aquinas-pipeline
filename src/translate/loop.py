@@ -53,51 +53,6 @@ class SegmentOutcome:
 
 _SUFFIX_RE = re.compile(r"\d+$")
 
-# Perfect-passive habere: 'habitum est' / 'habita sunt' ("as was held/stated").
-_HABERE_PPP_RE = re.compile(r"\b(habitum|habita)\s+(?:est|sunt)\b", re.IGNORECASE)
-
-
-def _drop_habere_ppp_constraints(latin: str, constraints: list[dict]) -> list[dict]:
-    """Drop 'habitus' constraints whose only evidence is perfect-passive habere.
-
-    CLTK lemmatizes the participle in 'habitum est' / 'habita sunt' to the noun
-    *habitus*, so the resolver writes a bogus term_usage row and the pipeline
-    then demands 'habitus' in the Slovak draft of a segment that never mentions
-    the concept. When every token supporting the constraint is part of such a
-    construction, the constraint is false — remove it. Constraints also backed
-    by a genuine habitus token elsewhere in the segment are kept.
-
-    TEMPORARY read-time patch: the root cause is the resolver writing the bogus
-    term_usage row. Part 1's re-resolution pass will fix resolution with
-    pos_tag_latin (participle + esse form never maps to a noun term) and purge
-    the existing bad rows — delete this function once the data is clean.
-    """
-    if not latin or not constraints:
-        return constraints
-    ppp_tokens = {m.group(1).lower() for m in _HABERE_PPP_RE.finditer(latin)}
-    if not ppp_tokens:
-        return constraints
-
-    result: list[dict] = []
-    for c in constraints:
-        stripped = _SUFFIX_RE.sub("", c["latin_lemma"])
-        if stripped != "habitus":
-            result.append(c)
-            continue
-        other_evidence = any(
-            stripped in {_SUFFIX_RE.sub("", cand) for cand in lemmatize_latin(token)}
-            for token in set(re.findall(r"[a-zA-Z]+", latin))
-            if token.lower() not in ppp_tokens
-        )
-        if other_evidence:
-            result.append(c)
-        else:
-            log.info(
-                "dropping false 'habitus' constraint — only evidence is "
-                "perfect-passive habere ('habitum est'/'habita sunt')"
-            )
-    return result
-
 
 def _build_surface_constraints(latin: str, constraints: list[dict]) -> list[dict]:
     """Replace lemma-form constraints with the inflected surface forms from the Latin text.
@@ -188,9 +143,6 @@ def translate_segment(
     # For formula terms, to_prompt_dict shows the human-readable Latin surface
     # (e.g. "Ad nonum sic proceditur") rather than the slug key; NULL category → "term".
     constraints = [c.to_prompt_dict() for c in locked_terms]
-    # 'habitum est' is a form of habere, not the noun habitus — drop constraints
-    # that have no other textual evidence, for translator, precheck and reviewer alike.
-    constraints = _drop_habere_ppp_constraints(seg.latin or "", constraints)
     # Surface-form constraints for the translator: CLTK maps each approved lemma
     # to the inflected forms that actually appear in this segment's Latin text,
     # so the model sees e.g. 'rationem → rozum' rather than 'ratio → rozum'.

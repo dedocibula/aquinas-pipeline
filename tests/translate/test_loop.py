@@ -15,7 +15,6 @@ from common.pricing import UsageInfo
 from translate.loop import (
     _build_surface_constraints,
     _build_terminology_microedit,
-    _drop_habere_ppp_constraints,
     translate_segment,
 )
 from translate.prechecks import CheckResult
@@ -114,53 +113,6 @@ def test_build_surface_constraints_fallback_passes_full_dict():
     assert len(result) == 1
     assert result[0]["context_label"] == "as theological virtue"
     assert result[0]["latin_lemma"] == "caritas"
-
-
-# ── _drop_habere_ppp_constraints — 'habitum est' false-constraint filter ──────
-
-_HABITUS_CONSTRAINT = {"latin_lemma": "habitus", "required_slovak": "habitus", "category": "term"}
-
-
-def test_drop_habere_ppp_only_evidence_dropped():
-    """'habitum est' as the sole evidence → bogus habitus constraint removed."""
-    latin = "Sicut habitum est in praecedenti quaestione."
-    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
-    assert result == []
-
-
-def test_drop_habere_ppp_habita_sunt_variant_dropped():
-    """Plural 'habita sunt' is also perfect-passive habere."""
-    latin = "Quae habita sunt in superioribus."
-    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
-    assert result == []
-
-
-def test_drop_habere_ppp_kept_with_genuine_evidence():
-    """A real habitus token elsewhere keeps the constraint despite 'habitum est'."""
-    latin = "Sicut habitum est, habitus virtutis manet in anima."
-    result = _drop_habere_ppp_constraints(latin, [dict(_HABITUS_CONSTRAINT)])
-    assert len(result) == 1
-    assert result[0]["latin_lemma"] == "habitus"
-
-
-def test_drop_habere_ppp_no_construction_unchanged():
-    """'habitus est' (noun + copula) is NOT the participle construction — untouched."""
-    latin = "Habitus est qualitas de difficili mobilis."
-    constraints = [dict(_HABITUS_CONSTRAINT)]
-    result = _drop_habere_ppp_constraints(latin, constraints)
-    assert result == constraints
-
-
-def test_drop_habere_ppp_other_constraints_untouched():
-    """Non-habitus constraints pass through even when the construction is present."""
-    latin = "Sicut habitum est, gratiam Deus dat."
-    constraints = [
-        dict(_HABITUS_CONSTRAINT),
-        {"latin_lemma": "gratia", "required_slovak": "milosť", "category": "term"},
-    ]
-    result = _drop_habere_ppp_constraints(latin, constraints)
-    assert len(result) == 1
-    assert result[0]["latin_lemma"] == "gratia"
 
 
 # ── translate_segment — setup helpers ─────────────────────────────────────────
