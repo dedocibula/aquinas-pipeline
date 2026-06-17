@@ -1,4 +1,4 @@
--- M1 schema corrections — apply before Step 2 (Krystal preseed).
+-- schema corrections — apply before Step 2 (Krystal preseed).
 --
 -- Fixes identified in code review:
 --   1. sense_rendering: add UNIQUE(sense_id, lang, source_id) — preseed idempotency + view safety

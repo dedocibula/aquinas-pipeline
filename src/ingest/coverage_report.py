@@ -1,12 +1,12 @@
 """
-M2 coverage report and dedup roll-up.
+Coverage report and dedup roll-up.
 
 Produces:
   reports/m2_coverage.txt    — go/no-go deliverable for translation spend
-  reports/m2_dedup_rollup.csv — corpus-wide term list for M3 review surface
+  reports/m2_dedup_rollup.csv — corpus-wide term list for the review surface
 
 Run:
-  uv run python -m ingest.report_m2
+  uv run python -m ingest.coverage_report
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ _STUB_RE = re.compile(r"^\[")
 def assert_no_stub_proposals(rows: list[dict]) -> None:
     """Fail loudly if any proposed_slovak is a bracketed stub or NULL.
 
-    M2 acceptance criterion: no stub and no missing rendering may reach the review
+    Acceptance criterion: no stub and no missing rendering may reach the review
     export. We raise rather than swallow so a bad run aborts before writing a
     poisoned roll-up.
     """
@@ -344,7 +344,7 @@ def write_coverage_report(conn, path: Path = COVERAGE_REPORT) -> str:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def run() -> None:
-    print("Generating M2 coverage report and dedup roll-up...")
+    print("Generating coverage report and dedup roll-up...")
     with get_conn() as conn:
         rows = generate_dedup_rollup(conn)
         assert_no_stub_proposals(rows)

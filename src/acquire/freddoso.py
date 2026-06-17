@@ -3,7 +3,7 @@ Acquire Freddoso's English translation of the Summa Theologiae.
 
 Downloads TOC HTML pages and builds a coverage gap map.  Actual article files
 are PDFs; the script records their locators and saves the TOC pages, then writes
-coverage_gaps.json so the M1 English ingest knows when to fall back to Dominican.
+coverage_gaps.json so the English ingest knows when to fall back to Dominican.
 
 Run:
     uv run python src/acquire/freddoso.py
@@ -151,7 +151,7 @@ def build_coverage_gaps(
 ) -> dict:
     """
     Compare available question numbers against the complete Summa counts and
-    produce the coverage gap map consumed by the M1 English ingest.
+    produce the coverage gap map consumed by the English ingest.
 
     Locator format matches segment.locator_path prefix: "I.q3", "I-II.q6", etc.
     """

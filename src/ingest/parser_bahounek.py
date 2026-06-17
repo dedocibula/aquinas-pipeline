@@ -204,7 +204,7 @@ def parse_bahounek_for_articles(article_locators: list[str]) -> list[OverlayElem
         if not html_path.exists():
             raise RuntimeError(
                 f"FAIL: Bahounek file not found: {html_path}. "
-                "Was M0 download completed?"
+                "Was the source download completed?"
             )
         file_elements = _extract_elements_from_file(html_path)
         for elem in file_elements:

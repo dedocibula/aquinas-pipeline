@@ -336,7 +336,7 @@ def insert_glossary(conn, entries: list[GlossaryEntry], src_krystal: int) -> dic
         for sense in entry.senses:
             # status='approved': Krystal is the terminological authority for the SENSE
             # DEFINITION (what the Latin term means). The SK rendering being a Czech
-            # placeholder is a separate quality concern handled in the M3 review pass.
+            # placeholder is a separate quality concern handled in the review pass.
             cur.execute(
                 """
                 INSERT INTO glossary_sense (term_id, context_label, status)
@@ -350,7 +350,7 @@ def insert_glossary(conn, entries: list[GlossaryEntry], src_krystal: int) -> dic
 
             # cs rendering — from DOCX.
             # lemma = cs_rendering directly (Krystal renderings are dictionary forms).
-            # TODO(M2): run MorphoDiTa on cs_rendering to get the true lemma form,
+            # TODO: run MorphoDiTa on cs_rendering to get the true lemma form,
             # in case any rendering is not in nominative singular (e.g. compound forms).
             cur.execute(
                 """
@@ -362,8 +362,8 @@ def insert_glossary(conn, entries: list[GlossaryEntry], src_krystal: int) -> dic
             rendering_count += 1
 
             # sk rendering — Czech content as placeholder pending Slovak theologian review.
-            # source_id=krystal is intentional for M1 (resolver reads sk rows regardless of
-            # source). TODO(M4): replace with actual Slovak content and source_id=model
+            # source_id=krystal is intentional here (resolver reads sk rows regardless of
+            # source). TODO: replace with actual Slovak content and source_id=model
             # before the translation prompt injects this as a hard constraint. Until then
             # the translator will receive Czech terms as Slovak constraints — reviewable.
             cur.execute(
@@ -375,9 +375,9 @@ def insert_glossary(conn, entries: list[GlossaryEntry], src_krystal: int) -> dic
             )
             rendering_count += 1
 
-            # TODO(M2): add en cue rows once a Latin→English term mapping is available.
+            # TODO: add en cue rows once a Latin→English term mapping is available.
             # EN cues serve as disambiguation signals for multi-sense resolution
-            # (resolver Step 7). For M1, Czech signals from Bahounek text are sufficient
+            # (resolver Step 7). Currently Czech signals from Bahounek text are sufficient
             # and the English signal path will simply produce no evidence (not an error).
 
     cur.close()

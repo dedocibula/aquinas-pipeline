@@ -1,5 +1,5 @@
 """
-Tests for src/ingest/report_m2.py — pure logic, no DB, no live files.
+Tests for src/ingest/coverage_report.py — pure logic, no DB, no live files.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ingest.report_m2 import (
+from ingest.coverage_report import (
     _count_anomalies,
     _load_api_stats,
     _load_latin_stats,
@@ -227,8 +227,8 @@ def _make_mock_conn(
 class TestGenerateCoverageReport:
     def _run(self, tmp_path, **kwargs):
         conn = _make_mock_conn(**kwargs)
-        with patch("ingest.report_m2.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "api_stats.json"):
+        with patch("ingest.coverage_report.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "api_stats.json"):
             return generate_coverage_report(conn)
 
     def test_contains_all_sections(self, tmp_path):
@@ -260,8 +260,8 @@ class TestGenerateCoverageReport:
         log = tmp_path / "anomalies.txt"
         log.write_text("[ANOMALY] locator=x\n[ANOMALY] locator=y\n")
         conn = _make_mock_conn()
-        with patch("ingest.report_m2.ANOMALY_LOG", log), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "missing.json"):
+        with patch("ingest.coverage_report.ANOMALY_LOG", log), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "missing.json"):
             report = generate_coverage_report(conn)
         assert "2" in report  # 2 anomalies
 
@@ -275,8 +275,8 @@ class TestGenerateCoverageReport:
         stats = {"calls": 3, "input_tokens": 500, "output_tokens": 50, "cost_usd": 0.0007}
         (tmp_path / "api_stats.json").write_text(json.dumps(stats))
         conn = _make_mock_conn()
-        with patch("ingest.report_m2.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "api_stats.json"):
+        with patch("ingest.coverage_report.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "api_stats.json"):
             report = generate_coverage_report(conn)
         assert "0.0007" in report
 
@@ -297,9 +297,9 @@ class TestCoverageReportLatinStats:
         stats_file = tmp_path / "latin_stats.json"
         stats_file.write_text(json.dumps(latin_data))
         conn = _make_mock_conn(articles=latin_data["ingested"])
-        with patch("ingest.report_m2.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "api_stats.json"), \
-             patch("ingest.report_m2.LATIN_STATS_FILE", stats_file):
+        with patch("ingest.coverage_report.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "api_stats.json"), \
+             patch("ingest.coverage_report.LATIN_STATS_FILE", stats_file):
             return generate_coverage_report(conn)
 
     def test_uses_total_from_latin_stats(self, tmp_path):
@@ -319,8 +319,8 @@ class TestWriteCoverageReport:
     def test_writes_file(self, tmp_path):
         conn = _make_mock_conn()
         out = tmp_path / "coverage.txt"
-        with patch("ingest.report_m2.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "stats.json"):
+        with patch("ingest.coverage_report.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "stats.json"):
             write_coverage_report(conn, path=out)
         assert out.exists()
         assert "CORPUS OVERVIEW" in out.read_text()
@@ -328,7 +328,7 @@ class TestWriteCoverageReport:
     def test_creates_parent_directory(self, tmp_path):
         conn = _make_mock_conn()
         out = tmp_path / "deep" / "report.txt"
-        with patch("ingest.report_m2.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
-             patch("ingest.report_m2.API_STATS_FILE", tmp_path / "stats.json"):
+        with patch("ingest.coverage_report.ANOMALY_LOG", tmp_path / "anomalies.txt"), \
+             patch("ingest.coverage_report.API_STATS_FILE", tmp_path / "stats.json"):
             write_coverage_report(conn, path=out)
         assert out.exists()

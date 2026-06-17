@@ -1,4 +1,4 @@
--- M1 initial schema migration
+-- initial schema migration
 -- Run ONLY after human review. See CLAUDE.md "Stop for DDL".
 --
 -- Execution:

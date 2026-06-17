@@ -117,7 +117,7 @@ class ReportStep(BaseStep):
     stage = "ingest"
 
     def run(self, ctx: PipelineContext) -> StepResult:
-        from ingest.report_m2 import run
+        from ingest.coverage_report import run
 
         print("[report] Generating coverage report and dedup roll-up...")
         run()

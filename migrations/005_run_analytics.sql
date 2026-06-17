@@ -1,4 +1,4 @@
--- M5: versioned run analytics — translation_run + run_segment
+-- versioned run analytics — translation_run + run_segment
 --
 -- Purpose: make structural/incremental pipeline changes measurable across runs
 -- (regression vs improvement) instead of manual JSONL forensics. PromptLogger

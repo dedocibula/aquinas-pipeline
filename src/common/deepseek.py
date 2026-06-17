@@ -20,7 +20,7 @@ _DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 _client = DeepSeekClient(_DEEPSEEK_MODEL, url=_DEEPSEEK_URL, timeout=60)
 
 # Model-assigned gap-term categories (stored in glossary_term.category, overridable
-# in M3). 'term'/'name'/'formula' are kept-and-locked; 'prose' is ordinary vocab.
+# during review). 'term'/'name'/'formula' are kept-and-locked; 'prose' is ordinary vocab.
 _GAP_CATEGORIES: frozenset[str] = frozenset({"term", "name", "formula", "prose"})
 
 

@@ -1,4 +1,4 @@
-"""Gap-term scanning, batch proposal, and DB preseed (M2 Phase 1)."""
+"""Gap-term scanning, batch proposal, and DB preseed."""
 
 from __future__ import annotations
 

@@ -304,7 +304,7 @@ class TestTocFilenames:
 
 class TestFallbackDetection:
     """
-    The M1 ingest reads coverage_gaps.json to decide whether to fall back
+    The English ingest reads coverage_gaps.json to decide whether to fall back
     to Dominican Province for a given locator.  These tests verify the
     locator format and set membership logic that enables that decision.
     """

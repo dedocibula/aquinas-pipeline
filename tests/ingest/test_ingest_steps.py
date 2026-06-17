@@ -53,7 +53,7 @@ def test_resolve_step_passes_knobs(tmp_path):
 
 
 def test_report_step_delegates(tmp_path):
-    with patch("ingest.report_m2.run") as fn:
+    with patch("ingest.coverage_report.run") as fn:
         result = ReportStep().run(_ctx(tmp_path))
     fn.assert_called_once_with()
     assert result.ok and result.name == "report"

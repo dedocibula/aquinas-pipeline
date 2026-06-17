@@ -1,4 +1,4 @@
-"""Export the M2 glossary dedup roll-up to Google Sheets.
+"""Export the glossary dedup roll-up to Google Sheets.
 
 CLI:
     uv run python -m review.export_sheet

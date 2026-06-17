@@ -1,4 +1,4 @@
--- M4: add translation tracking columns to segment
+-- add translation tracking columns to segment
 --
 -- translation_status: 'pending' (default) → 'translated' | 'needs_human'
 -- reviewer_notes: advisory JSON from R1 reviewer, keyed by axis

@@ -1,4 +1,4 @@
-"""Sense mining — discover multisense term renderings from the cs/en corpus (M5 Part 1).
+"""Sense mining — discover multisense term renderings from the cs/en corpus.
 
 The corpus already contains two professional segment-aligned translations
 (Bahounek cs ~91%, Dominican en ~99%). For every glossary term we look at the
@@ -510,7 +510,7 @@ def run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="M5 Part 1 — glossary sense mining")
+    parser = argparse.ArgumentParser(description="glossary sense mining")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--terms", nargs="+", metavar="LEMMA",
                        help="mine only these Latin lemmas (dry-run friendly)")

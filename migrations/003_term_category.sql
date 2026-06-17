@@ -1,4 +1,4 @@
--- M2 gap-term category migration
+-- gap-term category migration
 -- Run ONLY after human review. See CLAUDE.md "Stop for DDL".
 --
 -- Execution:
@@ -7,7 +7,7 @@
 
 -- ── glossary_term.category ─────────────────────────────────────────────────────
 -- Model-assigned classification for gap terms (lemmas not in Krystal), set during
--- the DeepSeek proposal pass. Drives M3 review ordering and is fully overridable
+-- the DeepSeek proposal pass. Drives review ordering and is fully overridable
 -- by a reviewer — terminology decisions live here in the DB, never in code.
 --
 --   term     — theological/philosophical content word (anima, peccatum, potentia)
@@ -15,7 +15,7 @@
 --   formula  — recurring structural/formulaic connective (Praeterea, Respondeo, Videtur)
 --   prose    — ordinary word: verb, quantifier, function word (dico, omnis, tertius)
 --
--- Nullable: Krystal-seeded terms (loaded in M1) keep category NULL — they are
+-- Nullable: Krystal-seeded terms keep category NULL — they are
 -- authoritative regardless of category. Only gap terms carry a model category.
 
 ALTER TABLE glossary_term
