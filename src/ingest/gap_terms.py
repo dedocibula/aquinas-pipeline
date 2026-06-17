@@ -31,6 +31,21 @@ def _strip_lemma_suffix(lemma: str) -> str:
     return re.sub(r"\d+$", "", lemma)
 
 
+def _canonical_lemma(lemma: str) -> str:
+    """Canonical gap-lemma form: numeric suffix stripped, then lowercased.
+
+    Latin dictionary lemmas are conventionally lowercase, but CLTK returns
+    sentence-initial / proper-case tokens capitalized ("Actus", "Caritas").
+    Without canonicalization those become capital-variant *duplicate* gap terms
+    (Actus alongside actus) — pure noise for the reviewer — and a capitalized
+    token can even shadow a lowercase Krystal term ("Caritas" leaking as a gap
+    proposal next to the approved "caritas"). Every Krystal lemma is lowercase,
+    so lowercasing both deduplicates gap terms and makes Krystal membership
+    case-insensitive.
+    """
+    return _strip_lemma_suffix(lemma).lower()
+
+
 def _load_ignored_lemmas(conn) -> frozenset[str]:
     """Load lemmas with category='stopword' from DB — permanently silenced by reviewers."""
     with conn.cursor() as cur:
@@ -62,6 +77,9 @@ def _scan_gap_lemmas(
     """
     lemma_data: dict[str, dict] = {}
     total_segments = len(segments)
+    # Self-consistent regardless of caller casing: Krystal membership is tested
+    # against lowercase lemmas (see _canonical_lemma).
+    krystal_lemmas = {k.lower() for k in krystal_lemmas}
 
     for seg in segments:
         latin = seg.latin or ""
@@ -75,16 +93,17 @@ def _scan_gap_lemmas(
             cands = lemmatize_latin(token)
             if not cands:
                 continue
-            # Phase 2 tries all candidates for Krystal lookup; skip here if any would hit.
-            if any(c in krystal_lemmas for c in cands):
+            # Phase 2 tries all candidates for Krystal lookup; skip here if any would
+            # hit. Case-insensitive so a sentence-initial "Caritas" resolves to the
+            # Krystal "caritas" instead of leaking as a gap proposal.
+            if any(c.lower() in krystal_lemmas for c in cands):
                 continue
-            lemma = _strip_lemma_suffix(cands[0])
-            lemma_lower = lemma.lower()
+            lemma = _canonical_lemma(cands[0])  # suffix-stripped + lowercased
             if (
                 len(lemma) <= min_len
                 or lemma in krystal_lemmas
-                or lemma_lower in _CLTK_STOPS
-                or lemma_lower in ignored_lemmas
+                or lemma in _CLTK_STOPS
+                or lemma in ignored_lemmas
                 or lemma in seen_in_seg
             ):
                 continue
@@ -122,7 +141,12 @@ def _ensure_glossary_term(conn, lemma: str, category: str | None = None) -> int:
     On conflict the category is refreshed only for gap terms (no approved senses).
     Krystal-seeded terms have approved senses and must never have their category
     overwritten by a model re-run.
+
+    The lemma is canonicalized to lowercase so capital-variant tokens never create
+    a duplicate gap term (Actus vs actus) — the unique constraint on latin_lemma
+    is case-sensitive, so this guarantee must live here, not only in the scanner.
     """
+    lemma = _canonical_lemma(lemma)
     with conn.cursor() as cur:
         cur.execute(
             """

@@ -370,16 +370,23 @@ def write_proposed_senses(conn, term_id: int, senses: list[dict], src_model: int
 
     Senses whose cs_lemma or context_label already exists for the term are
     skipped — never duplicate, never touch approved senses (Krystal is law).
+    Matching is case-insensitive and tracked within the batch, so capital-variant
+    proposals ("Vôľa" vs "vôľa", "Anima" vs "anima") never reach the reviewer as
+    separate senses.
     """
     existing = fetch_existing_senses(conn, term_id)
-    existing_cs = {e["cs_lemma"] for e in existing if e["cs_lemma"]}
-    existing_labels = {e["context_label"] for e in existing if e["context_label"]}
+    seen_cs = {e["cs_lemma"].casefold() for e in existing if e["cs_lemma"]}
+    seen_labels = {e["context_label"].casefold() for e in existing if e["context_label"]}
 
     written = 0
     with conn.cursor() as cur:
         for s in senses:
-            if s["cs_lemma"] in existing_cs or s["context_label"] in existing_labels:
+            cs_key = s["cs_lemma"].casefold()
+            label_key = s["context_label"].casefold()
+            if cs_key in seen_cs or label_key in seen_labels:
                 continue
+            seen_cs.add(cs_key)
+            seen_labels.add(label_key)
             cur.execute(
                 "INSERT INTO glossary_sense (term_id, context_label, status) "
                 "VALUES (%s, %s, 'proposed') RETURNING sense_id",

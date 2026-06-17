@@ -294,6 +294,53 @@ def test_write_proposed_senses_skips_existing_context_label():
     cur.execute.assert_not_called()
 
 
+def test_write_proposed_senses_skips_case_variant_of_existing():
+    """A proposal differing from an existing sense only by case is a duplicate."""
+    existing = [
+        {
+            "sense_id": 5,
+            "context_label": "As Reason",
+            "status": "proposed",
+            "cs_lemma": "Rozum",
+            "sk": "rozum",
+        }
+    ]
+    with patch("ingest.sense_mining.fetch_existing_senses", return_value=existing):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.__enter__ = lambda s: s
+        cur.__exit__ = MagicMock(return_value=False)
+        conn.cursor.return_value = cur
+
+        n = write_proposed_senses(
+            conn, term_id=1, senses=[_sense("rozum", "as reason")], src_model=9
+        )
+
+    assert n == 0
+    cur.execute.assert_not_called()
+
+
+def test_write_proposed_senses_dedups_within_batch():
+    """Two proposals in one batch that differ only by case collapse to one insert."""
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = lambda s: s
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = (42,)
+    conn.cursor.return_value = cur
+
+    with patch("ingest.sense_mining.fetch_existing_senses", return_value=[]):
+        n = write_proposed_senses(
+            conn,
+            term_id=1,
+            senses=[_sense("rozum", "as reason"), _sense("Rozum", "As Reason")],
+            src_model=9,
+        )
+
+    assert n == 1  # second (case variant) is dropped
+    assert cur.execute.call_count == 4  # one sense insert + 3 renderings
+
+
 def test_write_proposed_senses_partial_skip():
     """Only the non-duplicate sense is written when one of two is a duplicate."""
     existing = [

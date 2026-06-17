@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from common.deepseek import _call_deepseek_batch, _parse_batch_entry, get_api_stats
 from ingest.gap_terms import (
+    _canonical_lemma,
     _load_existing_gap_terms,
     _propose_gap_terms,
     _scan_gap_lemmas,
@@ -286,6 +287,17 @@ class TestStripLemmaSuffix:
         assert _strip_lemma_suffix("homo1") == "homo"
 
 
+class TestCanonicalLemma:
+    def test_lowercases(self):
+        assert _canonical_lemma("Actus") == "actus"
+
+    def test_strips_suffix_then_lowercases(self):
+        assert _canonical_lemma("Dico2") == "dico"
+
+    def test_plain_lemma_unchanged(self):
+        assert _canonical_lemma("virtus") == "virtus"
+
+
 # ── _parse_batch_entry ────────────────────────────────────────────────────────
 
 class TestParseBatchEntry:
@@ -414,6 +426,26 @@ class TestScanGapLemmas:
         result = _scan_gap_lemmas(segs, krystal_lemmas={"essentia"}, freq_floor=1,
                                   freq_ceiling_pct=1.0)
         assert "essentia" not in result
+
+    def test_capital_variant_collapses_to_single_lowercase_key(self):
+        # CLTK preserves token case ("Virtus" → ["Virtus"], "virtus" → ["virtus"]);
+        # both must canonicalize to one lowercase gap term, not two — capital-variant
+        # duplicates are pure noise for the reviewer.
+        segs = [self._seg("Virtus est", seg_id=1), self._seg("virtus bona", seg_id=2)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas=set(), freq_floor=1,
+                                  freq_ceiling_pct=1.0)
+        assert "Virtus" not in result
+        assert "virtus" in result
+        assert result["virtus"]["freq"] == 2  # both segments fold into one lemma
+
+    def test_krystal_exclusion_is_case_insensitive(self):
+        # A sentence-initial "Caritas" must resolve to the lowercase Krystal
+        # "caritas", not leak as a capitalized gap proposal.
+        segs = [self._seg("Caritas est", seg_id=i) for i in range(5)]
+        result = _scan_gap_lemmas(segs, krystal_lemmas={"caritas"}, freq_floor=1,
+                                  freq_ceiling_pct=1.0)
+        assert "Caritas" not in result
+        assert "caritas" not in result
 
     def test_skips_short_tokens(self):
         # len gate: with min_len=5, 'deus' (4 chars) is excluded

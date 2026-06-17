@@ -56,11 +56,11 @@ from ingest.gap_terms import (
     _GAP_FREQ_FLOOR,
     _GAP_MAX_WORKERS,
     _GAP_MIN_LEN,
+    _canonical_lemma,
     _load_existing_gap_terms,
     _load_ignored_lemmas,
     _propose_gap_terms,
     _scan_gap_lemmas,
-    _strip_lemma_suffix,
 )
 from storage.db import get_conn, source_id, work_id
 from storage.models import Segment, Sense, Term
@@ -277,10 +277,12 @@ def resolve_segment(
         if not cands:
             continue
 
-        # Krystal: try every candidate lemma; first hit wins.
+        # Krystal: try every candidate lemma; first hit wins. Lookup is
+        # case-insensitive (lemma_to_term is lowercase-keyed) so a sentence-initial
+        # "Caritas" resolves to the Krystal "caritas" rather than falling to gap.
         krystal_hit = False
         for lemma in cands:
-            term = lemma_to_term.get(lemma)
+            term = lemma_to_term.get(lemma.lower())
             if term is None:
                 continue
             krystal_hit = True
@@ -294,8 +296,9 @@ def resolve_segment(
         if krystal_hit:
             continue
 
-        # Gap: the stripped first candidate (matches _scan_gap_lemmas keying).
-        stripped = _strip_lemma_suffix(cands[0])
+        # Gap: the canonical first candidate (matches _scan_gap_lemmas keying:
+        # suffix-stripped + lowercased).
+        stripped = _canonical_lemma(cands[0])
         if len(stripped) > min_len:
             gap_candidates.add(stripped)
 
@@ -381,8 +384,10 @@ def run(
         segments = SegmentRepository(conn).load_body_segments(wid)
         ignored_lemmas = _load_ignored_lemmas(conn)
 
-    lemma_to_term = {t.latin_lemma: t for t in singleword_terms}
-    krystal_lemmas = set(lemma_to_term.keys()) | {t.latin_lemma for t in multiword_terms}
+    # Lowercase-keyed so Krystal lookup is case-insensitive (all Krystal lemmas
+    # are lowercase; a capitalized token must still resolve, not leak to gap).
+    lemma_to_term = {t.latin_lemma.lower(): t for t in singleword_terms}
+    krystal_lemmas = set(lemma_to_term.keys()) | {t.latin_lemma.lower() for t in multiword_terms}
     print(f"  Glossary: {len(multiword_terms)} multiword + {len(singleword_terms)} singleword Krystal terms")
     print(f"  Ignored (stopword): {len(ignored_lemmas)}")
     print(f"  Segments: {len(segments)} body segments to resolve")
@@ -437,7 +442,7 @@ def run(
         cs_rank = _source_rank(conn, "bahounek")
         en_rank = _source_rank(conn, "dominican")
         multiword_terms, singleword_terms = GlossaryRepository(conn).load_glossary()
-        lemma_to_term = {t.latin_lemma: t for t in singleword_terms}
+        lemma_to_term = {t.latin_lemma.lower(): t for t in singleword_terms}
         segments = SegmentRepository(conn).load_body_segments(wid)
         usage_repo = TermUsageRepository(conn)
 
