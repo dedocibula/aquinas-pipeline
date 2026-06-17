@@ -1,7 +1,0 @@
-Import complete.
-  Approved:                          0 terms
-  Skipped:                           1 (already confirmed)
-  Not found:                         0
-  Conflicts:                         0 (see below)
-  Version bumped (re-run triggered): 0 terms
-  Version held (no content change):  0 terms

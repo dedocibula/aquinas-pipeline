@@ -1,8 +1,0 @@
-[ANOMALY] locator=I.q10.a1 file=sth1003.html type=RuntimeError excerpt="FAIL: article 'I.q10.a1' is missing structural elements: ['sed_contra']"
-[ANOMALY] locator=I.q19.a12 file=sth1015.html type=RuntimeError excerpt="FAIL: article 'I.q19.a12' is missing structural elements: ['sed_contra']"
-[ANOMALY] locator=I.q29.a1 file=sth1028.html type=RuntimeError excerpt="FAIL: article 'I.q29.a1' is missing structural elements: ['sed_contra']"
-[ANOMALY] locator=I.q39.a8 file=sth1028.html type=RuntimeError excerpt="FAIL: article 'I.q39.a8' is missing structural elements: ['sed_contra']"
-[ANOMALY] locator=I.q74.a3 file=sth1065.html type=RuntimeError excerpt="FAIL: article 'I.q74.a3' is missing structural elements: ['respondeo', 'sed_contra']"
-[ANOMALY] locator=I.q91.a4 file=sth1090.html type=RuntimeError excerpt="FAIL: article 'I.q91.a4' is missing structural elements: ['respondeo']"
-[ANOMALY] locator=II_II.q161.a6 file=sth3155.html type=RuntimeError excerpt="FAIL: article 'II_II.q161.a6' is missing structural elements: ['sed_contra']"
-[ANOMALY] locator=II_II.q58.a1 file=sth3057.html type=RuntimeError excerpt="FAIL: article 'II_II.q58.a1' is missing structural elements: ['sed_contra']"
