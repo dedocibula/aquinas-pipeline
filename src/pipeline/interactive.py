@@ -215,10 +215,10 @@ def build_menu() -> list[MenuItem]:
 
         return RerunStaleStep()
 
-    def _retranslate() -> PipelineStep:
-        from translate.steps import RetranslateBodyStep
+    def _reset_corpus() -> PipelineStep:
+        from translate.steps import ResetCorpusStep
 
-        return RetranslateBodyStep()
+        return ResetCorpusStep()
 
     def _report() -> PipelineStep:
         from ingest.steps import ReportStep
@@ -236,7 +236,7 @@ def build_menu() -> list[MenuItem]:
         MenuItem("import-approvals", "Import approvals + flag stale", _import),
         MenuItem("translate", "Translate corpus", _translate),
         MenuItem("rerun-stale", "Re-translate stale segments", _rerun),
-        MenuItem("retranslate-body", "Re-translate all body segments", _retranslate),
+        MenuItem("reset-corpus", "Re-translate entire corpus", _reset_corpus),
         MenuItem("report", "Coverage / provenance report", _report),
     ]
 

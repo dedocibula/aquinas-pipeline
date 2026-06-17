@@ -11,11 +11,12 @@ Usage
 # After bumping glossary sense versions (re-translate stale segments):
     MAX_WORKERS=10 uv run python -m translate.run --flow rerun_stale
 
-# Re-translate only previously-translated body segments (with updated constraints):
-    MAX_WORKERS=10 uv run python -m translate.run --flow retranslate_body
+# Reset translated body segments to pending (interactive pipeline step):
+    uv run python -m translate.run --flow reset_corpus
+    # then review the summary, then run translate_corpus to re-translate
 
 # Run a specific flow with args (Python API):
-    from translate.run import translate_corpus, rerun_stale, retranslate_body
+    from translate.run import translate_corpus, rerun_stale, reset_corpus
     translate_corpus(work_id=1)
     translate_corpus(work_id=1, pars=["I", "I_II", "II_II", "III"], max_question=20)
 """
@@ -271,6 +272,24 @@ def translate_corpus(
     _write_needs_human_report(results, work_id)
 
 
+def _guard_and_reset(
+    seg_repo: SegmentRepository,
+    ids: list[int],
+    note: str,
+) -> tuple[list[int], set[int]]:
+    """Apply the human-edit guard and reset non-guarded segments to pending.
+
+    Returns (to_reset, human_edited) so callers can log flow-specific messages.
+    """
+    human_edited = set(seg_repo.get_human_edited_segments(ids))
+    if human_edited:
+        seg_repo.flag_needs_human(sorted(human_edited), note)
+    to_reset = [s for s in ids if s not in human_edited]
+    if to_reset:
+        seg_repo.reset_translation_status(to_reset)
+    return to_reset, human_edited
+
+
 @flow(name="rerun-stale")
 def rerun_stale(work_id: int = 1) -> None:
     """Reset stale segments to pending, then re-translate.
@@ -291,68 +310,64 @@ def rerun_stale(work_id: int = 1) -> None:
             log.info("No stale segments — nothing to do.")
             return
 
-        human_edited = set(seg_repo.get_human_edited_segments(stale))
+        to_reset, human_edited = _guard_and_reset(
+            seg_repo,
+            stale,
+            "term updated after human edit — verify the edit still holds",
+        )
         if human_edited:
             log.info(
                 "Guarding %d human-edited stale segments (flagged needs_human, not reset)",
                 len(human_edited),
             )
-            seg_repo.flag_needs_human(
-                sorted(human_edited),
-                "term updated after human edit — verify the edit still holds",
-            )
-
-        to_reset = [s for s in stale if s not in human_edited]
         if not to_reset:
             log.info("All stale segments are human-edited — nothing to re-translate.")
             return
         log.info("Resetting %d stale segments to pending", len(to_reset))
-        seg_repo.reset_translation_status(to_reset)
 
     translate_corpus(work_id, flow_name="rerun_stale")
 
 
-@flow(name="retranslate-body")
-def retranslate_body(work_id: int = 1) -> None:
-    """Reset previously-translated body segments to pending, then re-translate.
+@flow(name="reset-corpus")
+def reset_corpus(work_id: int = 1) -> None:
+    """Reset translated body segments to pending, then re-translate them.
 
     Targets arg, reply, sed_contra, respondeo segments only (excludes titles).
-    Useful after new glossary terms are approved — retranslates only the subset
-    that already has a translation, with updated constraints, without touching
-    the larger pool of never-translated pending segments.
+    Useful after new glossary terms are approved — re-translates only the body
+    subset that already had a translation, with updated constraints, without
+    touching the larger pool of never-translated pending segments.
+
+    Human-edit guard: segments already edited by a human are NOT reset — they
+    are flagged needs_human instead so a reviewer verifies the edit still holds.
     """
     with get_conn() as conn:
         seg_repo = SegmentRepository(conn)
         body_ids = seg_repo.get_translated_body_segment_ids(work_id)
 
         if not body_ids:
-            log.info("No translated body segments — nothing to do.")
+            log.info("No translated body segments — nothing to reset.")
             return
 
-        human_edited = set(seg_repo.get_human_edited_segments(body_ids))
+        to_reset, human_edited = _guard_and_reset(
+            seg_repo,
+            body_ids,
+            "reset_corpus: human edit preserved — verify under updated constraints",
+        )
         if human_edited:
             log.info(
                 "Guarding %d human-edited segments (flagged needs_human, not reset)",
                 len(human_edited),
             )
-            seg_repo.flag_needs_human(
-                sorted(human_edited),
-                "retranslate_body: human edit preserved — verify under updated constraints",
-            )
-
-        to_reset = [s for s in body_ids if s not in human_edited]
         if not to_reset:
             log.info("All translated body segments are human-edited — nothing to reset.")
             return
 
-        log.info("Resetting %d translated body segments to pending", len(to_reset))
-        seg_repo.reset_translation_status(to_reset)
-
-    translate_corpus(
-        work_id,
-        flow_name="retranslate_body",
-        segment_filter=frozenset(to_reset),
+    log.info(
+        "Reset %d body segments to pending (%d human-edited preserved). Starting re-translation.",
+        len(to_reset),
+        len(human_edited),
     )
+    translate_corpus(work_id, flow_name="reset_corpus", segment_filter=frozenset(to_reset))
 
 
 # ── Report writers ────────────────────────────────────────────────────────────
@@ -467,7 +482,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Full-corpus translation flows")
     parser.add_argument(
         "--flow",
-        choices=["translate_corpus", "rerun_stale", "retranslate_body"],
+        choices=["translate_corpus", "rerun_stale", "reset_corpus"],
         default="translate_corpus",
         help="Which flow to run (default: translate_corpus)",
     )
@@ -488,8 +503,8 @@ if __name__ == "__main__":
 
     if args.flow == "rerun_stale":
         rerun_stale(work_id=args.work_id)
-    elif args.flow == "retranslate_body":
-        retranslate_body(work_id=args.work_id)
+    elif args.flow == "reset_corpus":
+        reset_corpus(work_id=args.work_id)
     else:
         translate_corpus(
             work_id=args.work_id,

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pipeline import PipelineContext
-from translate.steps import RerunStaleStep, RetranslateBodyStep, TranslateCorpusStep
+from translate.steps import RerunStaleStep, ResetCorpusStep, TranslateCorpusStep
 
 
 def _ctx(tmp_path: Path, work_id=None) -> PipelineContext:
@@ -33,13 +33,13 @@ def test_rerun_stale_step_delegates(tmp_path):
     assert result.ok and result.name == "rerun-stale"
 
 
-def test_retranslate_body_step_delegates(tmp_path):
-    with patch("translate.run.retranslate_body") as fn:
-        result = RetranslateBodyStep().run(_ctx(tmp_path))
+def test_reset_corpus_step_delegates(tmp_path):
+    with patch("translate.run.reset_corpus") as fn:
+        result = ResetCorpusStep().run(_ctx(tmp_path))
     fn.assert_called_once_with(work_id=1)
-    assert result.ok and result.name == "retranslate-body"
+    assert result.ok and result.name == "reset-corpus"
 
 
 def test_translate_steps_declare_stage():
-    for step in (TranslateCorpusStep, RerunStaleStep, RetranslateBodyStep):
+    for step in (TranslateCorpusStep, RerunStaleStep, ResetCorpusStep):
         assert step.stage == "translate"

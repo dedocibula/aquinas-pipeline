@@ -41,12 +41,12 @@ class RerunStaleStep(BaseStep):
         return StepResult(name=self.name, ok=True, summary="stale segments re-translated")
 
 
-class RetranslateBodyStep(BaseStep):
-    name = "retranslate-body"
+class ResetCorpusStep(BaseStep):
+    name = "reset-corpus"
     stage = "translate"
 
     def run(self, ctx: PipelineContext) -> StepResult:
-        from translate.run import retranslate_body
+        from translate.run import reset_corpus
 
-        retranslate_body(work_id=_work_id(ctx))
-        return StepResult(name=self.name, ok=True, summary="body segments re-translated")
+        reset_corpus(work_id=_work_id(ctx))
+        return StepResult(name=self.name, ok=True, summary="body segments reset and re-translated")

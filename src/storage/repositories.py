@@ -584,7 +584,7 @@ class SegmentRepository:
     def get_translated_body_segment_ids(self, work_id: int = 1) -> list[int]:
         """Return segment_ids of translated body segments (titles excluded), ordered.
 
-        Drives retranslate_body: the subset that already has a translation and so
+        Used by reset_corpus: the subset that already has a translation and so
         should be re-run under updated constraints, leaving never-translated
         pending segments untouched.
         """
