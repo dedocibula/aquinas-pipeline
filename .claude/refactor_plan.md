@@ -15,6 +15,9 @@ cd /Users/agalad/Workspace/python/aquinas-pipeline/.claude/worktrees/aquinas-ref
 # One-time env setup (these are gitignored, not present in a fresh worktree):
 cp ../../../.env .env                 # DATABASE_URL etc.
 ln -s ../../../models models          # CLTK + MorphoDiTa models (large)
+ln -s ../../../sources sources        # scraped Latin/Czech/English source files
+# (without the sources symlink, `acquire.steps` source-file checks FAIL — that's a
+#  missing-input artifact, not a regression; add the symlink to /sources to .git/info/exclude)
 # .venv is created automatically by `uv run` from uv.lock
 
 uv run pytest -q          # regression gate — MUST stay green (baseline: 745 passed)
@@ -86,7 +89,8 @@ Explore agents + grep). Disposition per the user:
 | 7 — Strip milestone labels; rename milestone files | ✅ DONE | `40ebe40`; report_m2 → coverage_report |
 | 8 — Consolidate DB schema | ✅ DONE | `db/schema.sql` (annotated, verified identical to live) + seed; migrations 001–007 → `migrations/archive/`; README setup step (see below) |
 | 9 — Domain housekeeping (oov_stem, habere) | ✅ DONE | 9a (`b5a770d`); 9b — resolver root-cause fix + 492-row purge (user-approved, applied) + read-time patch deleted |
-| 10/11 — Final gate + memory | ☐ | |
+| 10 — Final regression gate | ✅ DONE | `1d646f9`; suite green at 811, ruff clean; every entry point smoke-tested; per-stage reports populate; resolver sample diff identical; tests unified onto one fake source (see below) |
+| 11 — Project memory entry | ☐ | folder map + conventions → permanent memory (the only remaining step) |
 
 #### Phase 5.0 — Pilot consolidation (sample-only) — DONE
 Decision (user-approved): the pilot and the production runner (`translate/run.py`) do **not** differ
@@ -368,6 +372,42 @@ approved Krystal term. User chose the **full root-cause fix** (over purge-only /
 - End state: correction lives once on the **write path** (resolver, where the defect originates) instead
   of running on every translation in the wrong module. **811 passed; ruff clean.** Commits: resolver fix,
   dry-run purge script, read-time patch removal.
+
+#### Phase 10 — Final regression gate — DONE
+Behavior-preserving wrap-up; no production code touched (test-only commit `1d646f9`).
+- **Suite + lint**: `uv run pytest -q` → **811 passed** (≥745 baseline holds); `uv run ruff check` clean.
+- **Every entry point smoke-tested** (24 runnable modules):
+  - import-smoke all 24 (catches refactor breakage from moved packages) → **24/24 OK**;
+  - `--help` on the argparse CLIs (`translate.run`, `ingest.sense_mining`, `ingest.parser_latin`,
+    `optimize.run_compare`, `pipeline.interactive`, `pipeline`) → all exit 0;
+  - live read-only runs: `python -m pipeline --status` (reads live DB: 26 377 segments,
+    pending/translated split, sense status, last run #22); `python -m acquire.steps` verify-sources
+    → **7/7 checks pass**; `python -m ingest.coverage_report` → live coverage numbers.
+  - Note: the old standalone `ingest.pipeline` runner no longer exists — the ingest flow is driven
+    via `python -m pipeline` (interactive) + the per-module `python -m ingest.<x>` entries + the
+    `ingest.steps` step wrappers (no `__main__`).
+- **Per-stage reports populate**: verify-sources wrote `reports/acquire/verify-sources.md`
+  (the generic `StepReport`); coverage report regenerated `reports/m2_coverage.txt` (restored after,
+  to keep the gate commit data-churn-free).
+- **Resolver behavior-preservation diff**: read-only harness re-ran `resolve_segment` on a 40-segment
+  sample and diffed the produced resolutions against the **stored** `term_usage` (written by the M2
+  ingest, post-9b purge): **40 segments / 928 rows → IDENTICAL**. Confirms the refactored resolver +
+  9b habere suppression are idempotent and behavior-preserving. (The pilot path is locked by its test
+  suite; a live pilot run costs API budget, mutates segment status, and is temp-0.3 nondeterministic,
+  so a byte-diff there is not meaningful — deliberately not run.)
+- **Test-style consistency** (user-requested side task): the shared fakes lived in `conftest.py` as
+  factory fixtures only, so four modules kept duplicate fake classes (factory fixtures can't be
+  subclassed/imported-as-class). Moved the fake classes into a plain importable **`tests/_fakes.py`**
+  (single definition); `conftest` re-exports them + keeps the `fake_conn`/`fake_worksheet`/
+  `fake_spreadsheet` fixtures. Migrated the four holdouts: `test_export_sheet.py`/`test_sheets.py`
+  (deleted byte-identical gspread fakes → import from `_fakes`), `test_resolver.py
+  TestLoadExistingGapTerms` (→ `fake_conn` fixture), `test_parser_latin.py` (4 repeated inline
+  FakeConn+get_conn blocks → one module-level `_fake_get_conn` helper). Left intentionally specialized
+  fakes as-is: `test_resolver.py TestWriteGapProposalsCollision` (branching MagicMock fetchone
+  sequence) and `test_server.py` (MagicMock conn for Flask route asserts). Net −107 lines; the only
+  fake class defs now live in `tests/_fakes.py`.
+- **Worktree env note**: a fresh worktree also needs `ln -s ../../../sources sources` (§0) — without
+  it the `acquire.steps` source-file checks fail on missing inputs (not a regression).
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
