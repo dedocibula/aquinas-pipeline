@@ -17,9 +17,10 @@ import psycopg2.extras
 
 from storage.models import Constraint, Segment, Sense, Term
 
-# Element types the resolver runs on (skip non-body segments). Titles resolve to
+# Element types load_body_segments returns for the resolver. Titles resolve to
 # zero terms (no Latin) but are included so the resolver leaves an auditable
-# empty result. Duplicated from resolution.py to avoid a circular import.
+# empty result. (body_text_coverage below uses a titles-excluded set — different
+# purpose, intentionally not shared.)
 _BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "article_title", "question_title"}
 
 
@@ -579,6 +580,48 @@ class SegmentRepository:
                     (locator_prefix, work_id),
                 )
             return cur.fetchone() is not None
+
+    def get_translated_body_segment_ids(self, work_id: int = 1) -> list[int]:
+        """Return segment_ids of translated body segments (titles excluded), ordered.
+
+        Drives retranslate_body: the subset that already has a translation and so
+        should be re-run under updated constraints, leaving never-translated
+        pending segments untouched.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT segment_id FROM segment
+                WHERE work_id = %s
+                  AND translation_status = 'translated'
+                  AND element_type NOT IN ('question_title', 'article_title')
+                ORDER BY segment_id
+                """,
+                (work_id,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+    def get_needs_human_segments(self, work_id: int = 1) -> list[dict]:
+        """Return needs_human segments with locator_path and raw reviewer_notes, ordered.
+
+        Drives the needs-human triage report. ``reviewer_notes`` is the raw jsonb
+        dict (or None); the caller flattens iteration/last_feedback for display.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.locator_path::text AS locator_path, s.reviewer_notes
+                FROM segment s
+                WHERE s.translation_status = 'needs_human'
+                  AND s.work_id = %s
+                ORDER BY s.locator_path
+                """,
+                (work_id,),
+            )
+            return [
+                {"locator_path": loc, "reviewer_notes": notes}
+                for loc, notes in cur.fetchall()
+            ]
 
     def get_stale_segments(self, work_id: int = 1) -> list[int]:
         """Return segment IDs whose term_usage references an outdated glossary sense.

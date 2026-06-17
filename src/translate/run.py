@@ -323,18 +323,7 @@ def retranslate_body(work_id: int = 1) -> None:
     """
     with get_conn() as conn:
         seg_repo = SegmentRepository(conn)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT segment_id FROM segment
-                WHERE work_id = %s
-                  AND translation_status = 'translated'
-                  AND element_type NOT IN ('question_title', 'article_title')
-                ORDER BY segment_id
-                """,
-                (work_id,),
-            )
-            body_ids = [row[0] for row in cur.fetchall()]
+        body_ids = seg_repo.get_translated_body_segment_ids(work_id)
 
         if not body_ids:
             log.info("No translated body segments — nothing to do.")
@@ -455,31 +444,18 @@ def _write_needs_human_report(results: list[ArticleResult], work_id: int = 1) ->
 
 
 def _fetch_needs_human_rows(conn, work_id: int = 1) -> list[dict]:
-    """Fetch all needs_human segments for work_id with their locator and reviewer notes."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                s.locator_path::text AS locator_path,
-                s.reviewer_notes
-            FROM segment s
-            WHERE s.translation_status = 'needs_human'
-              AND s.work_id = %s
-            ORDER BY s.locator_path
-            """,
-            (work_id,),
+    """Flatten needs_human segments into report rows (locator + iteration + feedback)."""
+    rows = []
+    for seg in SegmentRepository(conn).get_needs_human_segments(work_id):
+        notes = seg["reviewer_notes"] or {}
+        rows.append(
+            {
+                "locator_path": seg["locator_path"],
+                "iteration": notes.get("iteration"),
+                "last_feedback": notes.get("last_feedback"),
+            }
         )
-        rows = []
-        for locator_path, reviewer_notes in cur.fetchall():
-            notes = reviewer_notes or {}
-            rows.append(
-                {
-                    "locator_path": locator_path,
-                    "iteration": notes.get("iteration"),
-                    "last_feedback": notes.get("last_feedback"),
-                }
-            )
-        return rows
+    return rows
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

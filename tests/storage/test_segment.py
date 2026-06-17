@@ -197,6 +197,33 @@ def test_get_stale_segments(fake_conn):
     assert SegmentRepository(conn).get_stale_segments(1) == [3, 4]
 
 
+def test_get_translated_body_segment_ids(fake_conn):
+    conn = fake_conn(fetchall_rows=[(11,), (12,)])
+    assert SegmentRepository(conn).get_translated_body_segment_ids(1) == [11, 12]
+    sql, params = conn.executed[-1]
+    assert "translation_status = 'translated'" in sql
+    assert "NOT IN ('question_title', 'article_title')" in sql
+    assert params == (1,)
+
+
+def test_get_needs_human_segments_returns_raw_notes(fake_conn):
+    conn = fake_conn(
+        fetchall_rows=[
+            ("I.q1.a1.respondeo", {"iteration": 3, "last_feedback": "Missing term X"}),
+            ("I.q2.a1.arg1", None),
+        ]
+    )
+    rows = SegmentRepository(conn).get_needs_human_segments(1)
+    assert rows == [
+        {"locator_path": "I.q1.a1.respondeo",
+         "reviewer_notes": {"iteration": 3, "last_feedback": "Missing term X"}},
+        {"locator_path": "I.q2.a1.arg1", "reviewer_notes": None},
+    ]
+    sql, params = conn.executed[-1]
+    assert "translation_status = 'needs_human'" in sql
+    assert params == (1,)
+
+
 def test_get_human_edited_empty_short_circuits(fake_conn):
     conn = fake_conn()
     assert SegmentRepository(conn).get_human_edited_segments([]) == []
