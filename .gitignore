@@ -82,5 +82,8 @@ output/
 # ─── Pipeline debug / run logs ───────────────────────
 reports/
 
+# Claude Code agent worktrees (each is its own branch, not repo data)
+.claude/worktrees/
+
 # Interactive driver's last-command memory (per-checkout, not pipeline data)
 .pipeline_state.json
