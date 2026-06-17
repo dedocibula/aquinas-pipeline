@@ -85,7 +85,7 @@ Explore agents + grep). Disposition per the user:
 | 6.1 — report* review + gap-term dedup (user-requested side tasks) | ✅ DONE | see below |
 | 7 — Strip milestone labels; rename milestone files | ✅ DONE | `40ebe40`; report_m2 → coverage_report |
 | 8 — Consolidate DB schema | ✅ DONE | `db/schema.sql` (annotated, verified identical to live) + seed; migrations 001–007 → `migrations/archive/`; README setup step (see below) |
-| 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
+| 9 — Domain housekeeping (oov_stem, habere) | ◑ | 9a DONE (`b5a770d`); 9b (habere purge) pending — gated by approval |
 | 10/11 — Final gate + memory | ☐ | |
 
 #### Phase 5.0 — Pilot consolidation (sample-only) — DONE
@@ -286,13 +286,12 @@ Two side tasks the user asked for after Phase 6.
   to lowercase: new `gap_terms._canonical_lemma`; `_scan_gap_lemmas` + `_ensure_glossary_term` +
   resolver Krystal lookup/gap-keying all case-insensitive (`lemma_to_term` lowercase-keyed);
   `sense_mining.write_proposed_senses` dedup now casefold + within-batch. +7 tests. **802 passed; ruff clean.**
-- **⚠ PENDING (gated on human approval) — existing-data cleanup.** The fix is forward-only; the 531
-  uppercase rows / 201 dup groups already in the live glossary remain. Cleanup is a destructive data
-  migration (delete gap `glossary_term` + cascade senses/renderings/term_usage for the capitalized
-  variants, then re-run the resolver to regenerate canonical lowercase proposals — gap proposals are
-  idempotently regenerated; OR in-place `lower()` rename where no lowercase twin exists). **Per
-  CLAUDE.md: write as a `--dry-run` script, present the plan, STOP for approval before any DELETE.**
-  Not yet started — decision surfaced to the user.
+- **✅ RESOLVED — existing-data cleanup applied by the user.** `scripts/purge_capitalized_gap_terms.py`
+  (the `--dry-run`/`--apply` companion: DELETE capital-variant gap terms with a lowercase twin
+  child-first, in-place `lower()` RENAME the rest, re-assert no-approved-sense, never touch Krystal)
+  was reviewed and **run against the live glossary by the user**. The forward-fix prevents new
+  capital-variant duplicates, so the one-off was deleted (`fd16cfc`). Only **9b's habere purge**
+  remains as a gated destructive migration.
 
 #### Phase 8 — Consolidate DB schema → `db/schema.sql` — DONE
 Single annotated current-state schema; no DB change (read-only `pg_dump` used to verify).
@@ -320,8 +319,29 @@ Single annotated current-state schema; no DB change (read-only `pg_dump` used to
 - **Next (Phase 9)**: domain housekeeping — the only behavioral phase. 9a `_oov_stem` encapsulation
   (optional cleaner impl behind locked `test_prechecks.py`); 9b habere purge — write
   `scripts/purge_habere_ppp_usage.py` as **--dry-run**, present plan, **STOP for human approval** before
-  any DELETE, then harden resolver + delete `_drop_habere_ppp_constraints`. Note the still-pending
-  gated gap-term existing-data cleanup from Phase 6.1 (also a destructive migration needing approval).
+  any DELETE, then harden resolver + delete `_drop_habere_ppp_constraints`.
+
+#### Phase 9a — Encapsulate Slovak term matching → `SlovakTermMatcher` — DONE
+The Slovak morphological-matching logic was split across two modules (`prechecks._oov_stem` /
+`_word_in_draft` / `_normalise` + `lemmatize.generate_slovak_forms`); it now lives in one cohesive
+object. **Behavior-preserving** — the optional "cleaner stem impl" was *not* adopted (it's explicitly
+non-blocking and would risk the locked snapshots; the existing stem heuristic is unchanged).
+- **`common/lemmatize.py`**: new `SlovakTermMatcher` (frozen dataclass) — `generate` callable
+  (injectable; defaults to `generate_slovak_forms`), `forms(lemma)` (generation), `stem(word)`
+  (staticmethod, was `_oov_stem`, verbatim), `matches(word, draft_tokens, draft_tokens_norm)` (was
+  `_word_in_draft`, incl. the `[PRECHECK]` stderr diagnostics kept verbatim for grep continuity). Plus
+  public `normalise` (was `prechecks._normalise`) as a shared diacritic-stripping helper.
+- **`translate/prechecks.py`**: `_oov_stem`/`_word_in_draft`/`_normalise` deleted; imports
+  `SlovakTermMatcher`/`generate_slovak_forms`/`normalise`. `check_terminology_lemma` builds the matcher
+  **per call** with `generate=generate_slovak_forms` so the test monkeypatch seam
+  (`monkeypatch.setattr("src.translate.prechecks.generate_slovak_forms", …)`) still takes effect; the
+  formula path + `check_terminology` use `normalise`.
+- **Tests**: +10 model-free matcher unit tests (injected `generate`, no model load) merged into the
+  canonical `tests/ingest/test_lemmatize.py` (NOT a new `test_lemmatize.py` — pytest basename
+  collision). `test_prechecks.py` (28) unchanged and green. **812 passed; ruff clean.** Commit `b5a770d`.
+- **Next (9b)**: habere purge — `scripts/purge_habere_ppp_usage.py` as **--dry-run**, present plan,
+  **STOP for human approval** before any DELETE, then harden resolver (`pos_tag_latin`) + delete
+  `_drop_habere_ppp_constraints` / its call / `_HABERE_PPP_RE` (keep `_SUFFIX_RE`).
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
