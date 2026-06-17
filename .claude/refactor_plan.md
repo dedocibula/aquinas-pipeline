@@ -956,7 +956,36 @@ default `work_id=1`, while the interactive driver resolves the real id via `work
 for the display — if the summa work isn't id 1 the translate steps act on the wrong work. Pre-existing
 `default 1` convention, not a Phase-5 regression.
 
-#### Unit 6 — NEXT: queued critiques to investigate (Phase 6, optimize isolation)
+#### Unit 6 — DONE (commit `8158076`)
+Verdict: **clean relocation; all six queued critiques verified. One real dead-code finding — a removal
+Phase 6 started but left half-done.** Five of six pass with no change:
+- **Pure relocation** — rename-detected diff of `dfa257b` shows only import paths
+  (`translate.* → optimize.*`), sample-path constants, and docstrings changed; logic byte-identical.
+- **Sample-path resolution** — `pilot.py`/`reset_golden.py` default to in-package
+  `samples/pilot_sample_100.json` (resolves + exists); `PILOT_SAMPLE_FILE` override resolves against
+  `_REPO_ROOT` and lands on the real 200 file. Both confirmed live.
+- **`optimize_loop.sh`** — run-from-root documented; all three `python -m optimize.*` repoints present;
+  `PILOT_SAMPLE_FILE` → 200 sample; both `prompt_changelog.md` refs point in-package.
+- **Structural separation** — grep `import optimize`/`from optimize` across all seven production packages
+  returns nothing; `optimize` is a leaf consumer.
+- **Packaging** — `optimize` in hatch wheel `packages` + isort `known-first-party`; all four
+  `-m optimize.*` entry points import cleanly.
+
+Cleanup applied (commit `8158076`, **807 passed** / ruff clean):
+- **`gap_terms.pilot_batch_sizes` was orphaned.** Phase-6 collateral commit `74254b2` advertised
+  "the `--pilot` batch-size diagnostic is dropped" and deleted its CLI shell (`_step_pilot`), but left
+  the ~120-line function it called in place — reachable from no entry point, kept alive only by its 9
+  tests. Same dead-code pattern that same commit removed for `reset_gap_proposals.py` (+ test) and 6.1
+  removed for `report.py`. Deleted the function + its `TestPilotBatchSizes` block (9 tests) + the
+  then-unused imports (`collections.Counter`, `common.deepseek.{_api_stats_lock, get_api_stats}`).
+
+Noted-but-accepted (pre-existing, not Phase-6 regressions):
+- `pyproject.toml` wheel `packages` (line 34) omits `translate`/`pipeline`/`storage` — absent from a
+  built wheel; runtime works via the editable `.pth`. Predates Phase 6.
+- `optimize_loop.sh`'s embedded `claude -p` prompt says "100-segment sample" while the loop runs the
+  200 sample (line 51 vs line 14). Stale prompt text, predates the move.
+
+#### Unit 6 — appendix: original queued critiques (investigated above)
 Files: `src/optimize/` (`pilot.py`, `reset_golden.py`, `run_compare.py`, `build_sample.py`,
 `samples/pilot_sample_*.json`, `optimize_loop.sh`, `prompt_changelog.md`) + `pyproject.toml` packaging.
 Confirm:
@@ -1003,10 +1032,11 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
 
 ### Verification baseline for the review
 - Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
-  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: `de8a7f7`.
-- `uv run pytest -q` → **816 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
+  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: `de8a7f7`; after Unit 6: `8158076`.
+- `uv run pytest -q` → **807 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
   batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815;
-  +1 Unit-5 broken-factory test → 816); `uv run ruff check` → clean.
+  +1 Unit-5 broken-factory test → 816; −9 Unit-6 orphaned-diagnostic tests via `8158076` → 807);
+  `uv run ruff check` → clean.
 - Env in a fresh worktree: needs `.env`, `ln -s ../../../models models`, `ln -s ../../../sources sources` (§0).
 
 ---
