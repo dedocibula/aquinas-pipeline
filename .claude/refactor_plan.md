@@ -81,8 +81,9 @@ Explore agents + grep). Disposition per the user:
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
 | 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below) |
-| 6 — Isolate optimize/ toolchain | ✅ DONE | new `src/optimize/` package; toolchain relocated; 823 passed; ruff clean (see below) |
-| 7 — Strip milestone labels; rename milestone files | ☐ | |
+| 6 — Isolate optimize/ toolchain | ✅ DONE | new `src/optimize/` package; toolchain relocated; 823 passed; ruff clean (see below). **Re-verified this session: 795 passed, ruff clean, deliverables present, old paths gone.** |
+| 6.1 — report* review + gap-term dedup (user-requested side tasks) | ✅ DONE | see below |
+| 7 — Strip milestone labels; rename milestone files | ☐ NEXT | |
 | 8 — Consolidate DB schema | ☐ | |
 | 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
 | 10/11 — Final gate + memory | ☐ | |
@@ -270,6 +271,28 @@ The whole prompt-opt toolchain now lives in one package, structurally separated 
 - **823 passed; ruff clean.** Smoke-tested all four `python -m optimize.*` imports + sample-path resolution.
 - **Note for Phase 11 memory**: prompt-opt toolchain = `src/optimize/`; run the loop from repo root via
   `./src/optimize/optimize_loop.sh`; samples live in `src/optimize/samples/`.
+
+#### Phase 6.1 — report* review + gap-term dedup (user-requested) — DONE
+Two side tasks the user asked for after Phase 6.
+- **`ingest/report*` review** → `report.py` (M1 provenance, `python -m ingest.report` →
+  `reports/m1_provenance.txt`) **deleted** (`e29009b`): zero importers, no tests, in no pipeline
+  step; per-term provenance lives in `term_usage`, its "pending M3 review" gap roll-up is superseded
+  by the review surface (`export_sheet`) + M2 dedup CSV. `report_m2.py` is live (drives `ReportStep`,
+  tested) → **kept** (Phase 7 still renames it to `coverage_report.py`).
+- **Gap-term dedup** (`94a39fe`): CLTK preserves token case, so capitalized/sentence-initial tokens
+  created capital-variant duplicate gap terms **and** could shadow a lowercase Krystal term. Measured
+  in live DB: **201 case-variant dup groups, 531 uppercase gap rows** (all gap; 0 Krystal — Krystal is
+  100% lowercase), incl. a proposed `Caritas` next to approved `caritas`. Fix = canonicalize gap lemmas
+  to lowercase: new `gap_terms._canonical_lemma`; `_scan_gap_lemmas` + `_ensure_glossary_term` +
+  resolver Krystal lookup/gap-keying all case-insensitive (`lemma_to_term` lowercase-keyed);
+  `sense_mining.write_proposed_senses` dedup now casefold + within-batch. +7 tests. **802 passed; ruff clean.**
+- **⚠ PENDING (gated on human approval) — existing-data cleanup.** The fix is forward-only; the 531
+  uppercase rows / 201 dup groups already in the live glossary remain. Cleanup is a destructive data
+  migration (delete gap `glossary_term` + cascade senses/renderings/term_usage for the capitalized
+  variants, then re-run the resolver to regenerate canonical lowercase proposals — gap proposals are
+  idempotently regenerated; OR in-place `lower()` rename where no lowercase twin exists). **Per
+  CLAUDE.md: write as a `--dry-run` script, present the plan, STOP for approval before any DELETE.**
+  Not yet started — decision surfaced to the user.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)
