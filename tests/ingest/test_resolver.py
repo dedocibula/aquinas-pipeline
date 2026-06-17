@@ -624,31 +624,16 @@ class TestProposeGapTerms:
 
 
 class TestLoadExistingGapTerms:
-    def _make_conn(self, rows):
-        """Fake psycopg2 connection returning fixed rows."""
-        class FakeCursor:
-            def __init__(self):
-                self._rows = rows
-            def execute(self, *_): pass
-            def fetchall(self): return self._rows
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-
-        class FakeConn:
-            def cursor(self): return FakeCursor()
-
-        return FakeConn()
-
-    def test_returns_empty_when_no_rows(self):
-        conn = self._make_conn([])
+    def test_returns_empty_when_no_rows(self, fake_conn):
+        conn = fake_conn(fetchall_rows=[])
         assert _load_existing_gap_terms(conn) == {}
 
-    def test_returns_indexed_by_lemma(self):
+    def test_returns_indexed_by_lemma(self, fake_conn):
         rows = [
             ("virtus", 1, 10, 2, "term", "cnosť"),
             ("anima",  2, 20, 1, "name", "duša"),
         ]
-        conn = self._make_conn(rows)
+        conn = fake_conn(fetchall_rows=rows)
         result = _load_existing_gap_terms(conn)
         assert set(result) == {"virtus", "anima"}
         assert result["virtus"] == {

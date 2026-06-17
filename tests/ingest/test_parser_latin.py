@@ -5,6 +5,7 @@ No DB, no live files.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,18 @@ from ingest.parser_latin import (
     _question_locator,
     run_full,
 )
+from tests._fakes import FakeConn
+
+
+@contextmanager
+def _fake_get_conn():
+    """get_conn replacement for run_full tests.
+
+    These tests monkeypatch the insert path (`_insert_article`), so the
+    connection only needs the context-manager / commit / rollback surface —
+    no cursor work happens. Yields the shared cursor-less FakeConn.
+    """
+    yield FakeConn()
 
 # ── _parse_title_full ─────────────────────────────────────────────────────────
 
@@ -285,20 +298,8 @@ class TestRunFull:
         def fake_insert(conn, locator, elems, wid, src):
             inserted.append(locator)
 
-        class FakeConn:
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def commit(self): pass
-            def rollback(self): pass
-
-        from contextlib import contextmanager
-
-        @contextmanager
-        def fake_get_conn():
-            yield FakeConn()
-
         monkeypatch.setattr(pl, "_insert_article", fake_insert)
-        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "get_conn", _fake_get_conn)
         monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
         monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
 
@@ -334,20 +335,8 @@ class TestRunFull:
         def fake_insert(conn, locator, elems, wid, src):
             inserted.append(locator)
 
-        class FakeConn:
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def commit(self): pass
-            def rollback(self): pass
-
-        from contextlib import contextmanager
-
-        @contextmanager
-        def fake_get_conn():
-            yield FakeConn()
-
         monkeypatch.setattr(pl, "_insert_article", fake_insert)
-        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "get_conn", _fake_get_conn)
         monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
         monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
 
@@ -360,19 +349,7 @@ class TestRunFull:
         """Log parent directories are created if they don't exist."""
         import ingest.parser_latin as pl
 
-        class FakeConn:
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def commit(self): pass
-            def rollback(self): pass
-
-        from contextlib import contextmanager
-
-        @contextmanager
-        def fake_get_conn():
-            yield FakeConn()
-
-        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "get_conn", _fake_get_conn)
         monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
         monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
 
@@ -385,19 +362,7 @@ class TestRunFull:
     def test_returns_zero_counts_for_empty_corpus(self, tmp_path, monkeypatch):
         import ingest.parser_latin as pl
 
-        class FakeConn:
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def commit(self): pass
-            def rollback(self): pass
-
-        from contextlib import contextmanager
-
-        @contextmanager
-        def fake_get_conn():
-            yield FakeConn()
-
-        monkeypatch.setattr(pl, "get_conn", fake_get_conn)
+        monkeypatch.setattr(pl, "get_conn", _fake_get_conn)
         monkeypatch.setattr(pl, "work_id", lambda conn, s: 1)
         monkeypatch.setattr(pl, "source_id", lambda conn, s: 2)
 

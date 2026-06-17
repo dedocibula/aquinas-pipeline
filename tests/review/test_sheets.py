@@ -13,50 +13,9 @@ from review.sheets import (
     read_existing_rows_from_data,
     write_header,
 )
+from tests._fakes import FakeSpreadsheet, FakeWorksheet
 
-# ── Fake gspread objects ──────────────────────────────────────────────────────
-
-
-class FakeWorksheet:
-    def __init__(self, title: str = "Review", rows: list[list] | None = None):
-        self.title = title
-        self.id = 42
-        self._rows: list[list] = rows if rows is not None else []
-        self.batch_updates_issued: list[list] = []
-        self.appended: list[list] = []
-        self.cell_updates: list[tuple] = []
-
-    def get_all_values(self) -> list[list]:
-        return list(self._rows)
-
-    def batch_update(self, updates, **kw):
-        self.batch_updates_issued.append(updates)
-
-    def append_rows(self, rows, **kw):
-        self.appended.extend(rows)
-
-    def update(self, range_name, values, **kw):
-        self.cell_updates.append((range_name, values))
-
-
-class FakeSpreadsheet:
-    def __init__(self, worksheets: dict[str, FakeWorksheet] | None = None):
-        self._worksheets: dict[str, FakeWorksheet] = worksheets or {}
-        self.batch_update_calls: list[dict] = []
-
-    def worksheets(self):
-        return list(self._worksheets.values())
-
-    def worksheet(self, title: str) -> FakeWorksheet:
-        return self._worksheets[title]
-
-    def add_worksheet(self, title: str, rows: int, cols: int) -> FakeWorksheet:
-        ws = FakeWorksheet(title=title)
-        self._worksheets[title] = ws
-        return ws
-
-    def batch_update(self, body: dict):
-        self.batch_update_calls.append(body)
+# ── Fake gspread objects come from tests/_fakes.py (shared definition) ─────────
 
 
 # ── get_or_create_worksheet ───────────────────────────────────────────────────

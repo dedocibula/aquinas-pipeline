@@ -15,50 +15,9 @@ from review.export_sheet import (
     rows_to_sheet_values,
 )
 from review.sheets import HEADER
+from tests._fakes import FakeSpreadsheet, FakeWorksheet
 
-# ── Fake objects ──────────────────────────────────────────────────────────────
-
-
-class FakeWorksheet:
-    def __init__(self, title: str = "Review", rows: list[list] | None = None):
-        self.title = title
-        self.id = 42
-        self._rows: list[list] = rows if rows is not None else []
-        self.batch_updates_issued: list = []
-        self.appended: list[list] = []
-        self.cell_updates: list = []
-
-    def get_all_values(self):
-        return list(self._rows)
-
-    def batch_update(self, updates, **kw):
-        self.batch_updates_issued.append(updates)
-
-    def append_rows(self, rows, **kw):
-        self.appended.extend(rows)
-
-    def update(self, range_name, values, **kw):
-        self.cell_updates.append((range_name, values))
-
-
-class FakeSpreadsheet:
-    def __init__(self, worksheets: dict | None = None):
-        self._worksheets = worksheets or {}
-        self.batch_update_calls: list = []
-
-    def worksheets(self):
-        return list(self._worksheets.values())
-
-    def worksheet(self, title):
-        return self._worksheets[title]
-
-    def add_worksheet(self, title, rows, cols):
-        ws = FakeWorksheet(title=title)
-        self._worksheets[title] = ws
-        return ws
-
-    def batch_update(self, body):
-        self.batch_update_calls.append(body)
+# ── Fake objects come from tests/_fakes.py (shared definition) ─────────────────
 
 
 def _db_row(**overrides) -> dict:
