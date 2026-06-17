@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from common.deepseek import _api_stats, _api_stats_lock, get_api_stats
-from common.lemmatize import lemmatize_czech, lemmatize_latin
+from common.lemmatize import lemmatize_czech, lemmatize_latin, pos_tag_latin
 from ingest.gap_terms import (
     _GAP_BATCH_SIZE,
     _GAP_FREQ_CEILING_PCT,
@@ -230,6 +230,52 @@ def _resolve_multi(term: Term, czech_text: str | None, english_text: str | None,
     )
 
 
+# ── Perfect-passive habere suppression ─────────────────────────────────────────
+#
+# CLTK lemmatizes the perfect-passive participle 'habitum' (in 'habitum est' /
+# 'habita sunt' — "as was held/stated") to the noun *habitus*, so a segment that
+# never mentions the concept would otherwise get a bogus habitus term_usage row.
+# pos_tag_latin CANNOT disambiguate the participle itself: it tags 'habitum' '?'
+# both as the PPP and as the accusative noun. The reliable signal is the *esse*
+# copula that follows, which the tagger marks as a verb ('est'/'sunt' → 'V'); so
+# the construction is detected by the participle + a verb-tagged copula, and the
+# noun is suppressed only when that construction is the segment's sole habitus
+# evidence ('habita' alone lemmatizes to 'habeo', so only 'habitum' matters).
+
+_HABERE_PPP_RE = re.compile(r"\b(?:habitum|habita)\s+(?:est|sunt)\b", re.IGNORECASE)
+_HABERE_PPP_FORMS = {"habitum", "habita"}
+_ESSE_FORMS = {"est", "sunt"}
+
+
+def _suppressed_habitus_tokens(latin: str) -> set[str]:
+    """Surface tokens that lemmatize to *habitus* only via perfect-passive habere.
+
+    Returns the set of participle surfaces ('habitum'/'habita') to suppress when
+    the 'habitum est'/'habita sunt' construction is the *only* habitus evidence
+    in `latin`; empty when habitus is genuinely present elsewhere (or the
+    construction is absent).
+    """
+    if not _HABERE_PPP_RE.search(latin):
+        return set()
+    tagged = pos_tag_latin(latin)
+    ppp = {
+        surface.lower()
+        for (surface, _), (nxt, nxt_pos) in zip(tagged, tagged[1:])
+        if surface.lower() in _HABERE_PPP_FORMS
+        and nxt.lower() in _ESSE_FORMS
+        and nxt_pos == "V"
+    }
+    if not ppp:
+        return set()
+    # Genuine habitus evidence from any other token keeps the noun in play.
+    for token in set(re.findall(r"[a-zA-Z]+", latin)):
+        if token.lower() in ppp:
+            continue
+        if "habitus" in {_canonical_lemma(cand) for cand in lemmatize_latin(token)}:
+            return set()
+    return ppp
+
+
 def resolve_segment(
     segment: Segment,
     multiword_terms: list[Term],
@@ -270,6 +316,10 @@ def resolve_segment(
     masked = mask_spans(latin, [t for t, _ in mw_matches])
     tokens = sorted(set(re.findall(r"[a-zA-Z]+", masked)))  # sorted for determinism
 
+    # Tokens that lemmatize to *habitus* only via perfect-passive habere — never
+    # resolve them to the noun (see _suppressed_habitus_tokens).
+    suppressed_habitus = _suppressed_habitus_tokens(latin)
+
     gap_candidates: set[str] = set()  # stripped lemmas not in Krystal, for gap handling
 
     for token in tokens:
@@ -285,6 +335,11 @@ def resolve_segment(
             term = lemma_to_term.get(lemma.lower())
             if term is None:
                 continue
+            # Suppress the noun habitus when this token is only a perfect-passive
+            # habere participle: consume the token (no resolution, no gap keying).
+            if term.latin_lemma == "habitus" and token.lower() in suppressed_habitus:
+                krystal_hit = True
+                break
             krystal_hit = True
             if term.term_id not in seen_term_ids:
                 seen_term_ids.add(term.term_id)

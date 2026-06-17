@@ -19,6 +19,7 @@ from ingest.resolver import (
     _match_pattern,
     _resolve_multi,
     _resolve_single,
+    _suppressed_habitus_tokens,
     mask_spans,
     phrase_match,
     resolve_segment,
@@ -908,3 +909,42 @@ class TestResolveSegmentGap:
         gap = [r for r in res if r.method in self._GAP_METHODS]
         assert len(gap) == 2
         assert all(r.sense.sense_id == 9 for r in gap)
+
+
+# ── resolve_segment — perfect-passive habere suppression ──────────────────────
+
+class TestResolveSegmentHabereSuppression:
+    """CLTK lemmatizes the PPP 'habitum' (in 'habitum est') to the noun *habitus*.
+    The resolver must not write that bogus habitus term_usage row when the
+    construction is the segment's only habitus evidence. Uses the real CLTK
+    lemmatizer + POS tagger (model-gated, skipped when models are absent)."""
+
+    def _seg(self, latin):
+        return Segment(segment_id=1, locator_path="I.q1.a1.arg1", element_type="arg",
+                       latin=latin, czech=None, english=None)
+
+    def _habitus_lookup(self):
+        return {"habitus": _term(54, "habitus", [_sense(60)])}
+
+    def test_ppp_only_is_suppressed(self):
+        # 'habitum est' = "as has been said" — no genuine habitus → no resolution.
+        res = resolve_segment(self._seg("Sicut habitum est supra de potentia."),
+                              [], self._habitus_lookup(), 20, 30, {})
+        assert [r for r in res if r.term.latin_lemma == "habitus"] == []
+
+    def test_accusative_noun_still_resolves(self):
+        # 'habitum bonum' (accusative noun, no esse) is genuine habitus → resolved.
+        res = resolve_segment(self._seg("Homo habitum bonum habet."),
+                              [], self._habitus_lookup(), 20, 30, {})
+        assert [r for r in res if r.term.latin_lemma == "habitus"]
+
+    def test_genuine_evidence_elsewhere_keeps_constraint(self):
+        # PPP present, but nominative 'habitus' elsewhere → not suppressed.
+        res = resolve_segment(self._seg("Habitus est qualitas, ut habitum est supra."),
+                              [], self._habitus_lookup(), 20, 30, {})
+        assert [r for r in res if r.term.latin_lemma == "habitus"]
+
+    def test_suppressed_tokens_helper(self):
+        assert _suppressed_habitus_tokens("Sicut habitum est supra.") == {"habitum"}
+        assert _suppressed_habitus_tokens("Homo habitum bonum habet.") == set()
+        assert _suppressed_habitus_tokens("Nulla mentio hic.") == set()
