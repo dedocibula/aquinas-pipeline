@@ -807,9 +807,9 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 3 | 3 (DeepSeek client) | ✅ REVIEWED + cleaned (commit `ae8bae8`) |
 | 4 | 4 (parser base class) | ✅ REVIEWED + cleaned (commit `600b2e7`) |
 | 5 | 5 (pipeline steps/runner/reporting/interactive) | ✅ REVIEWED + cleaned (commit `de8a7f7`) |
-| 6 | 6 (optimize isolation) | ⏭️ NEXT |
-| 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
-| 8 | 9 (domain housekeeping — the only behavioral phase) | pending |
+| 6 | 6 (optimize isolation) | ✅ REVIEWED + cleaned (commit `8158076`) |
+| 7 | 7 + 8 (label strip / rename / schema consolidation) | ✅ REVIEWED — no defects; doc-only close |
+| 8 | 9 (domain housekeeping — the only behavioral phase) | ⏭️ NEXT |
 | 9 | 10 + 11 (regression gate + memory) — overall merge verdict | pending |
 
 (Mirror of these units in the live task list, IDs #1–#9.)
@@ -1008,6 +1008,43 @@ Confirm:
   diagnostic and deleted `ingest/reset_gap_proposals.py` had no surviving importers (the resolver handles
   partial-run idempotency itself).
 
+#### Unit 7 — DONE (no code change; doc-only close)
+Verdict: **solid; both phases hold up. No correctness issues. One milestone residue, accepted.**
+Baseline at review: 807 passed, ruff clean.
+
+Phase 7 (label strip + rename) — all pass:
+- **Code comments/docstrings clean** — grep `M0–M5`/`milestone` across `src/` + `tests/` returns only
+  false positives in `parser_latin.py` (the regex match var `m2 = re.fullmatch(...)` / `m2.group(1)`),
+  not milestone labels.
+- **`report_m2.py → coverage_report.py` rename complete** — old file gone; zero `report_m2` refs; the
+  functions/constants (`generate_coverage_report`, `write_coverage_report`, `COVERAGE_REPORT`), the
+  `ingest/steps.py` import, and the test (`test_coverage_report.py`) all repointed.
+- **No other mN-named source files** under `src/` (the `.claude/m0_setup.md…m5_hardening.md` design docs
+  are intentionally milestone-named, out of scope; CLAUDE.md still routes to them).
+
+Phase 8 (schema consolidation) — all pass:
+- `db/schema.sql` = 11 tables + both views (`v_segment`/`v_sense`) + extensions + seed rows
+  (source-precedence + Summa work), dependency-ordered; header documents fresh-setup + DDL caution +
+  do-not-replay. Migrations `001`–`007` archived (002 present); `archive/README.md` historical-only.
+- **Still matches live** — git confirms nothing touched `db/` or `migrations/` since the Phase 8 commit
+  `841432c`, and Phase 9 was row-only (purge deletes `term_usage` rows, no DDL). Verified the three
+  details Phase 8 said it initially got wrong **directly against live**: `glossary_term` column order
+  `…notes, category, la_surface` (matches), `la_surface` present, unique constraint
+  `sense_rendering_sense_lang_source_unique` (matches). A full byte-identical re-roundtrip needs loading
+  into a throwaway DB (DDL — would STOP for approval) and is unnecessary given no DDL since the original
+  verification + the complete structural correspondence (every live `CREATE TABLE/VIEW/INDEX` has its
+  file counterpart; the only diff-noise is pg_dump's canonical form — `public.` qualifiers + separate
+  `ALTER TABLE ADD CONSTRAINT` vs the file's inline `CONSTRAINT`/`CHECK`).
+
+Noted-but-accepted (user decision: accept, no change):
+- **Report output filenames still carry milestone prefixes** (`m2_coverage.txt`, `m2_parser_anomalies.txt`,
+  `m2_latin_stats.json`, `m2_api_stats.json`, `m2_dedup_rollup.csv`, `m2_{bahounek,english}_gaps.txt`,
+  `m4_sample.txt`, `m5_production.txt`, `m5_needs_human.txt`). Real milestone residue, but never in Phase
+  7's scope (comments/docstrings + the one module rename), **cross-consumer coupled** (producer/consumer
+  pairs across modules; `m4_sample.txt` also read by `optimize_loop.sh`'s embedded prompt), and Phase 5c
+  already deferred relocating step-owned domain reports for this exact reason. All pairs currently
+  consistent (no drift). Left as-is; a rename, if ever wanted, is its own careful commit.
+
 #### Unit 2 — appendix: original queued critiques (investigated above)
 Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
 (resolver/resolution/loop/import_approvals; `corpus_db.py` + `glossary_repo.py` deleted).
@@ -1033,6 +1070,7 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
 ### Verification baseline for the review
 - Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
   after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: `de8a7f7`; after Unit 6: `8158076`.
+  Unit 7: no code change (doc-only close); suite still **807 passed**, ruff clean.
 - `uv run pytest -q` → **807 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
   batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815;
   +1 Unit-5 broken-factory test → 816; −9 Unit-6 orphaned-diagnostic tests via `8158076` → 807);
