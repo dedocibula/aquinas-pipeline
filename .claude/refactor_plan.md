@@ -806,7 +806,7 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 2 | 2 + 2b (repository layer + caller flip) | ✅ REVIEWED + cleaned (commit `3ca09b3`) |
 | 3 | 3 (DeepSeek client) | ✅ REVIEWED + cleaned (commit `ae8bae8`) |
 | 4 | 4 (parser base class) | ✅ REVIEWED + cleaned (commit `600b2e7`) |
-| 5 | 5 (pipeline steps/runner/reporting/interactive) | ✅ REVIEWED + cleaned (commit pending) |
+| 5 | 5 (pipeline steps/runner/reporting/interactive) | ✅ REVIEWED + cleaned (commit `de8a7f7`) |
 | 6 | 6 (optimize isolation) | ⏭️ NEXT |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
 | 8 | 9 (domain housekeeping — the only behavioral phase) | pending |
@@ -907,7 +907,7 @@ Cleanup applied (commit `600b2e7`, 815 passed / ruff clean):
 Noted-but-accepted (no change): the overlay `store()` lookup is unscoped by `work_id` (matches `main`'s
 overlay inserts; the title-placeholder lookup in latin is the only work_id-scoped path — also as on `main`).
 
-#### Unit 5 — DONE (cleanup commit pending)
+#### Unit 5 — DONE (commit `de8a7f7`)
 Files reviewed: `src/pipeline/` (`step.py`, `context.py`, `runner.py`, `reporting.py`, `interactive.py`,
 `__main__.py`), the step wrappers (`acquire/steps.py`, `ingest/steps.py` — **renamed from `pipeline.py`**,
 `review/steps.py`, `translate/steps.py`), and the status SQL (`SegmentRepository.translation_status_counts`,
@@ -930,7 +930,7 @@ later phase and is now accepted.**
   (clean; future multi-step caller can use it) but the gate is inert. Plan claims corrected: §3 Phase-5 row
   + the Phase 5b "SUPERSEDED" note now record this.
 
-Cleanup applied (commit pending; 816 passed / ruff clean):
+Cleanup applied (commit `de8a7f7`, 816 passed / ruff clean):
 - **Interactive loop: broken-stage import no longer fatal.** `item.factory()` ran the stage's local import
   **outside** the runner's try/except, so selecting a stage with a missing optional dep crashed the whole
   loop (the "broken dep doesn't kill the menu" guarantee held only at `build_menu` time, not at selection
@@ -1003,7 +1003,7 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
 
 ### Verification baseline for the review
 - Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
-  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: commit pending.
+  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: `de8a7f7`.
 - `uv run pytest -q` → **816 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
   batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815;
   +1 Unit-5 broken-factory test → 816); `uv run ruff check` → clean.
