@@ -1,16 +1,25 @@
 <!doctype html>
 <html lang="sk">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Aquinas Pipeline{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
 <body>
   <header class="site-header">
     <nav class="breadcrumb">
       <a href="/">Aquinas Pipeline</a>
       {% block breadcrumb %}{% endblock %}
+      <span class="nav-user">
+        {% if current_user_email %}
+        {{ current_user_email }} &mdash; <a href="/logout">Logout</a>
+        {% else %}
+        <a href="/login">Login</a>
+        {% endif %}
+      </span>
     </nav>
   </header>
 
@@ -19,8 +28,9 @@
   </main>
 
   <footer class="site-footer">
-    <small>Read-only preview — Aquinas Pipeline M4</small>
+    <small>Aquinas Pipelineπ</small>
   </footer>
   {% block scripts %}{% endblock %}
 </body>
+
 </html>

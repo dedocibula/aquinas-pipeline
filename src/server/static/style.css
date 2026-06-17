@@ -44,6 +44,14 @@ a:hover {
 
 .breadcrumb {
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+}
+
+.nav-user {
+  margin-left: auto;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 main {

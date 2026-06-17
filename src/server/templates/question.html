@@ -52,7 +52,7 @@
         {% else %}
         <em class="awaiting">— awaiting translation —</em>
         {% endif %}
-        {% if seg.slovak and ts in ('translated', 'needs_human') %}
+        {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
         <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
         {% endif %}
         {% if ts in ('translated', 'needs_human') %}
@@ -84,7 +84,9 @@
         <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
         {% elif needs_human %}
         <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+        {% if is_editor %}
         <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
+        {% endif %}
         {% else %}
         <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
         {% endif %}
@@ -118,7 +120,7 @@
         {% else %}
         <em class="awaiting">— awaiting translation —</em>
         {% endif %}
-        {% if seg.slovak and ts in ('translated', 'needs_human') %}
+        {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
         <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
         {% endif %}
         {% if ts in ('translated', 'needs_human') %}
@@ -150,7 +152,9 @@
         <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
         {% elif needs_human %}
         <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+        {% if is_editor %}
         <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
+        {% endif %}
         {% else %}
         <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
         {% endif %}

@@ -145,7 +145,7 @@
           {% endif %}
 
           {# Detail panel — shown for translated and needs_human segments #}
-          {% if seg.slovak and ts in ('translated', 'needs_human') %}
+          {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
           <button class="btn-edit" data-segment-id="{{ seg.segment_id }}"
                   title="Edit translation">&#9998; Edit</button>
           {% endif %}
@@ -205,7 +205,7 @@
           <span class="badge {{ badge_class }}"
                 data-badge="{{ seg.segment_id }}"
                 title="{{ badge_title }}">{{ badge_char | safe }}</span>
-          {% if needs_human %}
+          {% if is_editor and needs_human %}
             <button class="btn-approve"
                     data-segment-id="{{ seg.segment_id }}"
                     title="Approve this segment">&#10003; Approve</button>

@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "flask>=3.0",
     "prefect>=3.0",
+    "authlib>=1.7.2",
 ]
 
 [project.optional-dependencies]

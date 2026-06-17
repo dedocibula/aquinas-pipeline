@@ -2,15 +2,19 @@
 Flask preview server — Latin | Slovak parallel text viewer.
 
 URL structure mirrors aquinas.cc: /la/sk/~ST.I.Q3.A1
-Read-only; no auth; queries the production DB directly.
+Read-only for anonymous visitors. Editors authenticate via Google OAuth and
+can approve/edit segments. Editor emails are stored in the `editor` DB table.
 """
 
 from __future__ import annotations
 
+import os
 import re
+from functools import wraps
 
+from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
 load_dotenv()
 
@@ -30,6 +34,30 @@ from server.db import (  # noqa: E402
 from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
 app = Flask(__name__)
+app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+_client_id = os.environ.get("GOOGLE_CLIENT_ID")
+_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+if not _client_id or not _client_secret:
+    raise RuntimeError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+
+oauth = OAuth(app)
+oauth.register(
+    name="google",
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_id=_client_id,
+    client_secret=_client_secret,
+    client_kwargs={"scope": "openid email profile"},
+)
+
+
+def requires_editor(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("is_editor"):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 # Populated on the first request; lives for the process lifetime.
 _formulas: dict[str, str] = {}
@@ -101,6 +129,52 @@ def _load_formulas() -> None:
     if not _formulas:
         with get_conn() as conn:
             _formulas = get_structural_formulas(conn)
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+
+@app.route("/login")
+def login():
+    redirect_uri = url_for("auth_callback", _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    try:
+        token = oauth.google.authorize_access_token()
+    except Exception:
+        return jsonify({"ok": False, "error": "OAuth error"}), 400
+    userinfo = token.get("userinfo") or oauth.google.userinfo()
+    if not userinfo.get("email_verified"):
+        return jsonify({"ok": False, "error": "email not verified"}), 403
+    email = userinfo.get("email")
+    if not email:
+        return jsonify({"ok": False, "error": "no email in token"}), 400
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM editor WHERE email = %s", (email,))
+            is_editor = cur.fetchone() is not None
+    session["email"] = email
+    session["is_editor"] = is_editor
+    return redirect(url_for("index"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
+
+
+@app.context_processor
+def _inject_user():
+    return {
+        "current_user_email": session.get("email"),
+        "is_editor": session.get("is_editor", False),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +312,7 @@ def status():
 
 
 @app.route("/api/approve/<int:segment_id>", methods=["POST"])
+@requires_editor
 def approve(segment_id: int):
     """Flip a segment from needs_human → translated.
 
@@ -250,6 +325,7 @@ def approve(segment_id: int):
 
 
 @app.route("/api/edit/<int:segment_id>", methods=["POST"])
+@requires_editor
 def edit_segment(segment_id: int):
     """Save a human-edited Slovak translation.
 
