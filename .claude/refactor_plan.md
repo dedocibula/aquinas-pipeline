@@ -810,7 +810,7 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 6 | 6 (optimize isolation) | ✅ REVIEWED + cleaned (commit `8158076`) |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | ✅ REVIEWED — no defects; doc-only close |
 | 8 | 9 (domain housekeeping — the only behavioral phase) | ✅ REVIEWED + cleaned (commit `20e0c4b`) |
-| 9 | 10 + 11 (regression gate + memory) — overall merge verdict | ⏭️ NEXT |
+| 9 | 10 + 11 (regression gate + memory) — overall merge verdict | ✅ REVIEWED — merge-ready; branch merged to `main` |
 
 (Mirror of these units in the live task list, IDs #1–#9.)
 
@@ -1045,6 +1045,31 @@ Confirmed correct (accept, no change):
 - **Purge script** is dry-run-by-default, touches only `term_usage`, and shares its bogus-detector with the
   resolver. (Untracked in the worktree — committed at `323accd`, removed from git at `2d0a793` as a one-off;
   the working copy is harmless and gitignored-equivalent.)
+
+#### Unit 9 — DONE (final unit; overall merge verdict)
+Files/artifacts reviewed: Phase 10 (final regression gate) + Phase 11 (memory entry), plus the whole
+branch as the merge candidate. Re-ran the gate fresh (not trusting the log).
+
+Verdict: **merge-ready. No new defects; all 8 prior units reviewed + cleaned.**
+- **Gate green re-run**: `uv run pytest -q` → **808 passed** (≥745 holds); `uv run ruff check` clean;
+  working tree clean.
+- **Entry-point import-smoke**: 33/33 real modules import. The 3 first-pass "misses" were stale names,
+  all matching the plan's own record (verified on disk): `common.models`→`storage/models.py` (Phase 2),
+  `ingest.resolution`→merged into `resolver.py` (Unit 2), Flask app is top-level `server/` (`server.app`/
+  `server.db` import fine), not `review.server`. CLI smoke (`pipeline --help`, `translate.run --help`) → 0.
+- **Phase 11 memory present + accurate**: `project-aquinas-architecture.md` exists, indexed in `MEMORY.md`;
+  folder map matches the live `src/` layout (storage leaf, deepseek_client single API door, parser_latin
+  structural).
+- **Merge housekeeping**: deleted the untracked spent one-off `scripts/purge_habere_ppp_usage.py`
+  (committed `323accd` → removed from git `2d0a793`; working copy was lingering). Worktree clean.
+
+Carried-forward accepted residue (all previously surfaced + user-accepted — eyes-open at merge):
+1. Runner verify-gate inert in production (Unit 5) — interactive runs one step per selection.
+2. ≤25-segment habere latent gap (Unit 8) — code fixed forward; purged rows left unrestored ("leave it").
+3. Report filenames keep `m2_`/`m4_`/`m5_` prefixes (Unit 7) — cross-consumer coupled; deferred.
+4. Wheel `packages` omits `translate`/`pipeline`/`storage` (Unit 6) — pre-existing; runtime via editable `.pth`.
+
+**Pre-merge review COMPLETE. Branch `aquinas-refactor` merged → `main`.**
 
 #### Unit 7 — DONE (no code change; doc-only close)
 Verdict: **solid; both phases hold up. No correctness issues. One milestone residue, accepted.**
