@@ -809,8 +809,8 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 5 | 5 (pipeline steps/runner/reporting/interactive) | ✅ REVIEWED + cleaned (commit `de8a7f7`) |
 | 6 | 6 (optimize isolation) | ✅ REVIEWED + cleaned (commit `8158076`) |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | ✅ REVIEWED — no defects; doc-only close |
-| 8 | 9 (domain housekeeping — the only behavioral phase) | ⏭️ NEXT |
-| 9 | 10 + 11 (regression gate + memory) — overall merge verdict | pending |
+| 8 | 9 (domain housekeeping — the only behavioral phase) | ✅ REVIEWED + cleaned (commit `20e0c4b`) |
+| 9 | 10 + 11 (regression gate + memory) — overall merge verdict | ⏭️ NEXT |
 
 (Mirror of these units in the live task list, IDs #1–#9.)
 
@@ -1007,6 +1007,44 @@ Confirm:
 - **Phase-6 collateral** (cross-check, already touched in `74254b2`): the dropped `--pilot` batch-size
   diagnostic and deleted `ingest/reset_gap_proposals.py` had no surviving importers (the resolver handles
   partial-run idempotency itself).
+
+#### Unit 8 — DONE (commit `20e0c4b`)
+Files reviewed: Phase 9a (`common/lemmatize.SlovakTermMatcher` + `translate/prechecks.py`),
+Phase 9b (`ingest/resolver._suppressed_habitus_tokens` + the deleted `loop._drop_habere_ppp_constraints`
++ `scripts/purge_habere_ppp_usage.py`). The only behavioral phase.
+
+Verdict: **9a is a clean behavior-preserving encapsulation; 9b's resolver root-cause fix is correct but
+had one bounded over-suppression bug — now fixed.**
+
+**Finding — same-surface over-suppression (confirmed, bounded; FIXED):** `_suppressed_habitus_tokens`
+returned the construction surfaces as a *set*, and the resolver matches that set against a deduplicated
+token list — so a surface (`habitum`) was suppressed or resolved wholesale. When a genuine accusative
+`habitum` co-occurred with a stock `habitum est` in the same segment (same surface), the genuine one was
+dropped with the bogus. Live corpus: ≤25 segments (≤3.5% of 723). Concrete instance: seg 26876
+(`per habitum virtutis moralis` + `ut supra habitum est`) had 0 habitus rows.
+- **Not a Phase-9 regression**: the old read-time patch was equally surface-blind (dropped the constraint
+  whenever the PPP regex matched anywhere), so 26876 lost it pre-9b too. The corpus-level
+  behavior-preservation diff (40 seg / 928 rows identical) still holds — this is a pre-existing latent gap.
+- **Fix**: per-surface occurrence counting — suppress a surface only when total occurrences ≤ construction
+  occurrences. Keeps 26876 (2 `habitum` > 1 construction → genuine) while still suppressing the all-bogus
+  case (2 `habitum est` = 2 constructions → suppress). The "genuine evidence from another token" early-out
+  is preserved; `purge_habere_ppp_usage.py` reuses the same function so script/resolver stay one source of
+  truth. +1 resolver test (same-surface genuine+construction) + 2 helper assertions. **808 passed; ruff clean.**
+- **Live-DB recovery deliberately NOT done (user: "leave it").** The 9b purge already deleted those ≤25
+  genuine rows with the old detector; the code fix prevents future over-suppression but does not restore
+  them. Restoring would mean re-resolving the affected segments (a DB write) — left as an accepted ≤25-seg
+  latent gap.
+
+Confirmed correct (accept, no change):
+- **9a `SlovakTermMatcher`** — pure relocation of `_oov_stem`/`_word_in_draft`/`_normalise` into one frozen
+  dataclass; `generate` injectable; the cleaner-stem alternative deliberately NOT adopted (non-blocking,
+  would risk locked snapshots). `check_terminology_lemma` rebuilds the matcher per call so the
+  `generate_slovak_forms` monkeypatch seam holds.
+- **9b resolver fix is PERMANENT** — CLTK re-mislemmatizes on every run, so the correction must live on the
+  write path; the regex gate keeps the POS tagger off the hot path; read-time patch correctly deleted.
+- **Purge script** is dry-run-by-default, touches only `term_usage`, and shares its bogus-detector with the
+  resolver. (Untracked in the worktree — committed at `323accd`, removed from git at `2d0a793` as a one-off;
+  the working copy is harmless and gitignored-equivalent.)
 
 #### Unit 7 — DONE (no code change; doc-only close)
 Verdict: **solid; both phases hold up. No correctness issues. One milestone residue, accepted.**
