@@ -187,6 +187,21 @@ def test_failed_step_reports_but_continues(monkeypatch, tmp_path):
     assert "reported a failure" in out
 
 
+def test_broken_factory_is_surfaced_not_fatal(monkeypatch, tmp_path):
+    """A stage whose factory raises (broken optional dep) is reported, loop survives."""
+    from pipeline.interactive import MenuItem
+
+    def _boom():
+        raise ImportError("no module named widget")
+
+    menu = [MenuItem("broken", "Broken stage", _boom)]
+    monkeypatch.setattr(ix, "build_menu", lambda: menu)
+    code, runner, out = _run(monkeypatch, tmp_path, _Reader("1", "q"))
+    assert code == 0
+    assert runner.ran == []  # step never reached the runner
+    assert "[broken] unavailable" in out
+
+
 def test_status_unavailable_is_surfaced_not_fatal(monkeypatch, tmp_path):
     from pipeline import StepResult
     from pipeline.context import PipelineContext

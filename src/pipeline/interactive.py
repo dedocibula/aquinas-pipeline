@@ -294,7 +294,12 @@ def run_loop(
             continue
 
         item = menu[int(choice) - 1]
-        results = make_runner().run([item.factory()])
+        try:
+            step = item.factory()
+        except Exception as exc:  # broken optional dep in this stage — surface, don't crash the loop
+            print(f"[{item.token}] unavailable: {exc}", file=out)
+            continue
+        results = make_runner().run([step])
         save_state(item.token)
         if not all(r.ok for r in results):
             print(f"[{item.token}] reported a failure — see the report above.", file=out)

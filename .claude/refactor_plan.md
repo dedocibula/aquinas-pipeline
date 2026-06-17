@@ -88,7 +88,7 @@ Explore agents + grep). Disposition per the user:
 | 2b — Flip callers to models | ✅ DONE | resolver/resolution flipped (`4210376`); loop.translate_segment now consumes Segment/Constraint models + seg_repo writes; import_approvals bump/update/write_human_rendering via GlossaryRepository; corpus_db.py + glossary_repo.py deleted; tests repaired & test_import_approvals migrated to shared conftest fakes. Follow-up `b596cda`: folded `get_current_sense`/`get_la_surface`/`write_human_surface`/context_label UPDATE into GlossaryRepository (`get_current_sense`/`get_la_surface`/`write_context_label`/`write_human_surface`); helper tests moved to test_glossary.py. **No transition shims remain in import_approvals. 750 passed; ruff clean.** |
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
-| 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below) |
+| 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below). **⚠️ superseded by Phase 6's `74254b2`: `ingest/pipeline.py` + its `--all`/`--step` CLI were deleted; `python -m pipeline` (interactive) is now the only orchestration entry point — see the Phase 5b note and Unit 5 review.** |
 | 6 — Isolate optimize/ toolchain | ✅ DONE | new `src/optimize/` package; toolchain relocated; 823 passed; ruff clean (see below). **Re-verified this session: 795 passed, ruff clean, deliverables present, old paths gone.** |
 | 6.1 — report* review + gap-term dedup (user-requested side tasks) | ✅ DONE | see below |
 | 7 — Strip milestone labels; rename milestone files | ✅ DONE | `40ebe40`; report_m2 → coverage_report |
@@ -184,6 +184,15 @@ timing/fail-loud loop in `ingest/pipeline.py` is gone.
   fakes; assert order, stop-on-failure, failed-verify-blocks-ingest, not-ok→exit 1); +3 Runner
   verify-hook tests; +6 `VerifySourcesStep`/`steps.main` tests. Smoke-tested `--help`, bad-step
   rejection, and `acquire.steps` import. **782 passed; ruff clean.**
+- **⚠️ SUPERSEDED (Phase 6, commit `74254b2`)**: `ingest/pipeline.py` was renamed to the CLI-less
+  `ingest/steps.py` and its **`--all`/`--step` runner CLI + `_build_steps()` registry + the
+  `_STEPS = (verify,latin,…,report)` order tuple were deleted** ("interactive driver is the single
+  entry point"). Consequence — accepted at Unit 5 review: the "**verify is prerequisite step 0 → no
+  ingest step touches the DB on a failed verify**" guarantee above is **no longer realized in any
+  runnable path**. The only orchestration entry is `python -m pipeline`, which runs exactly one step
+  per menu selection (`Runner.run([one_step])`), so the `Runner`'s ordered-sequence + `stop_on_failure`
+  + `verify()`-gate machinery is exercised only by tests, never by a >1-step production caller. The
+  abstraction is retained (clean; a future multi-step caller can use it) but the gate is not enforced.
 - **Next (5c)**: `src/pipeline/reporting.py` `StepReport` writer; route each step's `StepResult`
   details into per-stage `reports/<stage>/` (use `ctx.stage_reports_dir`); PromptLogger JSONL →
   `reports/translate/debug/`.
@@ -797,8 +806,8 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 2 | 2 + 2b (repository layer + caller flip) | ✅ REVIEWED + cleaned (commit `3ca09b3`) |
 | 3 | 3 (DeepSeek client) | ✅ REVIEWED + cleaned (commit `ae8bae8`) |
 | 4 | 4 (parser base class) | ✅ REVIEWED + cleaned (commit `600b2e7`) |
-| 5 | 5 (pipeline steps/runner/reporting/interactive) | ⏭️ NEXT |
-| 6 | 6 (optimize isolation) | pending |
+| 5 | 5 (pipeline steps/runner/reporting/interactive) | ✅ REVIEWED + cleaned (commit pending) |
+| 6 | 6 (optimize isolation) | ⏭️ NEXT |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
 | 8 | 9 (domain housekeeping — the only behavioral phase) | pending |
 | 9 | 10 + 11 (regression gate + memory) — overall merge verdict | pending |
@@ -898,31 +907,77 @@ Cleanup applied (commit `600b2e7`, 815 passed / ruff clean):
 Noted-but-accepted (no change): the overlay `store()` lookup is unscoped by `work_id` (matches `main`'s
 overlay inserts; the title-placeholder lookup in latin is the only work_id-scoped path — also as on `main`).
 
-#### Unit 5 — NEXT: queued critiques to investigate (Phase 5, pipeline steps/runner/reporting/interactive)
-Files: `src/pipeline/` (`step.py`, `context.py`, `runner.py`, `reporting.py`, `interactive.py`, `__main__.py`)
-plus the step wrappers that consume it (`acquire/steps.py`, `ingest/pipeline.py` Step classes,
-`review/steps.py`, `translate/steps.py`) and the new status SQL in the repos
-(`translation_status_counts`, `sense_status_counts`, `RunRepository.last_run`). Confirm:
-- **Runner fail-loud + stop-on-failure** — an uncaught step exception becomes a failed `StepResult` (run
-  summary survives), and a `verify()` False / error halts the run under default stop-on-failure. No step
-  runs after a failed prerequisite (esp. verify-sources as step 0 → no ingest step touches the DB on a
-  failed verify).
-- **Tx boundaries unchanged** — steps still open one conn per unit of work via `ctx.connection()`
-  (cross-check Unit 2 #1); the runner/reporting layer opens no DB transactions of its own.
-- **Reporting is additive & safe** — `StepReport` writes only under `ctx.stage_reports_dir(stage)`; a step
-  without a `stage` attr writes no file; the per-stage `reports/` dirs are gitignored (no data churn).
-- **Interactive driver delegates, never reimplements** — every menu item invokes a `PipelineStep` through
-  the `Runner` (no operation logic in the driver); `.pipeline_state.json` is load/save only (no DDL); a
-  DB-unreachable status read is surfaced, not fatal; local imports so a broken optional dep in one stage
-  doesn't kill the whole menu.
-- **Knob accessors fail loud** — `knob_int`/`knob_float` raise on a malformed value rather than silently
-  defaulting; resolve reads its knobs via `ctx.knob_*` (no direct `os.environ`).
-- **No behavior drift in the flipped ingest pipeline** — `_step_*` → `*Step` classes preserve the exact
-  print progress + the `--all` order (`verify,latin,bahounek,english,resolve,report`); `--step` still
-  accepts any single token incl. `verify`; `MineSensesStep` is deliberately NOT in `--all` (spends API
-  budget).
-- **Status SQL correctness** — the three count/last-run reads are projections (dict/scalar) consistent with
-  Unit 2 #2 (accepted, not entity loads); confirm they don't double-count or miss a status.
+#### Unit 5 — DONE (cleanup commit pending)
+Files reviewed: `src/pipeline/` (`step.py`, `context.py`, `runner.py`, `reporting.py`, `interactive.py`,
+`__main__.py`), the step wrappers (`acquire/steps.py`, `ingest/steps.py` — **renamed from `pipeline.py`**,
+`review/steps.py`, `translate/steps.py`), and the status SQL (`SegmentRepository.translation_status_counts`,
+`GlossaryRepository.sense_status_counts`, `RunRepository.last_run`).
+
+Verdict: **abstractions clean; small-bore critiques all hold; one structural premise was invalidated by a
+later phase and is now accepted.**
+
+**Headline finding — accepted (not a code change; plan corrected):** the queued critiques (and the Phase
+5b/5d log) were written against the Phase-5 `ingest/pipeline.py` with a `--all`/`--step` CLI that ran
+`Runner.run([verify, latin, …, report])` as one stop-on-failure sequence — so a failed verify-sources
+(step 0) blocked all ingest. **Phase 6's `74254b2` deleted that CLI** (rename → CLI-less `ingest/steps.py`;
+"interactive driver is the single entry point"). Consequences, verified and **accepted by the user**:
+- The only orchestration entry is `python -m pipeline` (interactive), which runs **exactly one step per
+  menu selection** (`Runner.run([item.factory()])`). Nothing chains verify → ingest.
+- The "**verify is prerequisite step 0 → no ingest step touches the DB on a failed verify**" invariant
+  (repeated throughout the plan) **is no longer realized in any runnable path**.
+- Both production `.run(...)` sites pass single-element lists, so the `Runner`'s ordered-sequence +
+  `stop_on_failure` + `verify()`-gate machinery is exercised **only by tests**. The abstraction is retained
+  (clean; future multi-step caller can use it) but the gate is inert. Plan claims corrected: §3 Phase-5 row
+  + the Phase 5b "SUPERSEDED" note now record this.
+
+Cleanup applied (commit pending; 816 passed / ruff clean):
+- **Interactive loop: broken-stage import no longer fatal.** `item.factory()` ran the stage's local import
+  **outside** the runner's try/except, so selecting a stage with a missing optional dep crashed the whole
+  loop (the "broken dep doesn't kill the menu" guarantee held only at `build_menu` time, not at selection
+  time). Wrapped the factory call in `run_loop`: a construction/import error prints `[<token>] unavailable: …`
+  and `continue`s. +1 test (`test_broken_factory_is_surfaced_not_fatal`).
+
+Confirmed correct (accept, no change):
+- **Status SQL** — clean `GROUP BY status` (no double-count; absent statuses absent, handled by
+  `render_status`); `last_run` = `ORDER BY run_id DESC LIMIT 1`. Projections, consistent with Unit 2 #2.
+- **Knob accessors fail loud** — `knob_int`/`knob_float` raise `ValueError` on a malformed value;
+  `ResolveStep` reads every knob via `ctx.knob_*` (no direct `os.environ`).
+- **Reporting additive & safe** — `StepReport.write` only under `ctx.stage_reports_dir(stage)`; runner
+  writes a file only when `getattr(step, "stage", None)` is truthy (bare/test steps emit nothing);
+  per-stage dirs gitignored.
+- **Tx boundaries unchanged** — steps open one conn per unit of work via `ctx.connection()`; runner/reporting
+  open no transactions. `MineSensesStep` is correctly exposed in the interactive menu but documented as
+  not-part-of-corpus-build (spends API budget).
+- **Interactive delegates, never reimplements** — every menu item is a Step factory run through the
+  `Runner`; `.pipeline_state.json` load/save only (corrupt → `{}`); DB-unreachable status read caught + surfaced.
+
+Noted-but-accepted (awareness only, pre-existing): `translate/steps.py` + `translation_status_counts`
+default `work_id=1`, while the interactive driver resolves the real id via `work_id(conn,"summa_articulus")`
+for the display — if the summa work isn't id 1 the translate steps act on the wrong work. Pre-existing
+`default 1` convention, not a Phase-5 regression.
+
+#### Unit 6 — NEXT: queued critiques to investigate (Phase 6, optimize isolation)
+Files: `src/optimize/` (`pilot.py`, `reset_golden.py`, `run_compare.py`, `build_sample.py`,
+`samples/pilot_sample_*.json`, `optimize_loop.sh`, `prompt_changelog.md`) + `pyproject.toml` packaging.
+Confirm:
+- **Pure relocation, no behavior drift** — every move was `git mv` (history preserved); only path/import
+  references changed. Diff the moved Python against its `translate/`-era source via `git log --follow` and
+  confirm logic is byte-identical.
+- **Sample-path resolution** — `pilot.py`/`reset_golden.py` default to the in-package
+  `samples/pilot_sample_100.json`; the `PILOT_SAMPLE_FILE` env override still resolves relative to repo
+  root (not the package). Verify both the default and the override path land on a real file.
+- **`optimize_loop.sh` correctness** — must run from repo root (documented in its header); the three
+  `python -m translate.*` → `optimize.*` repoints are complete; `PILOT_SAMPLE_FILE` →
+  `src/optimize/samples/pilot_sample_200.json`; both `prompt_changelog.md` refs in the embedded `claude -p`
+  prompt point at `src/optimize/prompt_changelog.md`.
+- **Structural separation holds** — `optimize/` may import from production `translate`/`common`/`storage`,
+  but **nothing in production imports `optimize`** (grep `import optimize` / `from optimize` across
+  `src/{acquire,ingest,translate,review,storage,common,pipeline}`). The toolchain is a leaf consumer.
+- **Packaging** — `optimize` is in the hatch wheel `packages` and isort `known-first-party`; the `python -m
+  optimize.*` entry points all import cleanly.
+- **Phase-6 collateral** (cross-check, already touched in `74254b2`): the dropped `--pilot` batch-size
+  diagnostic and deleted `ingest/reset_gap_proposals.py` had no surviving importers (the resolver handles
+  partial-run idempotency itself).
 
 #### Unit 2 — appendix: original queued critiques (investigated above)
 Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
@@ -948,10 +1003,10 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
 
 ### Verification baseline for the review
 - Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
-  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`.
-- `uv run pytest -q` → **815 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
-  batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815);
-  `uv run ruff check` → clean.
+  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`; after Unit 5: commit pending.
+- `uv run pytest -q` → **816 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
+  batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815;
+  +1 Unit-5 broken-factory test → 816); `uv run ruff check` → clean.
 - Env in a fresh worktree: needs `.env`, `ln -s ../../../models models`, `ln -s ../../../sources sources` (§0).
 
 ---
