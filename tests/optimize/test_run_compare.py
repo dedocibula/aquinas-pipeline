@@ -1,11 +1,11 @@
-"""Tests for src/translate/run_compare.py — cross-run regression report."""
+"""Tests for src/optimize/run_compare.py — cross-run regression report."""
 
 from __future__ import annotations
 
 from collections import Counter
 from unittest.mock import MagicMock, patch
 
-from translate.run_compare import (
+from optimize.run_compare import (
     build_report,
     fetch_failure_class_counts,
     fetch_run_summary,
@@ -93,12 +93,12 @@ def test_build_report_lists_flips_and_deltas():
     ]
     with (
         patch(
-            "translate.run_compare.fetch_run_summary",
+            "optimize.run_compare.fetch_run_summary",
             side_effect=[_summary(), _summary(git_sha="def5678")],
         ),
-        patch("translate.run_compare.fetch_status_flips", return_value=flips),
+        patch("optimize.run_compare.fetch_status_flips", return_value=flips),
         patch(
-            "translate.run_compare.fetch_failure_class_counts",
+            "optimize.run_compare.fetch_failure_class_counts",
             side_effect=[
                 Counter({"precheck_terminology(rozum)": 5}),
                 Counter({"precheck_terminology(rozum)": 1}),
@@ -120,12 +120,12 @@ def test_build_report_lists_flips_and_deltas():
 def test_build_report_notes_prompt_change():
     with (
         patch(
-            "translate.run_compare.fetch_run_summary",
+            "optimize.run_compare.fetch_run_summary",
             side_effect=[_summary(), _summary(prompt_hash="0123456789abcdef")],
         ),
-        patch("translate.run_compare.fetch_status_flips", return_value=[]),
+        patch("optimize.run_compare.fetch_status_flips", return_value=[]),
         patch(
-            "translate.run_compare.fetch_failure_class_counts",
+            "optimize.run_compare.fetch_failure_class_counts",
             side_effect=[Counter(), Counter()],
         ),
     ):

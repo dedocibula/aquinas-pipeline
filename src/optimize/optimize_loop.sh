@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Automated prompt optimization loop for the Aquinas translation pipeline.
-# Usage: ./optimize_loop.sh [EPOCHS]   (default: 5)
+# Usage: ./src/optimize/optimize_loop.sh [EPOCHS]   (default: 5)
+# Must be run from the repository root (relative paths: reports/, prompts/, src/optimize/).
 #
 # Each epoch:
 #   1. Reset the 200-segment golden set to pending
@@ -10,7 +11,7 @@
 set -euo pipefail
 
 EPOCHS=${1:-5}
-export PILOT_SAMPLE_FILE="docs/pilot_sample_200.json"
+export PILOT_SAMPLE_FILE="src/optimize/samples/pilot_sample_200.json"
 DB_CMD="docker exec aquinas-pipeline-db-1 psql -U aquinas -d aquinas -t -A"
 
 for epoch in $(seq 1 "$EPOCHS"); do
@@ -18,10 +19,10 @@ for epoch in $(seq 1 "$EPOCHS"); do
     echo "=== Epoch $epoch / $EPOCHS ==="
 
     # 1. Reset golden set to pending
-    uv run python -m translate.reset_golden
+    uv run python -m optimize.reset_golden
 
     # 2. Pilot on golden set (sample file set above via PILOT_SAMPLE_FILE)
-    PILOT_WORKERS=5 uv run python -m translate.pilot
+    PILOT_WORKERS=5 uv run python -m optimize.pilot
 
     # 3. Get the last two run IDs (newest first)
     RUN_IDS=$($DB_CMD -c \
@@ -35,12 +36,12 @@ for epoch in $(seq 1 "$EPOCHS"); do
     fi
 
     # 4. Compare runs; symlink latest for Claude
-    uv run python -m translate.run_compare "$RUN_A" "$RUN_B"
+    uv run python -m optimize.run_compare "$RUN_A" "$RUN_B"
     cp "reports/run_compare_${RUN_A}_${RUN_B}.txt" reports/latest_compare.txt
     echo "Compare written to reports/latest_compare.txt"
 
     # 5. Let Claude optimize both prompts and log code suggestions
-    claude --dangerously-skip-permissions -p "Read reports/latest_compare.txt and prompt_changelog.md.
+    claude --dangerously-skip-permissions -p "Read reports/latest_compare.txt and src/optimize/prompt_changelog.md.
 Analyze the failure class deltas between run $RUN_A (baseline) and run $RUN_B (candidate).
 You may modify BOTH prompts/translator_system.txt and prompts/reviewer_system.txt
 if either needs improvement; explain your reasoning for each file.
@@ -64,7 +65,7 @@ ALLOWED changes to prompts:
 
 If you identify failure patterns that require a code fix (e.g. in prechecks.py, loop.py, or translator.py),
 document the suggested change clearly — what function, what change, and why.
-Append a one-row entry to the markdown table in prompt_changelog.md using these columns:
+Append a one-row entry to the markdown table in src/optimize/prompt_changelog.md using these columns:
   Epoch | Git SHA | Prompt Hypothesis | Pass Rate | Code Suggestions | Notes
 where Pass Rate is (translated / total) from the latest pilot report (reports/m4_sample.txt).
 Commit all modified files with a conventional-commit message starting 'prompt(opt): epoch $epoch'."

@@ -8,7 +8,9 @@ from pathlib import Path
 from storage.db import get_conn
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SAMPLE = _REPO_ROOT / os.environ.get("PILOT_SAMPLE_FILE", "docs/pilot_sample_100.json")
+_DEFAULT_SAMPLE = Path(__file__).resolve().parent / "samples" / "pilot_sample_100.json"
+_sample_env = os.environ.get("PILOT_SAMPLE_FILE")
+_SAMPLE = (_REPO_ROOT / _sample_env) if _sample_env else _DEFAULT_SAMPLE
 
 
 def main() -> None:

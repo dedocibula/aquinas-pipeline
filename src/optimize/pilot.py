@@ -7,15 +7,16 @@ extrapolation calibrated from the sample. It is NOT the production runner —
 `translate.run` orchestrates the full corpus (Prefect, retries, re-run flows).
 
 Usage:
-    PILOT_WORKERS=10 uv run python -m translate.pilot
+    PILOT_WORKERS=10 uv run python -m optimize.pilot
 
-    # Point at a different sample (default: docs/pilot_sample_100.json):
-    PILOT_SAMPLE_FILE=docs/pilot_sample_200.json PILOT_WORKERS=10 \\
-        uv run python -m translate.pilot
+    # Point at a different sample (default: optimize/samples/pilot_sample_100.json).
+    # PILOT_SAMPLE_FILE is resolved relative to the repo root:
+    PILOT_SAMPLE_FILE=src/optimize/samples/pilot_sample_200.json PILOT_WORKERS=10 \\
+        uv run python -m optimize.pilot
 
 The sample file is JSON with a top-level "segments" list of {"segment_id": int}.
 Only segments still 'pending' are translated, so reset them first (see
-translate.reset_golden) when re-running for comparison.
+optimize.reset_golden) when re-running for comparison.
 
 Abort conditions (exits 1):
     - needs_human / total > 0.20   → rubric too strict
@@ -55,7 +56,9 @@ log = logging.getLogger(__name__)
 
 _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_SAMPLE_FILE = _REPO_ROOT / os.environ.get("PILOT_SAMPLE_FILE", "docs/pilot_sample_100.json")
+_DEFAULT_SAMPLE = Path(__file__).resolve().parent / "samples" / "pilot_sample_100.json"
+_sample_env = os.environ.get("PILOT_SAMPLE_FILE")
+_SAMPLE_FILE = (_REPO_ROOT / _sample_env) if _sample_env else _DEFAULT_SAMPLE
 _REPORT_NAME = "m4_sample.txt"
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20

@@ -6,7 +6,7 @@ Reads translation_run + run_segment (migration 005) and reports:
   - failure-class deltas (e.g. did precheck_terminology failures go down?)
 
 Usage:
-    uv run python -m translate.run_compare <run_a> <run_b>
+    uv run python -m optimize.run_compare <run_a> <run_b>
 
 run_a is the baseline (older), run_b the candidate (newer). Only segments
 present in BOTH runs are compared for flips — a subset run against a full run

@@ -13,7 +13,7 @@
       "respondeo": "30%",
       "sed_contra": "20%"
     },
-    "excludes_questions_from": "docs/pilot_sample_100.json",
+    "excludes_questions_from": "src/optimize/samples/pilot_sample_100.json",
     "seed": 42
   },
   "counts": {

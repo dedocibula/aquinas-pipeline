@@ -1,11 +1,11 @@
-"""Tests for src/translate/pilot.py — sample selector and report logic."""
+"""Tests for src/optimize/pilot.py — sample selector and report logic."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
 
-from translate.pilot import (
+from optimize.pilot import (
     _write_report,
     fetch_sample_segments,
     run_pilot,
@@ -14,7 +14,7 @@ from translate.pilot import (
 # Silence the corpus-char DB query that _write_report issues. It's wrapped in
 # try/except so the tests pass either way, but mocking avoids spurious
 # connection-refused warnings in CI.
-_PATCH_GET_CONN = "translate.pilot.get_conn"
+_PATCH_GET_CONN = "optimize.pilot.get_conn"
 
 # ── Fake DB helpers ───────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ def _patch_sample(monkeypatch, ids):
     """Make fetch_sample_segments read a fixed list of segment_ids."""
     sample = {"segments": [{"segment_id": i} for i in ids]}
     monkeypatch.setattr(
-        "translate.pilot._SAMPLE_FILE",
+        "optimize.pilot._SAMPLE_FILE",
         MagicMock(read_text=lambda: json.dumps(sample), name="sample"),
     )
 
@@ -82,9 +82,9 @@ def test_fetch_sample_segments_returns_empty_when_none(monkeypatch):
 
 def test_run_pilot_uses_fetch_sample_segments():
     """The pilot's only selector is the sample file; empty sample is a no-op."""
-    with patch("translate.pilot.fetch_sample_segments", return_value=[]) as mock_sample, \
+    with patch("optimize.pilot.fetch_sample_segments", return_value=[]) as mock_sample, \
          patch(_PATCH_GET_CONN), \
-         patch("translate.pilot._write_report") as mock_report:
+         patch("optimize.pilot._write_report") as mock_report:
         run_pilot()
 
     mock_sample.assert_called_once()
@@ -95,7 +95,7 @@ def test_run_pilot_uses_fetch_sample_segments():
 
 
 def test_write_report_creates_file(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=40,
@@ -108,7 +108,7 @@ def test_write_report_creates_file(tmp_path):
 
 
 def test_write_report_contains_key_fields(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=40,
@@ -126,7 +126,7 @@ def test_write_report_contains_key_fields(tmp_path):
 
 
 def test_write_report_abort_threshold_needs_human_ok(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=100,
             translated=90,
@@ -140,7 +140,7 @@ def test_write_report_abort_threshold_needs_human_ok(tmp_path):
 
 
 def test_write_report_abort_threshold_needs_human_triggered(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=100,
             translated=70,
@@ -154,7 +154,7 @@ def test_write_report_abort_threshold_needs_human_triggered(tmp_path):
 
 
 def test_write_report_avg_iterations(tmp_path):
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=10,
             translated=8,
@@ -170,7 +170,7 @@ def test_write_report_avg_iterations(tmp_path):
 
 def test_write_report_empty_run(tmp_path):
     """Should not crash when no segments were run."""
-    with patch("translate.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
+    with patch("optimize.pilot._REPORTS_DIR", tmp_path), patch(_PATCH_GET_CONN):
         _write_report(
             total_segments=50,
             translated=0,

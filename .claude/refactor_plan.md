@@ -81,7 +81,7 @@ Explore agents + grep). Disposition per the user:
 | 3 — DeepSeek client | ✅ DONE | `e2c7c8f`; `common/deepseek_client.py` (DeepSeekClient.chat + DeepSeekAPIError); 4 requests.post blocks collapsed; +9 client tests; 748 passed; ruff clean |
 | 4 — Parser base class | ✅ DONE | Recommended scope built (user approved + "pull common DB access out of all three; remove dead code"). New `src/ingest/source_parser.py`: `OverlayElement(locator, text)` + `TextOverlayParser` ABC (class attr `lang`; abstract `parse`; concrete `store()` holding the shared lookup→upsert loop, missing-segment policy injected via an `on_missing` callback). bahounek (`BahounekParser`, cs) + english (`EnglishParser`, en) subclass it; `insert_bahounek_texts`/`insert_english_texts` are thin wrappers preserving their exact signatures + fail-loud/gap-log policy. **All parser SQL moved into `SegmentRepository`** (Phase-2 invariant): new `get_segment_id_by_locator(loc, work_id=None)`, `get_article_title_locators` (dedups the duplicated `_articles_from_db`), `wipe_article`, `create_segment`, `set_reply_to`, `body_text_coverage(lang)`. `parser_latin` left as the structural parser but its inline SQL now goes through the repo. Dead code removed: `_choose_edge_cases` (parser_latin, never called) + its comment ref; `_in_article` (ingest_english, defined-never-called). `BahouněkElement`/`EnglishElement` unified into `OverlayElement` (`.czech_text`/`.english_text` → `.text`); ~9 test sites updated; `TestInsertBahouněkTexts` migrated off MagicMock to the shared `fake_conn` (repo uses `with conn.cursor()`). +10 tests (`test_source_parser.py` + storage repo tests). **760 passed; ruff clean.** |
 | 5 — Pipeline steps + runner + reporting + interactive | ✅ DONE | 5.0 + 5a + 5b + 5c + 5d all DONE (see below) |
-| 6 — Isolate optimize/ toolchain | ☐ | |
+| 6 — Isolate optimize/ toolchain | ✅ DONE | new `src/optimize/` package; toolchain relocated; 823 passed; ruff clean (see below) |
 | 7 — Strip milestone labels; rename milestone files | ☐ | |
 | 8 — Consolidate DB schema | ☐ | |
 | 9 — Domain housekeeping (oov_stem, habere) | ☐ | behavioral; habere purge gated by approval |
@@ -238,6 +238,38 @@ runner's timing + per-stage `StepReport` for free.
   `test_translate_steps.py`) to dodge the pytest no-`__init__` basename collision. **823 passed; ruff
   clean.** Smoke-tested `python -m pipeline --help`, `--status` (live DB), and all menu imports.
 - **Phase 5 complete.** Next: Phase 6 — isolate the prompt-optimization toolchain into `src/optimize/`.
+
+#### Phase 6 — Isolate the prompt-optimization toolchain → `src/optimize/` — DONE
+The whole prompt-opt toolchain now lives in one package, structurally separated from the production
+`translate` package. All moves were `git mv` (history preserved); only path/import references changed.
+- **New `src/optimize/` package** (`__init__.py` documents it as the sample-driven harness):
+  - `pilot.py` ← `translate/pilot.py` **moved unchanged** (Phase 5.0 had already collapsed the pilot to
+    the sample-only measurement harness, so there was no "corpus-pilot duty" left to split out — the
+    pilot *is* the optimize harness). `_SAMPLE_FILE` now defaults to the in-package
+    `samples/pilot_sample_100.json`; `PILOT_SAMPLE_FILE` env override still resolves relative to repo
+    root. Entry point: `python -m optimize.pilot`. (Debug JSONL kept at `reports/translate/debug/` —
+    behavior-preserving; relocating that report path is deferred, not required by the move.)
+  - `reset_golden.py`, `run_compare.py` ← moved from `translate/` (same `_DEFAULT_SAMPLE` treatment in
+    reset_golden). Entry points: `python -m optimize.{reset_golden,run_compare}`.
+  - `build_sample.py` ← `scripts/build_sample_200.py` (renamed). Reads/writes `samples/pilot_sample_*.json`.
+  - `samples/pilot_sample_100.json` + `pilot_sample_200.json` ← moved from `docs/` (stale
+    `excludes_questions_from` metadata in the 200 file repointed to the new path).
+- **Per user instruction** (overriding the plan's "keep a thin root `optimize_loop.sh` shim + port to
+  `optimize/loop.py`"): `optimize_loop.sh` and `prompt_changelog.md` were **moved into `src/optimize/`**
+  (no root shim, no Python port). The shell driver's three `python -m translate.*` calls → `optimize.*`,
+  `PILOT_SAMPLE_FILE` → `src/optimize/samples/pilot_sample_200.json`, and the two `prompt_changelog.md`
+  refs in the embedded `claude -p` prompt → `src/optimize/prompt_changelog.md`. It still must be run from
+  repo root (documented in its header).
+- **Tests** moved to `tests/optimize/` (`test_pilot.py`, `test_run_compare.py`); patch/import targets
+  `translate.{pilot,run_compare}` → `optimize.*`. Basenames stay unique (no `__init__` collision).
+- **`pyproject.toml`**: `optimize` added to isort `known-first-party` (ruff import ordering) and to the
+  hatch wheel `packages`. (Runtime/test import already works via the editable `.pth`, which puts `src/`
+  on the path.)
+- **`docs/claude-corrections.md`**: the live `translate.pilot` operational commands repointed to
+  `optimize.pilot` so future sessions don't hit a dead module path.
+- **823 passed; ruff clean.** Smoke-tested all four `python -m optimize.*` imports + sample-path resolution.
+- **Note for Phase 11 memory**: prompt-opt toolchain = `src/optimize/`; run the loop from repo root via
+  `./src/optimize/optimize_loop.sh`; samples live in `src/optimize/samples/`.
 
 ### Commits so far (on `aquinas-refactor`)
 - `e2c7c8f` refactor(api): single DeepSeekClient for all chat calls (Phase 3)

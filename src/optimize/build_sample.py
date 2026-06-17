@@ -10,7 +10,10 @@ Targets:
   I=70, I_II=50, II_II=50, III=30
   Each pars: arg≈20%, reply≈30%, respondeo≈30%, sed_contra≈20%
 
-Excludes all questions already covered in docs/pilot_sample_100.json.
+Excludes all questions already covered in samples/pilot_sample_100.json.
+
+Usage:
+    uv run python -m optimize.build_sample [seed]
 """
 from __future__ import annotations
 
@@ -23,8 +26,9 @@ from pathlib import Path
 import psycopg2
 
 _DB_URL = "postgresql://aquinas:aquinas@localhost:5432/aquinas"
-_CURRENT_SAMPLE = Path(__file__).resolve().parents[1] / "docs" / "pilot_sample_100.json"
-_OUT = Path(__file__).resolve().parents[1] / "docs" / "pilot_sample_200.json"
+_SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
+_CURRENT_SAMPLE = _SAMPLES_DIR / "pilot_sample_100.json"
+_OUT = _SAMPLES_DIR / "pilot_sample_200.json"
 
 # (pars, type_bucket) → count
 _TARGETS: dict[tuple[str, str], int] = {
@@ -163,7 +167,7 @@ def main(seed: int = 42) -> None:
         "selection_criteria": {
             "pars_targets": {"I": 70, "I_II": 50, "II_II": 50, "III": 30},
             "type_fraction": {"arg": "20%", "reply": "30%", "respondeo": "30%", "sed_contra": "20%"},
-            "excludes_questions_from": "docs/pilot_sample_100.json",
+            "excludes_questions_from": "src/optimize/samples/pilot_sample_100.json",
             "seed": seed,
         },
         "counts": {"total": len(selected), **{k: v for k, v in cat_got.items()}},
