@@ -388,6 +388,33 @@ class TestCallDeepseekBatch:
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             _call_deepseek_batch([])
 
+    def test_fatal_status_aborts(self, monkeypatch):
+        # 401/402/403 (auth/credit) must abort loudly, not soft-fail to {} —
+        # otherwise a whole resolve run silently fills the batch with fallbacks.
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        from unittest.mock import MagicMock
+
+        import pytest
+        batch = [{"lemma": "gratia", "best_latin": "", "best_czech": "", "best_english": ""}]
+        for status in (401, 402, 403):
+            err = MagicMock()
+            err.status_code = status
+            with patch("common.deepseek_client.requests.post", return_value=err):
+                with pytest.raises(RuntimeError, match=str(status)):
+                    _call_deepseek_batch(batch)
+
+    def test_non_fatal_status_soft_fails(self, monkeypatch):
+        # Any other HTTP error (e.g. 500) is transient — soft-fail to {} so the
+        # caller fills per-lemma fallbacks and the run continues.
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+        from unittest.mock import MagicMock
+        batch = [{"lemma": "gratia", "best_latin": "", "best_czech": "", "best_english": ""}]
+        err = MagicMock()
+        err.status_code = 500
+        with patch("common.deepseek_client.requests.post", return_value=err):
+            result = _call_deepseek_batch(batch)
+        assert result == {}
+
     def test_increments_call_count(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
         before = get_api_stats()["calls"]
