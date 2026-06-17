@@ -1,8 +1,10 @@
 """Typed persistence shapes for shared pipeline concepts.
 
 Frozen dataclasses that the repository layer (``storage.repositories``) returns
-in place of ad-hoc dicts. ``from_row`` builds them from a SQL row; ``as_dict``
-emits the legacy dict shape for callers not yet migrated to the models.
+in place of ad-hoc dicts. ``from_row`` builds them from a SQL row. Two boundary
+adapters remain for callers that still need a dict: ``Segment.as_dict`` (the
+translator prompt builder) and ``Constraint.to_prompt_dict`` (the prompt
+constraint shape).
 
 This is a *leaf* module: it imports nothing from the rest of the pipeline, so the
 repository layer can depend on it without forming an import cycle. Result/return
@@ -55,19 +57,6 @@ class Sense:
             la_surface=row["la_surface"],
         )
 
-    def as_dict(self) -> dict:
-        """Return the legacy sense-dict shape used by current consumers."""
-        return {
-            "sense_id": self.sense_id,
-            "context_label": self.context_label,
-            "version": self.version,
-            "cs_lemma": self.cs_lemma,
-            "cs_content": self.cs_content,
-            "en_cue": self.en_cue,
-            "sk_content": self.sk_content,
-            "la_surface": self.la_surface,
-        }
-
 
 @dataclass(frozen=True)
 class Term:
@@ -95,17 +84,6 @@ class Term:
             la_surface=row["la_surface"],
             senses=tuple(senses),
         )
-
-    def as_dict(self) -> dict:
-        """Return the legacy term-dict shape (senses as a list of sense-dicts)."""
-        return {
-            "term_id": self.term_id,
-            "latin_lemma": self.latin_lemma,
-            "is_multiword": self.is_multiword,
-            "category": self.category,
-            "la_surface": self.la_surface,
-            "senses": [s.as_dict() for s in self.senses],
-        }
 
 
 @dataclass(frozen=True)

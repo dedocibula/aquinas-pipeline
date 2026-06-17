@@ -1,4 +1,4 @@
-"""Unit tests for src/storage/models.py — construction, from_row, as_dict round-trip."""
+"""Unit tests for src/storage/models.py — construction, from_row, prompt/dict adapters."""
 
 from __future__ import annotations
 
@@ -52,11 +52,11 @@ LOCKED_TERM_ROW = {
 }
 
 
-def test_sense_from_row_and_roundtrip():
+def test_sense_from_row():
     sense = Sense.from_row(SENSE_ROW)
     assert sense.sense_id == 7
     assert sense.cs_content == "rozumová schopnosť"
-    assert sense.as_dict() == SENSE_ROW
+    assert sense.la_surface == "intellectus"
 
 
 def test_term_from_row_with_senses():
@@ -65,9 +65,9 @@ def test_term_from_row_with_senses():
     assert term.term_id == 3
     assert term.is_multiword is False
     assert term.senses == (sense,)
+    assert term.la_surface is None
     # senses tuple makes the term hashable
     assert hash(term)
-    assert term.as_dict() == {**TERM_ROW, "senses": [SENSE_ROW]}
 
 
 def test_segment_bulk_row_omits_optional_fields():

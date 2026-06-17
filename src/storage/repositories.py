@@ -89,19 +89,9 @@ class GlossaryRepository:
             if tid not in term_rows:
                 term_rows[tid] = row
                 sense_lists[tid] = []
-            # term.la_surface is shared by every sense row of the term.
-            sense_lists[tid].append(
-                Sense(
-                    sense_id=row["sense_id"],
-                    context_label=row["context_label"],
-                    version=row["version"],
-                    cs_lemma=row["cs_lemma"],
-                    cs_content=row["cs_content"],
-                    en_cue=row["en_cue"],
-                    sk_content=row["sk_content"],
-                    la_surface=row["la_surface"],
-                )
-            )
+            # term.la_surface (selected as gt.la_surface) is shared by every sense
+            # row of the term; Sense.from_row reads it off the same row.
+            sense_lists[tid].append(Sense.from_row(row))
 
         terms = [
             Term.from_row(term_rows[tid], tuple(sense_lists[tid])) for tid in term_rows
