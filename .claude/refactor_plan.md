@@ -795,8 +795,8 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 |---|---|---|
 | 1 | 0 (test net) + 1 (typed models) | ✅ REVIEWED + cleaned (commit `5adaa7d`) |
 | 2 | 2 + 2b (repository layer + caller flip) | ✅ REVIEWED + cleaned (commit `3ca09b3`) |
-| 3 | 3 (DeepSeek client) | ⏭️ NEXT |
-| 4 | 4 (parser base class) | pending |
+| 3 | 3 (DeepSeek client) | ✅ REVIEWED + cleaned (commit `ae8bae8`) |
+| 4 | 4 (parser base class) | ⏭️ NEXT |
 | 5 | 5 (pipeline steps/runner/reporting/interactive) | pending |
 | 6 | 6 (optimize isolation) | pending |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
@@ -840,14 +840,55 @@ Cleanups applied (commit `3ca09b3`, 813 passed / ruff clean):
 - Out-of-scope SQL in coverage_report/server/krystal/gap_terms/sense_mining/export_sheet/
   verify/optimize was never in Phase 2/2b scope — left as-is.
 
-#### Unit 3 — NEXT: queued critiques to investigate (Phase 3, DeepSeek client)
-Files: `src/common/deepseek_client.py` + the 4 flipped call sites (`translate/translator.py`,
-`translate/reviewer.py`, `common/deepseek.py::_call_deepseek_batch`,
-`ingest/sense_mining.py::call_deepseek_label`). Per §5/Phase-3, confirm: per-call
-temperature/max_tokens preserved exactly; fail-loud `RuntimeError`-after-retries semantics
-intact (loop's `try/except RuntimeError` depends on it); `_call_deepseek_batch` soft-fail vs
-fatal 401/402/403 via `exc.status_code`; api-key resolved lazily at call time; each caller keeps
-only its own policy (retry/backoff, `_api_stats`).
+#### Unit 3 — DONE (commit `ae8bae8`)
+Verdict: solid; behavior-preserving. Every value verified against `main` via `git show`:
+- **Sampling knobs preserved exactly** — translator 0.3/2048/timeout60; reviewer 0.0/8000/timeout150;
+  batch 0.0/`len(batch)*60`/timeout60; label 0.0/1024/json_object/timeout60, retries=3, `sleep(2**a)`.
+- **Fail-loud intact** — `DeepSeekAPIError(RuntimeError)` + network/empty-choices `RuntimeError`s are all
+  `RuntimeError` subclasses; `loop.py:177`/`:243` catch `except RuntimeError` → log + break to fallback.
+  Unchanged from pre-refactor.
+- **Batch soft-fail vs fatal split correct** — `except DeepSeekAPIError` (reads `exc.status_code`;
+  401/402/403 → re-raise; else `return {}`) ordered before `except Exception`. Matches the original
+  `raise_for_status` + `exc.response.status_code` logic.
+- **Lazy api-key** — resolved in the `api_key` property at call time; module-level `_client`s build at
+  import. The two soft-failing callers (batch/label) *also* pre-check the key and raise before their broad
+  `except` — intentional (the client's `RuntimeError` would otherwise be swallowed into soft-fail/retry).
+- **Caller-only policy** — `_api_stats`+lock stay in `deepseek.py`; retry/backoff stays in `sense_mining.py`.
+
+Cleanup applied (commit `ae8bae8`, 815 passed / ruff clean):
+- Added 2 tests to `TestCallDeepseekBatch` (`tests/ingest/test_resolver.py`) for the batch's fatal-vs-soft
+  branch — the one branch this unit protects that had no direct test (`test_returns_empty_on_api_error`
+  used a generic `Exception`, hitting the bare `except Exception`, not `except DeepSeekAPIError`).
+  `test_fatal_status_aborts` (401/402/403 → RuntimeError) + `test_non_fatal_status_soft_fails` (500 → {}).
+
+Noted-but-accepted (no change — all PRE-EXISTING, not Phase-3 regressions):
+- `chat()`'s per-call `timeout` override is unused by all 4 callers (harmless API hygiene).
+- batch computes `extract_usage` then discards it (it reads `chat.raw["usage"]` itself) — negligible.
+- a 402 mid-translate-loop isn't special-cased (marks each segment failed, continues); `call_deepseek_label`
+  retries 3× on a fatal 402. Pre-existing; out of scope for this unit. Flagged for awareness only.
+
+#### Unit 4 — NEXT: queued critiques to investigate (Phase 4, parser base class)
+Files: `src/ingest/source_parser.py` (`OverlayElement` + `TextOverlayParser` ABC), the two overlay-parser
+subclasses (`parser_bahounek.py::insert_bahounek_texts` cs, `ingest_english.py::insert_english_texts` en),
+`parser_latin.py` (left as the structural parser; inline SQL now via the repo), and the new
+`SegmentRepository` surface (`get_segment_id_by_locator`, `get_article_title_locators`, `wipe_article`,
+`create_segment`, `set_reply_to`, `body_text_coverage`). Per §5/Phase-4 + the Phase-4 status row, confirm:
+- **Wrapper signatures/returns preserved exactly** — `insert_bahounek_texts`/`insert_english_texts` keep
+  their exact signatures + fail-loud/gap-log policy (verify against `main` via `git show`).
+- **Shared `store()` policy is faithful** — lookup-by-`locator_path::ltree` → upsert `segment_text`;
+  missing segment → gap-log-and-skip when a gap log is given, else RuntimeError (fail-loud, no silent skip).
+  Confirm the `on_missing` callback wiring reproduces each parser's original missing-segment behavior.
+- **`parser_latin` transaction integrity** — its inline SQL now routes through the repo
+  (`wipe_article`→`create_segment`→`set_reply_to`); confirm it still runs as one per-article transaction
+  with commit-after / rollback-on-exception (no partial segment-graph commit). Cross-check Unit 2 finding #1.
+- **`OverlayElement` unification** — `.czech_text`/`.english_text` → `.text` rename didn't drop a field a
+  caller/test relied on; latin keeps its 4-positional element with `reply_number` (not forced into the ABC).
+- **Dead-code removals justified** — `_choose_edge_cases` (parser_latin), `_in_article` (ingest_english):
+  confirm zero remaining callers (grep) before trusting the deletion.
+- **Repo-layer invariant held** — no parser SQL left inline outside `SegmentRepository` (grep parsers for
+  `cur.execute`/`INSERT`/`SELECT`).
+- **Fail-loud rule (CLAUDE.md)** — parsers still crash + log exact locator/anomaly on structural deviation;
+  no new silent `try/except` introduced by the ABC.
 
 #### Unit 2 — appendix: original queued critiques (investigated above)
 Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
@@ -872,8 +913,10 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
    gone; no dict-subscript access to Term/Sense remains in resolver/resolution voting).
 
 ### Verification baseline for the review
-- Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`.
-- `uv run pytest -q` → 811 passed; `uv run ruff check` → clean.
+- Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
+  after Unit 3: `ae8bae8`.
+- `uv run pytest -q` → **815 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
+  batch error-branch tests via `ae8bae8` → 815); `uv run ruff check` → clean.
 - Env in a fresh worktree: needs `.env`, `ln -s ../../../models models`, `ln -s ../../../sources sources` (§0).
 
 ---
