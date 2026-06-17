@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from cltk.stops.lat import STOPS as _CLTK_STOPS
 
-from common.deepseek import _api_stats_lock, _call_deepseek_batch, get_api_stats
+from common.deepseek import _call_deepseek_batch
 from common.lemmatize import lemmatize_latin
 from storage.models import Segment
 
@@ -359,128 +358,3 @@ def _propose_gap_terms(
     }
 
     return {"terms": terms, "dropped": dropped, "gap_terms_db": gap_terms_db}
-
-
-def pilot_batch_sizes(
-    gap_data: dict[str, dict],
-    top_n: int = 50,
-    batch_sizes: list[int] | None = None,
-    sample_n: int = 5,
-) -> list[dict]:
-    """Compare batch sizes on top_n gap lemmas to find the cost/quality optimum.
-
-    For each batch size: runs _propose_gap_terms on the top-N lemmas, captures the
-    token-count delta vs. the running global stats, and records cost and sample terms.
-
-    Returns a list of result dicts (one per batch size). Prints a comparison table
-    and side-by-side sample terms to stdout. Does NOT write to the database.
-    """
-    if batch_sizes is None:
-        batch_sizes = [10, 25, 50, 100]
-
-    top_lemmas = dict(
-        sorted(gap_data.items(), key=lambda x: -x[1]["freq"])[:top_n]
-    )
-    total_qualifying = len(gap_data)
-    n_pilot = len(top_lemmas)
-
-    # Rough cost estimate: ~60 tokens per lemma per batch call (input+output combined).
-    est_calls = sum(-((-n_pilot) // bs) for bs in batch_sizes)
-    est_tokens = n_pilot * len(batch_sizes) * 60
-    est_cost = (est_tokens * 0.00014) / 1000
-    print(
-        f"\n[PILOT] {n_pilot} lemmas (of {total_qualifying} qualifying) "
-        f"at batch sizes {batch_sizes}",
-        flush=True,
-    )
-    print(
-        f"  Estimated: ~{est_calls} API calls, ~{est_tokens} tokens, ~${est_cost:.4f}",
-        flush=True,
-    )
-
-    def _sk(proposals: dict, lemma: str) -> str:
-        term = proposals["terms"].get(lemma)
-        return term["slovak"] if term else "???"
-
-    def _cat(proposals: dict, lemma: str) -> str | None:
-        term = proposals["terms"].get(lemma)
-        return term["category"] if term else None
-
-    top_order = sorted(top_lemmas, key=lambda lm: -top_lemmas[lm]["freq"])
-
-    results: list[dict] = []
-    per_size_proposals: dict[int, dict] = {}
-
-    for bs in batch_sizes:
-        with _api_stats_lock:
-            stats_before = dict(get_api_stats())
-
-        proposals = _propose_gap_terms(top_lemmas, batch_size=bs, max_workers=4)
-
-        stats_after = get_api_stats()
-        d_calls = stats_after["calls"] - stats_before["calls"]
-        d_in = stats_after["input_tokens"] - stats_before["input_tokens"]
-        d_out = stats_after["output_tokens"] - stats_before["output_tokens"]
-        cost = (d_in * 0.00014 + d_out * 0.00028) / 1000
-
-        cat_counts = Counter(
-            (t["category"] or "uncategorized") for t in proposals["terms"].values()
-        )
-
-        per_size_proposals[bs] = proposals
-        results.append({
-            "batch_size": bs,
-            "calls": d_calls,
-            "input_tokens": d_in,
-            "output_tokens": d_out,
-            "cost_usd": round(cost, 6),
-            "cost_per_lemma": round(cost / n_pilot, 8) if n_pilot else 0.0,
-            "category_counts": dict(cat_counts),
-            "samples": [
-                {
-                    "lemma": lm,
-                    "category": _cat(proposals, lm),
-                    "slovak": _sk(proposals, lm),
-                    "freq": top_lemmas[lm]["freq"],
-                }
-                for lm in top_order[:sample_n]
-            ],
-        })
-
-    # ── comparison table ─────────────────────────────────────────────────────
-    est_label = f"Est.({total_qualifying} lemmas)"
-    print(f"\n{'Batch':>8} {'Calls':>6} {'InTok':>7} {'OutTok':>7} {'$/lemma':>11}  {est_label}")
-    print("-" * (8 + 7 + 8 + 8 + 12 + 4 + len(est_label)))
-    for r in results:
-        est = r["cost_per_lemma"] * total_qualifying
-        print(
-            f"{r['batch_size']:>8} {r['calls']:>6} {r['input_tokens']:>7} "
-            f"{r['output_tokens']:>7} ${r['cost_per_lemma']:.8f}  ~${est:.4f}"
-        )
-
-    # ── category distribution (from the largest batch size, for stability) ────
-    last = results[-1]
-    if last["category_counts"]:
-        dist = ", ".join(f"{c}={n}" for c, n in sorted(last["category_counts"].items()))
-        print(f"\nCategory distribution (bs={last['batch_size']}): {dist}")
-
-    # ── side-by-side sample terms ─────────────────────────────────────────────
-    if top_order:
-        col_w = 18
-        header = f"{'Lemma':18} {'Freq':>6}"
-        for r in results:
-            header += f"  {'bs='+str(r['batch_size']):<{col_w}}"
-        print(f"\nSample terms (top {min(sample_n, len(top_order))} by frequency):")
-        print(header)
-        print("-" * len(header))
-        for lemma in top_order[:sample_n]:
-            freq = top_lemmas[lemma]["freq"]
-            row = f"{lemma:18} {freq:>6}"
-            for r in results:
-                p = per_size_proposals[r["batch_size"]]
-                cat = _cat(p, lemma) or "?"
-                cell = f"{_sk(p, lemma)} ({cat})"
-                row += f"  {cell:<{col_w}}"
-            print(row)
-
-    return results
