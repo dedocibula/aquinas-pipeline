@@ -796,8 +796,8 @@ working tree clean). Before merging `aquinas-refactor` → `main` we walk the br
 | 1 | 0 (test net) + 1 (typed models) | ✅ REVIEWED + cleaned (commit `5adaa7d`) |
 | 2 | 2 + 2b (repository layer + caller flip) | ✅ REVIEWED + cleaned (commit `3ca09b3`) |
 | 3 | 3 (DeepSeek client) | ✅ REVIEWED + cleaned (commit `ae8bae8`) |
-| 4 | 4 (parser base class) | ⏭️ NEXT |
-| 5 | 5 (pipeline steps/runner/reporting/interactive) | pending |
+| 4 | 4 (parser base class) | ✅ REVIEWED + cleaned (commit `600b2e7`) |
+| 5 | 5 (pipeline steps/runner/reporting/interactive) | ⏭️ NEXT |
 | 6 | 6 (optimize isolation) | pending |
 | 7 | 7 + 8 (label strip / rename / schema consolidation) | pending |
 | 8 | 9 (domain housekeeping — the only behavioral phase) | pending |
@@ -867,28 +867,62 @@ Noted-but-accepted (no change — all PRE-EXISTING, not Phase-3 regressions):
 - a 402 mid-translate-loop isn't special-cased (marks each segment failed, continues); `call_deepseek_label`
   retries 3× on a fatal 402. Pre-existing; out of scope for this unit. Flagged for awareness only.
 
-#### Unit 4 — NEXT: queued critiques to investigate (Phase 4, parser base class)
-Files: `src/ingest/source_parser.py` (`OverlayElement` + `TextOverlayParser` ABC), the two overlay-parser
-subclasses (`parser_bahounek.py::insert_bahounek_texts` cs, `ingest_english.py::insert_english_texts` en),
-`parser_latin.py` (left as the structural parser; inline SQL now via the repo), and the new
-`SegmentRepository` surface (`get_segment_id_by_locator`, `get_article_title_locators`, `wipe_article`,
-`create_segment`, `set_reply_to`, `body_text_coverage`). Per §5/Phase-4 + the Phase-4 status row, confirm:
-- **Wrapper signatures/returns preserved exactly** — `insert_bahounek_texts`/`insert_english_texts` keep
-  their exact signatures + fail-loud/gap-log policy (verify against `main` via `git show`).
-- **Shared `store()` policy is faithful** — lookup-by-`locator_path::ltree` → upsert `segment_text`;
-  missing segment → gap-log-and-skip when a gap log is given, else RuntimeError (fail-loud, no silent skip).
-  Confirm the `on_missing` callback wiring reproduces each parser's original missing-segment behavior.
-- **`parser_latin` transaction integrity** — its inline SQL now routes through the repo
-  (`wipe_article`→`create_segment`→`set_reply_to`); confirm it still runs as one per-article transaction
-  with commit-after / rollback-on-exception (no partial segment-graph commit). Cross-check Unit 2 finding #1.
-- **`OverlayElement` unification** — `.czech_text`/`.english_text` → `.text` rename didn't drop a field a
-  caller/test relied on; latin keeps its 4-positional element with `reply_number` (not forced into the ABC).
-- **Dead-code removals justified** — `_choose_edge_cases` (parser_latin), `_in_article` (ingest_english):
-  confirm zero remaining callers (grep) before trusting the deletion.
-- **Repo-layer invariant held** — no parser SQL left inline outside `SegmentRepository` (grep parsers for
-  `cur.execute`/`INSERT`/`SELECT`).
-- **Fail-loud rule (CLAUDE.md)** — parsers still crash + log exact locator/anomaly on structural deviation;
-  no new silent `try/except` introduced by the ABC.
+#### Unit 4 — DONE (commit `600b2e7`)
+Verdict: solid; behavior-preserving. Every queued critique verified against `main` via `git show`:
+- **Wrapper signatures preserved** — `insert_bahounek_texts(conn, elements, src_id, gap_log=None) -> int`
+  and `insert_english_texts(...)` are byte-identical to `main` except the element type annotation
+  (`BahouněkElement`/`EnglishElement` → `OverlayElement`).
+- **`store()` policy faithful** — lookup-by-`locator_path::ltree` → upsert `segment_text`; the `on_missing`
+  callbacks reproduce each source's original behavior exactly: Bahounek gap-log→skip / no-log→RuntimeError;
+  English gap-log→append+skip / no-log→silent skip (the `continue` was unconditional on `main` too).
+- **`parser_latin` transaction integrity intact** — inline SQL now routes through
+  `wipe_article`→`create_segment`→`set_reply_to`, but the tx boundary is unchanged (`run_full` commits/rolls
+  back per-article inside one `get_conn()`; repos never commit — matches Unit 2 finding #1). The title
+  placeholder lookup is correctly work_id-scoped: `get_segment_id_by_locator(title_loc, work_id_val)`
+  reproduces `main`'s `SELECT 1 … WHERE locator_path = %s AND work_id = %s`.
+- **`OverlayElement` unification clean** — `.czech_text`/`.english_text` → `.text` dropped no field a
+  caller/test relied on; latin keeps its 4-positional `ParsedElement` with `reply_number` (not in the ABC).
+- **Dead-code removals justified** — `_choose_edge_cases`/`_in_article` have zero remaining references.
+- **Repo-layer invariant held** — grep for `cur.execute`/`INSERT`/`SELECT`/`UPDATE`/`DELETE` across all four
+  parser files returns nothing; all SQL is in `SegmentRepository`.
+
+Cleanup applied (commit `600b2e7`, 815 passed / ruff clean):
+- **`parse()` was a vestigial half-abstraction.** The `TextOverlayParser` ABC declared an abstract `parse()`
+  that no caller ever invoked — both `run()` entry points call the free `parse_*_for_articles` functions
+  directly; the singletons were used only for `.store()`. Worse, `EnglishParser.parse` silently dropped the
+  `coverage_gap_log` arg, so it wasn't even a faithful proxy for the live path. Dropped it (option a): the
+  ABC became `TextOverlayWriter` (plain base; it writes, the per-source module functions parse);
+  `BahounekParser`/`EnglishParser` → `BahounekWriter`/`EnglishWriter` (each just declares `lang`); the
+  genuine shared surface (`lang` + the `store()` loop) is kept. Test stub + docstrings updated.
+
+Noted-but-accepted (no change): the overlay `store()` lookup is unscoped by `work_id` (matches `main`'s
+overlay inserts; the title-placeholder lookup in latin is the only work_id-scoped path — also as on `main`).
+
+#### Unit 5 — NEXT: queued critiques to investigate (Phase 5, pipeline steps/runner/reporting/interactive)
+Files: `src/pipeline/` (`step.py`, `context.py`, `runner.py`, `reporting.py`, `interactive.py`, `__main__.py`)
+plus the step wrappers that consume it (`acquire/steps.py`, `ingest/pipeline.py` Step classes,
+`review/steps.py`, `translate/steps.py`) and the new status SQL in the repos
+(`translation_status_counts`, `sense_status_counts`, `RunRepository.last_run`). Confirm:
+- **Runner fail-loud + stop-on-failure** — an uncaught step exception becomes a failed `StepResult` (run
+  summary survives), and a `verify()` False / error halts the run under default stop-on-failure. No step
+  runs after a failed prerequisite (esp. verify-sources as step 0 → no ingest step touches the DB on a
+  failed verify).
+- **Tx boundaries unchanged** — steps still open one conn per unit of work via `ctx.connection()`
+  (cross-check Unit 2 #1); the runner/reporting layer opens no DB transactions of its own.
+- **Reporting is additive & safe** — `StepReport` writes only under `ctx.stage_reports_dir(stage)`; a step
+  without a `stage` attr writes no file; the per-stage `reports/` dirs are gitignored (no data churn).
+- **Interactive driver delegates, never reimplements** — every menu item invokes a `PipelineStep` through
+  the `Runner` (no operation logic in the driver); `.pipeline_state.json` is load/save only (no DDL); a
+  DB-unreachable status read is surfaced, not fatal; local imports so a broken optional dep in one stage
+  doesn't kill the whole menu.
+- **Knob accessors fail loud** — `knob_int`/`knob_float` raise on a malformed value rather than silently
+  defaulting; resolve reads its knobs via `ctx.knob_*` (no direct `os.environ`).
+- **No behavior drift in the flipped ingest pipeline** — `_step_*` → `*Step` classes preserve the exact
+  print progress + the `--all` order (`verify,latin,bahounek,english,resolve,report`); `--step` still
+  accepts any single token incl. `verify`; `MineSensesStep` is deliberately NOT in `--all` (spends API
+  budget).
+- **Status SQL correctness** — the three count/last-run reads are projections (dict/scalar) consistent with
+  Unit 2 #2 (accepted, not entity loads); confirm they don't double-count or miss a status.
 
 #### Unit 2 — appendix: original queued critiques (investigated above)
 Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller flip
@@ -914,9 +948,10 @@ Files: `src/storage/repositories.py`, `src/storage/db.py`, and the 2b caller fli
 
 ### Verification baseline for the review
 - Branch HEAD before review: `f409011`; after Unit 1 cleanup: `5adaa7d`; after Unit 2: `3ca09b3`;
-  after Unit 3: `ae8bae8`.
+  after Unit 3: `ae8bae8`; after Unit 4: `600b2e7`.
 - `uv run pytest -q` → **815 passed** (was 811; +2 Unit-2 repo tests via `3ca09b3` → 813, +2 Unit-3
-  batch error-branch tests via `ae8bae8` → 815); `uv run ruff check` → clean.
+  batch error-branch tests via `ae8bae8` → 815; Unit-4 cleanup `600b2e7` is rename-only → still 815);
+  `uv run ruff check` → clean.
 - Env in a fresh worktree: needs `.env`, `ln -s ../../../models models`, `ln -s ../../../sources sources` (§0).
 
 ---
