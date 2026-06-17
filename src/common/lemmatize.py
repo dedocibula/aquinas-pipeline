@@ -23,6 +23,10 @@ from __future__ import annotations
 
 import functools
 import pathlib
+import sys
+import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass
 
 # ── Latin ─────────────────────────────────────────────────────────────────────
 
@@ -214,3 +218,85 @@ def generate_slovak_forms(lemma: str) -> frozenset[str]:
     return frozenset(
         form.form.lower() for entry in lemmas_forms for form in entry.forms
     )
+
+
+# ── Slovak term matching ──────────────────────────────────────────────────────
+
+def normalise(s: str) -> str:
+    """Lowercase and strip diacritics for loose containment comparison."""
+    s = s.lower()
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
+
+
+@dataclass(frozen=True)
+class SlovakTermMatcher:
+    """Decide whether a Slovak lemma occurs (in any inflected form) in a draft.
+
+    Wraps two strategies behind one object:
+
+    * MorphoDiTa *generation* (:meth:`forms`) — the reliable closed-vocabulary
+      form set for a lemma present in the MorfFlex SK dictionary.
+    * a normalised stem-prefix fallback (:meth:`stem`) for OOV lemmas (archaic
+      'čnosť', Latin loan 'habitus') and MorfFlex coverage gaps (e.g. 'pamäť'
+      generates only {'pamäti'}, missing 'pamäťou'/'pamätiam').
+
+    ``generate`` is injectable so the matching policy can be unit-tested without
+    loading the MorphoDiTa model.
+    """
+
+    generate: Callable[[str], frozenset[str]] = generate_slovak_forms
+
+    def forms(self, lemma: str) -> frozenset[str]:
+        """Inflected surface forms for ``lemma`` (lowercased); empty if OOV."""
+        return self.generate(lemma.lower())
+
+    @staticmethod
+    def stem(word: str) -> str:
+        """Derive a normalised stem prefix for a lemma MorphoDiTa cannot generate.
+
+        Latin loans decline without their -us ending (habitus → habitu/habitom),
+        so it is stripped. Otherwise trailing vowels are inflectional endings.
+        Stems shorter than 3 characters are too prefix-happy; keep the full word.
+        """
+        w = normalise(word)
+        if w.endswith("us") and len(w) >= 5:
+            # Latin -us loans: habitus → habit (habitu-, habitom-)
+            stem = w[:-2]
+        elif w.endswith("en") and len(w) >= 5:
+            # Slovak ň-stem nouns: vášeň → vasen → vas (vášne, vášni, vášňou)
+            # Oblique forms drop the 'en' entirely before the inflectional suffix,
+            # so the 5-char stem 'vasen' never prefix-matches 'vasne'.
+            stem = w[:-2]
+        else:
+            stem = w.rstrip("aeiouy")
+        return stem if len(stem) >= 3 else w
+
+    def matches(
+        self, word: str, draft_tokens: set[str], draft_tokens_norm: set[str]
+    ) -> bool:
+        """True if any inflected form of ``word`` appears among the draft's tokens.
+
+        ``draft_tokens`` are the lowercased draft tokens; ``draft_tokens_norm``
+        are those tokens with diacritics stripped (for the stem-prefix fallback).
+        """
+        w = word.lower()
+        if w in draft_tokens:
+            return True
+        forms = self.forms(w)
+        if not forms:
+            print(
+                f"[PRECHECK] OOV: no MorphoDiTa forms for '{word}' — stem fallback only",
+                file=sys.stderr,
+            )
+        if forms and forms & draft_tokens:
+            return True
+        # Stem-prefix fallback — covers both OOV lemmas ('čnosť', 'habitus') AND
+        # MorfFlex coverage gaps. Always applied as a second-chance check.
+        stem = self.stem(w)
+        matched = next((t for t in draft_tokens_norm if t.startswith(stem)), None)
+        if matched is not None:
+            print(
+                f"[PRECHECK] stem-fallback: '{word}' stem='{stem}' matched='{matched}'",
+                file=sys.stderr,
+            )
+        return matched is not None

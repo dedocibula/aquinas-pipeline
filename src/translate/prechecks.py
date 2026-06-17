@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import re as _re
 import sys
-import unicodedata
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-from common.lemmatize import generate_slovak_forms
+from common.lemmatize import SlovakTermMatcher, generate_slovak_forms, normalise
 
 load_dotenv()
 
@@ -30,47 +29,6 @@ class CheckResult:
 
 
 # ── check_terminology_lemma ───────────────────────────────────────────────────
-
-def _oov_stem(word: str) -> str:
-    """Derive a normalised stem prefix for a lemma MorphoDiTa cannot generate.
-
-    Latin loans decline without their -us ending (habitus → habitu/habitom),
-    so it is stripped. Otherwise trailing vowels are inflectional endings.
-    Stems shorter than 3 characters are too prefix-happy; keep the full word.
-    """
-    w = _normalise(word)
-    if w.endswith("us") and len(w) >= 5:
-        # Latin -us loans: habitus → habit (habitu-, habitom-)
-        stem = w[:-2]
-    elif w.endswith("en") and len(w) >= 5:
-        # Slovak ň-stem nouns: vášeň → vasen → vas (vášne, vášni, vášňou)
-        # Oblique forms drop the 'en' entirely before the inflectional suffix,
-        # so the 5-char stem 'vasen' never prefix-matches 'vasne'.
-        stem = w[:-2]
-    else:
-        stem = w.rstrip("aeiouy")
-    return stem if len(stem) >= 3 else w
-
-
-def _word_in_draft(word: str, draft_tokens: set[str], draft_tokens_norm: set[str]) -> bool:
-    """True if any inflected form of `word` appears among the draft's tokens."""
-    w = word.lower()
-    if w in draft_tokens:
-        return True
-    forms = generate_slovak_forms(w)
-    if not forms:
-        print(f"[PRECHECK] OOV: no MorphoDiTa forms for '{word}' — stem fallback only", file=sys.stderr)
-    if forms and forms & draft_tokens:
-        return True
-    # Stem-prefix fallback — covers both OOV lemmas ('čnosť', 'habitus') AND
-    # MorfFlex coverage gaps (e.g. 'pamäť' generates only {'pamäti'}, missing
-    # 'pamäťou', 'pamätiam', etc.). Always applied as a second-chance check.
-    stem = _oov_stem(w)
-    matched = next((t for t in draft_tokens_norm if t.startswith(stem)), None)
-    if matched is not None:
-        print(f"[PRECHECK] stem-fallback: '{word}' stem='{stem}' matched='{matched}'", file=sys.stderr)
-    return matched is not None
-
 
 def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
     """Generation-based terminology check using the MorphoDiTa Slovak model.
@@ -94,10 +52,14 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
     if not constraints:
         return CheckResult(ok=True)
 
+    # Build the matcher per call so a monkeypatched `generate_slovak_forms`
+    # (the unit-test seam) is picked up at call time.
+    matcher = SlovakTermMatcher(generate=generate_slovak_forms)
+
     draft_tokens = {
         t.lower() for t in _re.findall(r"[^\W\d_]+", draft, flags=_re.UNICODE)
     }
-    draft_tokens_norm = {_normalise(t) for t in draft_tokens}
+    draft_tokens_norm = {normalise(t) for t in draft_tokens}
 
     failures: list[str] = []
     failed_terms: list[str] = []
@@ -112,8 +74,8 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
             # but sentence-ending periods are always followed by a space — the
             # match would never fire. Stripping lets "takto." match "takto. " and
             # "takto:" and "takto," without losing the leading \b anchor.
-            req_norm = _normalise(required).rstrip(".,;:!?")
-            draft_norm = _normalise(draft)
+            req_norm = normalise(required).rstrip(".,;:!?")
+            draft_norm = normalise(draft)
             if not _re.search(rf"\b{_re.escape(req_norm)}\b", draft_norm):
                 msg = f"formula '{required}' (for {c['latin_lemma']}) not found in draft"
                 print(f"[PRECHECK] terminology FAIL: {msg}", file=sys.stderr)
@@ -125,7 +87,7 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
             missing_words = [
                 word
                 for word in required_words
-                if not _word_in_draft(word, draft_tokens, draft_tokens_norm)
+                if not matcher.matches(word, draft_tokens, draft_tokens_norm)
             ]
             if missing_words:
                 msg = f"missing components {missing_words} for '{required}' ({c['latin_lemma']})"
@@ -137,13 +99,6 @@ def check_terminology_lemma(draft: str, constraints: list[dict]) -> CheckResult:
 
 
 # ── check_terminology ─────────────────────────────────────────────────────────
-
-def _normalise(s: str) -> str:
-    """Lowercase and strip diacritics for loose containment comparison."""
-    s = s.lower()
-    s = unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
-    return s
-
 
 def check_terminology(draft: str, constraints: list[dict]) -> CheckResult:
     """Check that all hard term constraints appear in the draft (exact normalised match).
@@ -166,13 +121,13 @@ def check_terminology(draft: str, constraints: list[dict]) -> CheckResult:
     if not constraints:
         return CheckResult(ok=True)
 
-    normalised_draft = _normalise(draft)
+    normalised_draft = normalise(draft)
     failures: list[str] = []
 
     for c in constraints:
         latin_lemma = c["latin_lemma"]
         required_slovak = c["required_slovak"]
-        if _normalise(required_slovak) not in normalised_draft:
+        if normalise(required_slovak) not in normalised_draft:
             print(
                 f"[PRECHECK] terminology FAIL: '{required_slovak}' (for {latin_lemma}) not found in draft",
                 file=sys.stderr,

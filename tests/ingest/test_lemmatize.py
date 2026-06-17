@@ -16,6 +16,8 @@ import pathlib
 
 import pytest
 
+from common.lemmatize import SlovakTermMatcher, normalise
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _cltk_models_present() -> bool:
@@ -157,3 +159,64 @@ class TestLemmatizeSlovak:
         result = self.lemmatize("vierou")
         for r in result:
             assert "_" not in r, f"raw MorphoDiTa suffix not stripped: {r!r}"
+
+
+# ── Slovak term matcher (model-free: generate is injected) ─────────────────────
+
+def _gen(form_map: dict):
+    def _fn(lemma: str) -> frozenset[str]:
+        return frozenset(form_map.get(lemma.lower(), set()))
+
+    return _fn
+
+
+def test_normalise_lowercases_and_strips_diacritics():
+    assert normalise("Milosť") == "milost"
+    assert normalise("VÁŠEŇ") == "vasen"
+
+
+def test_matcher_forms_delegates_to_generate_lowercased():
+    matcher = SlovakTermMatcher(generate=_gen({"viera": {"viera", "vierou"}}))
+    assert matcher.forms("Viera") == frozenset({"viera", "vierou"})
+    assert matcher.forms("rozum") == frozenset()
+
+
+def test_matcher_stem_strips_latin_us_loan():
+    assert SlovakTermMatcher.stem("habitus") == "habit"
+
+
+def test_matcher_stem_strips_slovak_en_stem():
+    # 'vášeň' → normalise 'vasen' → drop 'en' → 'vas'
+    assert SlovakTermMatcher.stem("vášeň") == "vas"
+
+
+def test_matcher_stem_strips_trailing_vowels_otherwise():
+    assert SlovakTermMatcher.stem("forma") == "form"
+
+
+def test_matcher_stem_keeps_full_word_when_stem_too_short():
+    # 'oko' → 'ok' after rstrip is only 2 chars → keep full normalised word
+    assert SlovakTermMatcher.stem("oko") == "oko"
+
+
+def test_matcher_matches_direct_token_hit():
+    matcher = SlovakTermMatcher(generate=_gen({}))
+    assert matcher.matches("viera", {"viera"}, {"viera"}) is True
+
+
+def test_matcher_matches_generated_inflected_form():
+    matcher = SlovakTermMatcher(generate=_gen({"viera": {"viera", "vierou"}}))
+    assert matcher.matches("viera", {"vierou"}, {"vierou"}) is True
+
+
+def test_matcher_matches_oov_stem_prefix_fallback():
+    # 'čnosť' is OOV (empty form set) but 'čnostiam' shares the stem.
+    matcher = SlovakTermMatcher(generate=_gen({}))
+    tokens = {"čnostiam"}
+    assert matcher.matches("čnosť", tokens, {normalise(t) for t in tokens}) is True
+
+
+def test_matcher_matches_no_hit():
+    matcher = SlovakTermMatcher(generate=_gen({"forma": {"forma", "formy"}}))
+    tokens = {"informácia"}
+    assert matcher.matches("forma", tokens, {normalise(t) for t in tokens}) is False
