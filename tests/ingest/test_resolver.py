@@ -824,7 +824,22 @@ class TestResolveSegmentHabereSuppression:
                               [], self._habitus_lookup(), 20, 30, {})
         assert [r for r in res if r.term.latin_lemma == "habitus"]
 
+    def test_same_surface_genuine_and_construction_keeps_constraint(self):
+        # 'habitum' appears as a genuine accusative AND in 'habitum est'. The
+        # genuine occurrence (total > construction) must keep the constraint —
+        # the surface-blind set check used to drop both.
+        res = resolve_segment(
+            self._seg("Per habitum virtutis agimus, ut supra habitum est."),
+            [], self._habitus_lookup(), 20, 30, {})
+        assert [r for r in res if r.term.latin_lemma == "habitus"]
+
     def test_suppressed_tokens_helper(self):
         assert _suppressed_habitus_tokens("Sicut habitum est supra.") == {"habitum"}
         assert _suppressed_habitus_tokens("Homo habitum bonum habet.") == set()
         assert _suppressed_habitus_tokens("Nulla mentio hic.") == set()
+        # Same surface, genuine + construction → not suppressed (total > construction).
+        assert _suppressed_habitus_tokens(
+            "Per habitum virtutis agimus, ut supra habitum est.") == set()
+        # Both occurrences are the construction → suppressed (total == construction).
+        assert _suppressed_habitus_tokens(
+            "Ut habitum est, et sicut habitum est supra.") == {"habitum"}

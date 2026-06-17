@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -251,29 +252,44 @@ def _suppressed_habitus_tokens(latin: str) -> set[str]:
     """Surface tokens that lemmatize to *habitus* only via perfect-passive habere.
 
     Returns the set of participle surfaces ('habitum'/'habita') to suppress when
-    the 'habitum est'/'habita sunt' construction is the *only* habitus evidence
-    in `latin`; empty when habitus is genuinely present elsewhere (or the
-    construction is absent).
+    the 'habitum est'/'habita sunt' construction accounts for *every* occurrence
+    of that surface in `latin`; empty when habitus is genuinely present elsewhere
+    (or the construction is absent).
+
+    Suppression is decided per surface by occurrence count: a surface is bogus
+    only when its total occurrences ≤ its construction occurrences. A surface
+    that also appears as a genuine accusative noun (total > construction — e.g.
+    'per habitum virtutis ... ut supra habitum est') keeps its habitus
+    constraint; resolution is surface-granular, so this is the finest decision
+    the consuming resolver loop can act on.
     """
     if not _HABERE_PPP_RE.search(latin):
         return set()
     tagged = pos_tag_latin(latin)
-    ppp = {
+    # Per-surface count of the 'habitum/habita' + verb-tagged copula construction.
+    construction_counts = Counter(
         surface.lower()
         for (surface, _), (nxt, nxt_pos) in zip(tagged, tagged[1:])
         if surface.lower() in _HABERE_PPP_FORMS
         and nxt.lower() in _ESSE_FORMS
         and nxt_pos == "V"
-    }
-    if not ppp:
+    )
+    if not construction_counts:
         return set()
-    # Genuine habitus evidence from any other token keeps the noun in play.
+    # Genuine habitus evidence from any *other* token keeps the noun in play.
     for token in set(re.findall(r"[a-zA-Z]+", latin)):
-        if token.lower() in ppp:
+        if token.lower() in construction_counts:
             continue
         if "habitus" in {_canonical_lemma(cand) for cand in lemmatize_latin(token)}:
             return set()
-    return ppp
+    # Suppress a surface only when all its occurrences are the construction;
+    # if it also occurs as a genuine accusative (total > construction), keep it.
+    total_counts = Counter(t.lower() for t in re.findall(r"[a-zA-Z]+", latin))
+    return {
+        surface
+        for surface, c_count in construction_counts.items()
+        if total_counts[surface] <= c_count
+    }
 
 
 def resolve_segment(
