@@ -81,6 +81,7 @@ output/
 
 # ─── Pipeline debug / run logs ───────────────────────
 reports/
+src/optimize/samples/
 
 # Claude Code agent worktrees (each is its own branch, not repo data)
 .claude/worktrees/

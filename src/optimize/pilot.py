@@ -48,6 +48,7 @@ from translate.run import ArticleResult, _close_run, _open_run
 load_dotenv()
 
 logging.basicConfig(
+    force=True,  # Prefect installs a handler on import; force=True replaces it
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(message)s",
     datefmt="%H:%M:%S",
@@ -57,9 +58,12 @@ log = logging.getLogger(__name__)
 _REPORTS_DIR = Path(__file__).resolve().parent.parent.parent / "reports"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_SAMPLE = Path(__file__).resolve().parent / "samples" / "pilot_sample_100.json"
-_sample_env = os.environ.get("PILOT_SAMPLE_FILE")
-_SAMPLE_FILE = (_REPO_ROOT / _sample_env) if _sample_env else _DEFAULT_SAMPLE
 _REPORT_NAME = "m4_sample.txt"
+
+
+def _resolve_sample_file() -> Path:
+    env = os.environ.get("PILOT_SAMPLE_FILE")
+    return (_REPO_ROOT / env) if env else _DEFAULT_SAMPLE
 
 _ABORT_NEEDS_HUMAN_RATE = 0.20
 _ABORT_AVG_ITERATIONS = 2.5
@@ -78,13 +82,13 @@ class SegmentStats:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 
 
-def fetch_sample_segments(conn) -> list[dict]:
-    """Return pending segments listed in $PILOT_SAMPLE_FILE, ordered by locator_path.
+def fetch_sample_segments(conn, sample_file: Path) -> list[dict]:
+    """Return pending segments listed in sample_file, ordered by locator_path.
 
     article_title segments have English only (no Latin) and are included via the
     English fallback condition.
     """
-    sample = json.loads(_SAMPLE_FILE.read_text())
+    sample = json.loads(sample_file.read_text())
     ids = [s["segment_id"] for s in sample["segments"]]
     with conn.cursor() as cur:
         cur.execute(
@@ -143,15 +147,16 @@ def fetch_corpus_char_counts(conn) -> dict[str, int]:
 
 def run_pilot() -> None:
     start = time.time()
+    sample_file = _resolve_sample_file()
     debug_log_path = _REPORTS_DIR / "translate" / "debug" / f"debug_{int(start)}.jsonl"
 
     with get_conn() as conn:
-        pending = fetch_sample_segments(conn)
+        pending = fetch_sample_segments(conn, sample_file)
 
     log.info(
         "Sample pilot: %d pending segments from %s. Prompt log → %s",
         len(pending),
-        _SAMPLE_FILE.name,
+        sample_file.name,
         debug_log_path,
     )
 
@@ -164,6 +169,7 @@ def run_pilot() -> None:
             iterations_list=[],
             stats_list=[],
             elapsed=time.time() - start,
+            sample_file=sample_file,
         )
         return
 
@@ -276,6 +282,7 @@ def run_pilot() -> None:
         iterations_list=iterations_list,
         stats_list=stats_list,
         elapsed=elapsed,
+        sample_file=sample_file,
     )
 
     avg_iters = sum(iterations_list) / total_run if iterations_list else 0.0
@@ -311,6 +318,7 @@ def _write_report(
     iterations_list: list[int],
     stats_list: list[SegmentStats],
     elapsed: float,
+    sample_file: Path,
 ) -> None:
     total_run = translated + needs_human
 
@@ -374,7 +382,7 @@ def _write_report(
     # ── Report lines ────────────────────────────────────────────────────────
     lines = [
         "PILOT RUN SUMMARY",
-        f"  Sample file:       {_SAMPLE_FILE.name}",
+        f"  Sample file:       {sample_file.name}",
         f"  Total segments:    {total_segments}",
         f"  Translated:        {translated}  ({pct(translated)})",
         f"  Needs human:       {needs_human}  ({pct(needs_human)})",
