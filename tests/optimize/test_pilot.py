@@ -6,6 +6,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from optimize.pilot import (
+    _resolve_sample_file,
     _write_report,
     fetch_sample_segments,
     run_pilot,
@@ -15,6 +16,8 @@ from optimize.pilot import (
 # try/except so the tests pass either way, but mocking avoids spurious
 # connection-refused warnings in CI.
 _PATCH_GET_CONN = "optimize.pilot.get_conn"
+
+_SAMPLE_FILE = _resolve_sample_file()
 
 # ── Fake DB helpers ───────────────────────────────────────────────────────────
 
@@ -30,50 +33,45 @@ def _fake_conn(rows=None):
     return conn, cur
 
 
-def _patch_sample(monkeypatch, ids):
-    """Make fetch_sample_segments read a fixed list of segment_ids."""
+def _fake_sample_file(ids):
+    """Return a mock Path whose read_text() yields a sample JSON for the given ids."""
     sample = {"segments": [{"segment_id": i} for i in ids]}
-    monkeypatch.setattr(
-        "optimize.pilot._SAMPLE_FILE",
-        MagicMock(read_text=lambda: json.dumps(sample), name="sample"),
-    )
+    mock_file = MagicMock()
+    mock_file.read_text.return_value = json.dumps(sample)
+    return mock_file
 
 
 # ── fetch_sample_segments ─────────────────────────────────────────────────────
 
 
-def test_fetch_sample_segments_filters_pending(monkeypatch):
-    _patch_sample(monkeypatch, [1, 2])
+def test_fetch_sample_segments_filters_pending():
     rows = [(1, "I.q1.a1", "pending"), (2, "I.q2.a1", "pending")]
     conn, cur = _fake_conn(rows)
-    result = fetch_sample_segments(conn)
+    result = fetch_sample_segments(conn, _fake_sample_file([1, 2]))
     assert len(result) == 2
     assert result[0]["segment_id"] == 1
     assert result[0]["locator_path"] == "I.q1.a1"
 
 
-def test_fetch_sample_segments_filters_by_status_and_text(monkeypatch):
-    _patch_sample(monkeypatch, [1, 2])
+def test_fetch_sample_segments_filters_by_status_and_text():
     conn, cur = _fake_conn([])
-    fetch_sample_segments(conn)
+    fetch_sample_segments(conn, _fake_sample_file([1, 2]))
     sql = cur.execute.call_args[0][0]
     assert "pending" in sql
     assert "ANY(%s)" in sql
     assert "la" in sql and "en" in sql
 
 
-def test_fetch_sample_segments_passes_sample_ids(monkeypatch):
-    _patch_sample(monkeypatch, [7, 8, 9])
+def test_fetch_sample_segments_passes_sample_ids():
     conn, cur = _fake_conn([])
-    fetch_sample_segments(conn)
+    fetch_sample_segments(conn, _fake_sample_file([7, 8, 9]))
     _, params = cur.execute.call_args[0]
     assert params == ([7, 8, 9],)
 
 
-def test_fetch_sample_segments_returns_empty_when_none(monkeypatch):
-    _patch_sample(monkeypatch, [1])
+def test_fetch_sample_segments_returns_empty_when_none():
     conn, cur = _fake_conn([])
-    result = fetch_sample_segments(conn)
+    result = fetch_sample_segments(conn, _fake_sample_file([1]))
     assert result == []
 
 
@@ -103,6 +101,7 @@ def test_write_report_creates_file(tmp_path):
             iterations_list=[1, 1, 2, 1, 2, 2, 3, 1, 1, 2] + [1] * 35,
             stats_list=[],
             elapsed=125.0,
+            sample_file=_SAMPLE_FILE,
         )
     assert (tmp_path / "m4_sample.txt").exists()
 
@@ -116,6 +115,7 @@ def test_write_report_contains_key_fields(tmp_path):
             iterations_list=[1] * 45,
             stats_list=[],
             elapsed=90.0,
+            sample_file=_SAMPLE_FILE,
         )
     content = (tmp_path / "m4_sample.txt").read_text()
     assert "Translated:" in content
@@ -134,6 +134,7 @@ def test_write_report_abort_threshold_needs_human_ok(tmp_path):
             iterations_list=[1] * 100,
             stats_list=[],
             elapsed=60.0,
+            sample_file=_SAMPLE_FILE,
         )
     content = (tmp_path / "m4_sample.txt").read_text()
     assert "ok" in content
@@ -148,6 +149,7 @@ def test_write_report_abort_threshold_needs_human_triggered(tmp_path):
             iterations_list=[3] * 100,
             stats_list=[],
             elapsed=60.0,
+            sample_file=_SAMPLE_FILE,
         )
     content = (tmp_path / "m4_sample.txt").read_text()
     assert "TRIGGERED" in content
@@ -162,6 +164,7 @@ def test_write_report_avg_iterations(tmp_path):
             iterations_list=[1, 1, 2, 3, 1, 1, 1, 2, 3, 3],
             stats_list=[],
             elapsed=30.0,
+            sample_file=_SAMPLE_FILE,
         )
     content = (tmp_path / "m4_sample.txt").read_text()
     # avg = 18/10 = 1.80
@@ -178,5 +181,6 @@ def test_write_report_empty_run(tmp_path):
             iterations_list=[],
             stats_list=[],
             elapsed=5.0,
+            sample_file=_SAMPLE_FILE,
         )
     assert (tmp_path / "m4_sample.txt").exists()

@@ -241,6 +241,92 @@ class GlossaryRepository:
                 (surface, sense_id),
             )
 
+    # ── Term / sense creation (import_approvals new-term path) ─────────────────
+
+    def find_term_by_lemma(self, latin_lemma: str) -> int | None:
+        """Return term_id for latin_lemma (case-insensitive), or None."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT term_id FROM glossary_term WHERE lower(latin_lemma) = lower(%s)",
+                (latin_lemma,),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def insert_glossary_term(
+        self, latin_lemma: str, category: str | None, la_surface: str | None
+    ) -> int:
+        """Insert a new glossary_term row, return its term_id."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO glossary_term (latin_lemma, category, la_surface, is_multiword)
+                VALUES (%s, %s, %s, false)
+                RETURNING term_id
+                """,
+                (latin_lemma, category or None, la_surface or None),
+            )
+            return cur.fetchone()[0]
+
+    def insert_glossary_sense(
+        self, term_id: int, context_label: str | None, status: str = "approved"
+    ) -> int:
+        """Insert a new glossary_sense row, return its sense_id. Version starts at 1."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO glossary_sense (term_id, context_label, status, version)
+                VALUES (%s, %s, %s, 1)
+                RETURNING sense_id
+                """,
+                (term_id, context_label, status),
+            )
+            return cur.fetchone()[0]
+
+    def find_sense_by_label(self, term_id: int, context_label: str | None) -> dict | None:
+        """Return sense row for (term_id, context_label), or None.
+
+        NULL context_label matches only the primary (NULL) sense, not any labelled one.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if context_label is None:
+                cur.execute(
+                    """
+                    SELECT sense_id, version, status, context_label
+                    FROM glossary_sense
+                    WHERE term_id = %s AND context_label IS NULL
+                    """,
+                    (term_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT sense_id, version, status, context_label
+                    FROM glossary_sense
+                    WHERE term_id = %s AND context_label = %s
+                    """,
+                    (term_id, context_label),
+                )
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_sk_rendering_content(self, sense_id: int) -> str | None:
+        """Return highest-authority SK content for a sense, or None if absent."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sr.content
+                FROM sense_rendering sr
+                JOIN source s ON s.source_id = sr.source_id
+                WHERE sr.sense_id = %s AND sr.lang = 'sk'
+                ORDER BY s.authority_rank
+                LIMIT 1
+                """,
+                (sense_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
+
 
 class SegmentRepository:
     """All segment / segment_text access, plus corpus-wide status queries."""

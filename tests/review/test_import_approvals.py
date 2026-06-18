@@ -8,6 +8,7 @@ from review.import_approvals import (
     COLS,
     load_approved_rows,
     process_approval,
+    process_new_term,
 )
 from review.sheets import HEADER
 
@@ -27,15 +28,37 @@ def _make_sheet_row(
     proposed_slovak: str = "rozum",
     sense_id: int = 101,
     db_version: int = 1,
+    category: str = "",
 ) -> list:
     row = [""] * 15
     row[COLS["approved"]] = approved
+    row[COLS["category"]] = category
     row[COLS["latin_lemma"]] = latin
     row[COLS["latin_text"]] = latin_text
     row[COLS["context_label"]] = context_label
     row[COLS["proposed_slovak"]] = proposed_slovak
     row[COLS["sense_id"]] = str(sense_id)
     row[COLS["db_version"]] = str(db_version)
+    return row
+
+
+def _new_term_row(
+    approved: str = "TRUE",
+    latin: str = "circe",
+    latin_text: str = "",
+    context_label: str = "",
+    proposed_slovak: str = "",
+    category: str = "name",
+) -> list:
+    """Sheet row for the new-term creation path: sense_id and db_version are blank."""
+    row = [""] * 15
+    row[COLS["approved"]] = approved
+    row[COLS["category"]] = category
+    row[COLS["latin_lemma"]] = latin
+    row[COLS["latin_text"]] = latin_text
+    row[COLS["context_label"]] = context_label
+    row[COLS["proposed_slovak"]] = proposed_slovak
+    # sense_id and db_version intentionally left blank
     return row
 
 
@@ -74,9 +97,19 @@ def test_load_approved_rows_no_dead_is_not_true_branch(fake_worksheet):
     assert rows == []
 
 
-def test_load_approved_rows_skips_blank_sense_id(fake_worksheet):
-    row = _make_sheet_row(approved="TRUE")
-    row[COLS["sense_id"]] = ""
+def test_load_approved_rows_blank_sense_id_with_latin_lemma_is_new_term_row(fake_worksheet):
+    """Blank sense_id + filled latin_lemma → new-term row included with sense_id=None."""
+    ws = fake_worksheet(rows=[HEADER, _new_term_row(latin="circe")])
+    rows = load_approved_rows(ws)
+    assert len(rows) == 1
+    assert rows[0]["sense_id"] is None
+    assert rows[0]["latin_lemma"] == "circe"
+
+
+def test_load_approved_rows_skips_blank_sense_id_and_blank_latin_lemma(fake_worksheet):
+    """Both sense_id and latin_lemma blank → nothing useful in the row; skip it."""
+    row = _new_term_row()
+    row[COLS["latin_lemma"]] = ""
     ws = fake_worksheet(rows=[HEADER, row])
     assert load_approved_rows(ws) == []
 
@@ -361,3 +394,185 @@ def test_process_approval_empty_latin_text_skips_la_processing(fake_conn):
     # Approval always bumps once, regardless of LA processing being skipped.
     bump_calls = [e for e in conn.executed if "version = version + 1" in e[0]]
     assert len(bump_calls) == 1
+
+
+# ── load_approved_rows — new-term rows ───────────────────────────────────────
+
+
+def test_load_approved_rows_new_term_row_parses_category(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _new_term_row(latin="circe", category="name")])
+    rows = load_approved_rows(ws)
+    assert rows[0]["category"] == "name"
+
+
+def test_load_approved_rows_new_term_row_blank_category_is_empty_string(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _new_term_row(latin="circe", category="")])
+    rows = load_approved_rows(ws)
+    assert rows[0]["category"] == ""
+
+
+def test_load_approved_rows_existing_row_parses_category(fake_worksheet):
+    ws = fake_worksheet(rows=[HEADER, _make_sheet_row(category="term")])
+    rows = load_approved_rows(ws)
+    assert rows[0]["category"] == "term"
+
+
+def test_load_approved_rows_mixed_new_and_existing(fake_worksheet):
+    """Sheet may contain both existing-sense rows and new-term rows."""
+    ws = fake_worksheet(rows=[
+        HEADER,
+        _make_sheet_row(sense_id=101),
+        _new_term_row(latin="circe"),
+    ])
+    rows = load_approved_rows(ws)
+    assert len(rows) == 2
+    existing = [r for r in rows if r["sense_id"] is not None]
+    new_term = [r for r in rows if r["sense_id"] is None]
+    assert len(existing) == 1 and existing[0]["sense_id"] == 101
+    assert len(new_term) == 1 and new_term[0]["latin_lemma"] == "circe"
+
+
+# ── process_new_term ─────────────────────────────────────────────────────────
+
+
+def _new_row(**overrides):
+    base = {
+        "latin_lemma": "circe",
+        "context_label": "",
+        "proposed_slovak": "Kirke",
+        "category": "name",
+        "latin_text": "",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_process_new_term_created_inserts_term_sense_and_rendering(fake_conn):
+    """Brand-new latin_lemma: INSERT term, INSERT sense, INSERT rendering."""
+    conn = fake_conn(fetchone_results=[
+        None,   # find_term_by_lemma → not found
+        (1,),   # insert_glossary_term RETURNING term_id
+        (10,),  # insert_glossary_sense RETURNING sense_id
+    ])
+    status = process_new_term(conn, _new_row(), human_src_id=6)
+    assert status == "CREATED"
+    sqls = [e[0] for e in conn.executed]
+    assert any("INSERT INTO glossary_term" in s for s in sqls)
+    assert any("INSERT INTO glossary_sense" in s for s in sqls)
+    assert any("INSERT INTO sense_rendering" in s for s in sqls)
+
+
+def test_process_new_term_created_no_rendering_when_sk_blank(fake_conn):
+    """New term with blank proposed_slovak: no sense_rendering INSERT."""
+    conn = fake_conn(fetchone_results=[
+        None,
+        (1,),
+        (10,),
+    ])
+    status = process_new_term(conn, _new_row(proposed_slovak=""), human_src_id=6)
+    assert status == "CREATED"
+    sqls = [e[0] for e in conn.executed]
+    assert not any("INSERT INTO sense_rendering" in s for s in sqls)
+
+
+def test_process_new_term_created_passes_category_and_la_surface(fake_conn):
+    """Category and la_surface from the sheet row are passed to INSERT."""
+    conn = fake_conn(fetchone_results=[None, (1,), (10,)])
+    process_new_term(conn, _new_row(category="name", latin_text="Circe, Circes"), human_src_id=6)
+    term_insert = next(e for e in conn.executed if "INSERT INTO glossary_term" in e[0])
+    _, params = term_insert
+    assert "name" in params
+    assert "Circe, Circes" in params
+
+
+def test_process_new_term_created_context_label_null_when_blank(fake_conn):
+    """Blank context_label in row → NULL stored in glossary_sense."""
+    conn = fake_conn(fetchone_results=[None, (1,), (10,)])
+    process_new_term(conn, _new_row(context_label=""), human_src_id=6)
+    sense_insert = next(e for e in conn.executed if "INSERT INTO glossary_sense" in e[0])
+    _, params = sense_insert
+    assert params[1] is None  # context_label position
+
+
+def test_process_new_term_sense_added_reuses_existing_term(fake_conn):
+    """Term already in DB, no matching sense: INSERT only the sense."""
+    conn = fake_conn(fetchone_results=[
+        (5,),   # find_term_by_lemma → term_id=5
+        None,   # find_sense_by_label → not found
+        (20,),  # insert_glossary_sense
+    ])
+    status = process_new_term(conn, _new_row(context_label="mythological"), human_src_id=6)
+    assert status == "SENSE_ADDED"
+    sqls = [e[0] for e in conn.executed]
+    assert not any("INSERT INTO glossary_term" in s for s in sqls)
+    assert any("INSERT INTO glossary_sense" in s for s in sqls)
+
+
+def test_process_new_term_sense_added_writes_sk_when_provided(fake_conn):
+    conn = fake_conn(fetchone_results=[
+        (5,),
+        None,
+        (20,),
+    ])
+    process_new_term(conn, _new_row(proposed_slovak="Kirke"), human_src_id=6)
+    assert any("INSERT INTO sense_rendering" in e[0] for e in conn.executed)
+
+
+def test_process_new_term_updated_bumps_version_when_sk_changes(fake_conn):
+    """Existing sense with different SK: write new rendering and bump version."""
+    conn = fake_conn(fetchone_results=[
+        (5,),
+        {"sense_id": 20, "version": 1, "status": "approved", "context_label": "mythological"},
+        ("old_Kirke",),   # get_sk_rendering_content → different
+        (2,),             # bump_sense_version
+    ])
+    status = process_new_term(
+        conn, _new_row(proposed_slovak="Kirke", context_label="mythological"), human_src_id=6
+    )
+    assert status == "UPDATED"
+    assert any("version = version + 1" in e[0] for e in conn.executed)
+    assert any("INSERT INTO sense_rendering" in e[0] for e in conn.executed)
+
+
+def test_process_new_term_updated_no_version_bump_when_sk_unchanged(fake_conn):
+    """Existing sense with identical SK: no version bump."""
+    conn = fake_conn(fetchone_results=[
+        (5,),
+        {"sense_id": 20, "version": 1, "status": "approved", "context_label": None},
+        ("Kirke",),   # get_sk_rendering_content → same as proposed
+    ])
+    process_new_term(conn, _new_row(proposed_slovak="Kirke"), human_src_id=6)
+    assert not any("version = version + 1" in e[0] for e in conn.executed)
+
+
+def test_process_new_term_updated_approves_non_approved_sense(fake_conn):
+    """Existing sense still 'proposed' gets approved on update."""
+    conn = fake_conn(fetchone_results=[
+        (5,),
+        {"sense_id": 20, "version": 1, "status": "proposed", "context_label": None},
+        ("Kirke",),   # get_sk_rendering_content → unchanged
+    ])
+    process_new_term(conn, _new_row(proposed_slovak="Kirke"), human_src_id=6)
+    status_updates = [e for e in conn.executed if "UPDATE glossary_sense SET status" in e[0]]
+    assert len(status_updates) == 1
+    assert "approved" in status_updates[0][1]
+
+
+def test_process_new_term_updated_la_surface_written_when_changed(fake_conn):
+    """latin_text differs from stored la_surface → glossary_term updated."""
+    conn = fake_conn(fetchone_results=[
+        (5,),
+        {"sense_id": 20, "version": 1, "status": "approved", "context_label": None},
+        ("Kirke",),       # get_sk_rendering_content → unchanged
+        ("old surface",), # get_la_surface → different
+    ])
+    process_new_term(conn, _new_row(proposed_slovak="Kirke", latin_text="Circe, Circes"), human_src_id=6)
+    la_updates = [e for e in conn.executed if "UPDATE glossary_term" in e[0] and "la_surface" in e[0]]
+    assert len(la_updates) == 1
+
+
+def test_process_new_term_no_lemma_returns_no_lemma(fake_conn):
+    conn = fake_conn()
+    status = process_new_term(conn, _new_row(latin_lemma=""), human_src_id=6)
+    assert status == "NO_LEMMA"
+    assert conn.executed == []

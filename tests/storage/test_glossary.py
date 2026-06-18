@@ -256,3 +256,154 @@ def test_sense_status_counts(fake_conn):
 def test_sense_status_counts_empty(fake_conn):
     conn = fake_conn(fetchall_rows=[])
     assert GlossaryRepository(conn).sense_status_counts() == {}
+
+
+# ── find_term_by_lemma ───────────────────────────────────────────────────────
+
+
+def test_find_term_by_lemma_returns_term_id(fake_conn):
+    conn = fake_conn(fetchone_results=[(7,)])
+    assert GlossaryRepository(conn).find_term_by_lemma("circe") == 7
+
+
+def test_find_term_by_lemma_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).find_term_by_lemma("circe") is None
+
+
+def test_find_term_by_lemma_uses_case_insensitive_comparison(fake_conn):
+    conn = fake_conn(fetchone_results=[(7,)])
+    GlossaryRepository(conn).find_term_by_lemma("Circe")
+    sql, params = conn.executed[0]
+    assert "lower(latin_lemma)" in sql
+    assert params == ("Circe",)
+
+
+# ── insert_glossary_term ─────────────────────────────────────────────────────
+
+
+def test_insert_glossary_term_returns_term_id(fake_conn):
+    conn = fake_conn(fetchone_results=[(42,)])
+    result = GlossaryRepository(conn).insert_glossary_term("circe", "name", "Circe, Circes")
+    assert result == 42
+
+
+def test_insert_glossary_term_sql_targets_glossary_term(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_term("circe", "name", None)
+    sql, params = conn.executed[0]
+    assert "INSERT INTO glossary_term" in sql
+    assert "RETURNING term_id" in sql
+
+
+def test_insert_glossary_term_passes_all_fields(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_term("circe", "name", "Circe, Circes")
+    _, params = conn.executed[0]
+    assert params == ("circe", "name", "Circe, Circes")
+
+
+def test_insert_glossary_term_blank_category_becomes_none(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_term("circe", None, None)
+    _, params = conn.executed[0]
+    assert params[1] is None
+
+
+# ── insert_glossary_sense ────────────────────────────────────────────────────
+
+
+def test_insert_glossary_sense_returns_sense_id(fake_conn):
+    conn = fake_conn(fetchone_results=[(55,)])
+    result = GlossaryRepository(conn).insert_glossary_sense(7, "mythological")
+    assert result == 55
+
+
+def test_insert_glossary_sense_sql_targets_glossary_sense(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_sense(7, None)
+    sql, _ = conn.executed[0]
+    assert "INSERT INTO glossary_sense" in sql
+    assert "RETURNING sense_id" in sql
+
+
+def test_insert_glossary_sense_default_status_is_approved(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_sense(7, None)
+    _, params = conn.executed[0]
+    assert "approved" in params
+
+
+def test_insert_glossary_sense_version_starts_at_one(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_sense(7, "mythological")
+    sql, _ = conn.executed[0]
+    assert "1" in sql  # version=1 literal in INSERT
+
+
+def test_insert_glossary_sense_passes_context_label(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_sense(7, "mythological")
+    _, params = conn.executed[0]
+    assert params[1] == "mythological"
+
+
+def test_insert_glossary_sense_null_context_label(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    GlossaryRepository(conn).insert_glossary_sense(7, None)
+    _, params = conn.executed[0]
+    assert params[1] is None
+
+
+# ── find_sense_by_label ──────────────────────────────────────────────────────
+
+
+def test_find_sense_by_label_returns_dict(fake_conn):
+    conn = fake_conn(fetchone_results=[
+        {"sense_id": 20, "version": 1, "status": "approved", "context_label": "mythological"},
+    ])
+    result = GlossaryRepository(conn).find_sense_by_label(7, "mythological")
+    assert result == {"sense_id": 20, "version": 1, "status": "approved", "context_label": "mythological"}
+
+
+def test_find_sense_by_label_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).find_sense_by_label(7, "mythological") is None
+
+
+def test_find_sense_by_label_null_uses_is_null_clause(fake_conn):
+    """NULL context_label must use IS NULL, not = NULL."""
+    conn = fake_conn(fetchone_results=[None])
+    GlossaryRepository(conn).find_sense_by_label(7, None)
+    sql, params = conn.executed[0]
+    assert "IS NULL" in sql
+    assert params == (7,)
+
+
+def test_find_sense_by_label_non_null_uses_equality(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    GlossaryRepository(conn).find_sense_by_label(7, "mythological")
+    sql, params = conn.executed[0]
+    assert "context_label = %s" in sql
+    assert params == (7, "mythological")
+
+
+# ── get_sk_rendering_content ─────────────────────────────────────────────────
+
+
+def test_get_sk_rendering_content_returns_content(fake_conn):
+    conn = fake_conn(fetchone_results=[("Kirke",)])
+    assert GlossaryRepository(conn).get_sk_rendering_content(20) == "Kirke"
+
+
+def test_get_sk_rendering_content_returns_none_when_absent(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).get_sk_rendering_content(20) is None
+
+
+def test_get_sk_rendering_content_filters_sk_lang(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    GlossaryRepository(conn).get_sk_rendering_content(20)
+    sql, params = conn.executed[0]
+    assert "lang = 'sk'" in sql
+    assert params == (20,)
