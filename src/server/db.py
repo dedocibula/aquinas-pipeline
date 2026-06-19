@@ -38,14 +38,15 @@ def get_question_articles(
 ) -> list[dict]:
     """Return articles within a question (depth 3) with translation-status summary.
 
-    Each dict: ``{article_path, translated_count, total_count}``.
+    Each dict: ``{article_path, translated_count, needs_human_count, total_count}``.
     ``question_path`` is an ltree string like 'I.q3'.
     """
     sql = """
         SELECT
             ltree2text(subpath(locator_path, 0, 3)) AS article_path,
-            COUNT(*) FILTER (WHERE translation_status = 'translated') AS translated_count,
-            COUNT(*)                                                   AS total_count
+            COUNT(*) FILTER (WHERE translation_status = 'translated')  AS translated_count,
+            COUNT(*) FILTER (WHERE translation_status = 'needs_human') AS needs_human_count,
+            COUNT(*)                                                    AS total_count
         FROM segment
         WHERE locator_path <@ %s::ltree
           AND nlevel(locator_path) >= 3
@@ -138,7 +139,7 @@ def get_prev_next_article(
             FROM (
                 SELECT DISTINCT subpath(locator_path, 0, 3) AS ap
                 FROM segment
-                WHERE nlevel(locator_path) >= 3
+                WHERE nlevel(locator_path) >= 3 AND element_type != 'preamble'
             ) t
         ) windowed
         WHERE ap = %s
@@ -402,6 +403,31 @@ def get_question_preamble_segment(
         cur.execute(sql, {"qpath": question_path})
         row = cur.fetchone()
     return dict(row) if row else None
+
+
+def get_questions_by_status(
+    conn: psycopg2.extensions.connection,
+    status: str,
+) -> list[dict]:
+    """Return question paths that have at least one segment with the given status.
+
+    Each dict: ``{question_path, segment_count}``.
+    Ordered by locator_path so pars appear in natural document order.
+    ``status`` should be one of 'translated', 'needs_human', 'pending'.
+    """
+    sql = """
+        SELECT
+            ltree2text(subpath(locator_path, 0, 2)) AS question_path,
+            subpath(locator_path, 0, 2)             AS _sort_key,
+            COUNT(*)                                 AS segment_count
+        FROM segment
+        WHERE translation_status = %s
+        GROUP BY question_path, _sort_key
+        ORDER BY _sort_key
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, (status,))
+        return [dict(row) for row in cur.fetchall()]
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:

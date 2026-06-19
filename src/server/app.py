@@ -26,6 +26,7 @@ from server.db import (  # noqa: E402
     get_question_articles,
     get_question_preamble_segment,
     get_question_title_segment,
+    get_questions_by_status,
     get_segment_constraints,
     get_structural_formulas,
     get_translation_progress,
@@ -300,6 +301,33 @@ def _article_view(ltree_path: str, st_locator: str):
         nav=nav_urls,
         formulas=_formulas,
         constraints=constraints,
+    )
+
+
+_VALID_STATUSES = {"translated", "needs_human", "pending"}
+
+
+@app.route("/status/<status>")
+def status_list(status: str):
+    """List questions that have at least one segment with the given translation status."""
+    if status not in _VALID_STATUSES:
+        abort(404)
+    with get_conn() as conn:
+        questions = get_questions_by_status(conn, status)
+
+    for q in questions:
+        q["url_locator"] = _ltree_to_url_locator(q["question_path"])
+
+    grouped: dict[str, list[dict]] = {}
+    for q in questions:
+        pars = q["question_path"].split(".")[0]
+        grouped.setdefault(pars, []).append(q)
+
+    return render_template(
+        "status_list.html",
+        status=status,
+        grouped=grouped,
+        total=len(questions),
     )
 
 

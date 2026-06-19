@@ -14,8 +14,8 @@
       <div class="progress-fill" style="width: {{ pct }}%"></div>
     </div>
     <p class="progress-legend">
-      <span class="badge badge-ok">&#10003; {{ progress.translated }} translated</span>
-      <span class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</span>
+      <a href="/status/translated" class="badge badge-ok">&#10003; {{ progress.translated }} translated</a>
+      <a href="/status/needs_human" class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</a>
       <span class="badge badge-pending">&#8230; {{ progress.pending }} pending</span>
     </p>
   {% else %}

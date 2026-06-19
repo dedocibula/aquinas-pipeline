@@ -49,7 +49,17 @@ FAKE_QUESTIONS = [
 ]
 
 FAKE_ARTICLES = [
-    {"article_path": "I.q3.a1", "translated_count": 5, "total_count": 7},
+    {"article_path": "I.q3.a1", "translated_count": 5, "needs_human_count": 0, "total_count": 7},
+]
+
+FAKE_ARTICLES_WITH_NEEDS_HUMAN = [
+    {"article_path": "I.q3.a1", "translated_count": 2, "needs_human_count": 3, "total_count": 7},
+    {"article_path": "I.q3.a2", "translated_count": 7, "needs_human_count": 0, "total_count": 7},
+]
+
+FAKE_QUESTIONS_BY_STATUS = [
+    {"question_path": "I.q3", "segment_count": 4},
+    {"question_path": "II-I.q1", "segment_count": 2},
 ]
 
 FAKE_SEGMENTS = [
@@ -135,11 +145,12 @@ def client():
     with (
         patch("server.app.get_conn", make_fake_get_conn()),
         patch("server.app.get_structural_formulas", return_value={}),
-        patch("server.app.get_all_questions",       return_value=FAKE_QUESTIONS),
-        patch("server.app.get_question_articles",   return_value=FAKE_ARTICLES),
-        patch("server.app.get_article_segments",    return_value=FAKE_SEGMENTS),
-        patch("server.app.get_prev_next_article",   return_value=FAKE_NAV),
-        patch("server.app.get_translation_progress", return_value=FAKE_PROGRESS),
+        patch("server.app.get_all_questions",         return_value=FAKE_QUESTIONS),
+        patch("server.app.get_question_articles",     return_value=FAKE_ARTICLES),
+        patch("server.app.get_article_segments",      return_value=FAKE_SEGMENTS),
+        patch("server.app.get_prev_next_article",     return_value=FAKE_NAV),
+        patch("server.app.get_translation_progress",  return_value=FAKE_PROGRESS),
+        patch("server.app.get_questions_by_status",   return_value=FAKE_QUESTIONS_BY_STATUS),
     ):
         # Reset formula cache so before_request fires during test.
         import server.app as _app_module
@@ -344,13 +355,14 @@ def editor_client():
     with (
         patch("server.app.get_conn", make_fake_get_conn()),
         patch("server.app.get_structural_formulas", return_value={}),
-        patch("server.app.get_all_questions",       return_value=FAKE_QUESTIONS),
-        patch("server.app.get_question_articles",   return_value=FAKE_ARTICLES),
-        patch("server.app.get_article_segments",    return_value=FAKE_SEGMENTS),
-        patch("server.app.get_prev_next_article",   return_value=FAKE_NAV),
-        patch("server.app.get_translation_progress", return_value=FAKE_PROGRESS),
-        patch("server.app.get_segment_constraints", return_value={}),
-        patch("server.app.get_question_title_segment", return_value=None),
+        patch("server.app.get_all_questions",           return_value=FAKE_QUESTIONS),
+        patch("server.app.get_question_articles",       return_value=FAKE_ARTICLES),
+        patch("server.app.get_article_segments",        return_value=FAKE_SEGMENTS),
+        patch("server.app.get_prev_next_article",       return_value=FAKE_NAV),
+        patch("server.app.get_translation_progress",    return_value=FAKE_PROGRESS),
+        patch("server.app.get_questions_by_status",     return_value=FAKE_QUESTIONS_BY_STATUS),
+        patch("server.app.get_segment_constraints",     return_value={}),
+        patch("server.app.get_question_title_segment",  return_value=None),
         patch("server.app.get_question_preamble_segment", return_value=None),
     ):
         import server.app as _app_module
@@ -605,3 +617,197 @@ def test_approve_button_visible_for_editor(editor_client):
         resp = editor_client.get("/la/sk/~ST.I.Q3.A1")
     html = resp.data.decode()
     assert "btn-approve" in html
+
+
+# ---------------------------------------------------------------------------
+# Index page: progress badges link to status views
+# ---------------------------------------------------------------------------
+
+
+def test_index_translated_badge_is_a_link(client):
+    """The 'translated' badge on the index page links to /status/translated."""
+    resp = client.get("/")
+    html = resp.data.decode()
+    assert 'href="/status/translated"' in html
+
+
+def test_index_needs_human_badge_is_a_link(client):
+    """The 'needs review' badge on the index page links to /status/needs_human."""
+    resp = client.get("/")
+    html = resp.data.decode()
+    assert 'href="/status/needs_human"' in html
+
+
+def test_index_pending_badge_is_not_a_link(client):
+    """The 'pending' badge is a plain span — no link."""
+    resp = client.get("/")
+    html = resp.data.decode()
+    assert 'href="/status/pending"' not in html
+
+
+# ---------------------------------------------------------------------------
+# /status/<status> route
+# ---------------------------------------------------------------------------
+
+
+def test_status_list_translated_returns_200(client):
+    """GET /status/translated returns 200 for a valid status."""
+    resp = client.get("/status/translated")
+    assert resp.status_code == 200
+
+
+def test_status_list_needs_human_returns_200(client):
+    """GET /status/needs_human returns 200 for a valid status."""
+    resp = client.get("/status/needs_human")
+    assert resp.status_code == 200
+
+
+def test_status_list_pending_returns_200(client):
+    """GET /status/pending returns 200 for a valid status."""
+    resp = client.get("/status/pending")
+    assert resp.status_code == 200
+
+
+def test_status_list_invalid_status_returns_404(client):
+    """GET /status/bogus returns 404 for an unrecognised status."""
+    resp = client.get("/status/bogus")
+    assert resp.status_code == 404
+
+
+def test_status_list_groups_questions_by_pars(client):
+    """Status list renders a pars-section heading for each pars in the result."""
+    resp = client.get("/status/needs_human")
+    html = resp.data.decode()
+    # FAKE_QUESTIONS_BY_STATUS has I and II-I pars
+    assert "Pars I" in html
+    assert "Pars II-I" in html
+
+
+def test_status_list_shows_question_links(client):
+    """Status list renders href links to each question's URL locator."""
+    resp = client.get("/status/translated")
+    html = resp.data.decode()
+    # I.q3 → ST.I.Q3
+    assert "/la/sk/~ST.I.Q3" in html
+
+
+def test_status_list_shows_segment_counts(client):
+    """Status list annotates each question with its segment count."""
+    resp = client.get("/status/translated")
+    html = resp.data.decode()
+    # FAKE_QUESTIONS_BY_STATUS has counts 4 and 2
+    assert "4 segment" in html
+    assert "2 segment" in html
+
+
+def test_status_list_page_title_reflects_status(client):
+    """Status list <title> contains the human-readable status label."""
+    resp = client.get("/status/needs_human")
+    html = resp.data.decode()
+    assert "Needs review" in html
+
+
+# ---------------------------------------------------------------------------
+# Question view: Needs Review column
+# ---------------------------------------------------------------------------
+
+
+def test_question_view_has_needs_review_header(client):
+    """Question article summary table has a 'Needs Review' column header."""
+    resp = client.get("/la/sk/~ST.I.Q3")
+    html = resp.data.decode()
+    assert "Needs Review" in html
+
+
+def test_question_view_zero_needs_human_shows_plain_zero(client):
+    """Articles with needs_human_count=0 display a plain '0', not a badge."""
+    resp = client.get("/la/sk/~ST.I.Q3")
+    html = resp.data.decode()
+    # FAKE_ARTICLES has needs_human_count=0; should not render badge-warn for it
+    assert "badge-warn" not in html
+
+
+def test_question_view_nonzero_needs_human_renders_badge(client):
+    """Articles with needs_human_count>0 display a badge-warn with the count."""
+    with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
+        resp = client.get("/la/sk/~ST.I.Q3")
+    html = resp.data.decode()
+    assert 'class="badge badge-warn"' in html
+    assert ">3<" in html
+
+
+def test_question_view_highlights_needs_human_article_row(client):
+    """Article rows with needs_human_count>0 get the row-needs-human CSS class."""
+    with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
+        resp = client.get("/la/sk/~ST.I.Q3")
+    html = resp.data.decode()
+    assert "row-needs-human" in html
+
+
+def test_question_view_clean_article_has_no_highlight(client):
+    """Article rows with needs_human_count=0 do not get the row-needs-human class."""
+    resp = client.get("/la/sk/~ST.I.Q3")
+    html = resp.data.decode()
+    assert "row-needs-human" not in html
+
+
+# ---------------------------------------------------------------------------
+# get_questions_by_status DB function
+# ---------------------------------------------------------------------------
+
+
+def test_get_questions_by_status_queries_correct_status():
+    """get_questions_by_status passes the status value as a bind parameter."""
+    from server.db import get_questions_by_status
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchall.return_value = []
+    get_questions_by_status(conn, "needs_human")
+
+    executed_sql, params = cursor.execute.call_args[0]
+    assert "translation_status" in executed_sql
+    assert params == ("needs_human",)
+
+
+def test_get_questions_by_status_returns_list_of_dicts():
+    """get_questions_by_status converts fetchall rows to plain dicts."""
+    from server.db import get_questions_by_status
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchall.return_value = [
+        {"question_path": "I.q3", "_sort_key": "I.q3", "segment_count": 5},
+        {"question_path": "I.q4", "_sort_key": "I.q4", "segment_count": 1},
+    ]
+    result = get_questions_by_status(conn, "translated")
+
+    assert len(result) == 2
+    assert result[0]["question_path"] == "I.q3"
+    assert result[0]["segment_count"] == 5
+
+
+def test_get_questions_by_status_returns_empty_for_no_matches():
+    """get_questions_by_status returns [] when no segments have that status."""
+    from server.db import get_questions_by_status
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchall.return_value = []
+    result = get_questions_by_status(conn, "pending")
+
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_question_articles: needs_human_count column
+# ---------------------------------------------------------------------------
+
+
+def test_get_question_articles_sql_includes_needs_human_count():
+    """get_question_articles issues SQL that counts needs_human segments."""
+    from server.db import get_question_articles
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchall.return_value = []
+    get_question_articles(conn, "I.q3")
+
+    executed_sql, _ = cursor.execute.call_args[0]
+    assert "needs_human" in executed_sql.lower()

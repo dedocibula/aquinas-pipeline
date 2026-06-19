@@ -171,21 +171,23 @@
     <tr>
       <th>Article</th>
       <th>Translated</th>
+      <th>Needs Review</th>
       <th>Total</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for a in articles %}
-    <tr>
+    <tr{% if a.needs_human_count > 0 %} class="row-needs-human"{% endif %}>
       <td>{{ a.title }}</td>
       <td>{{ a.translated_count }}</td>
+      <td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count }}</span>{% else %}0{% endif %}</td>
       <td>{{ a.total_count }}</td>
       <td><a href="/la/sk/~{{ a.url_locator }}">View &rarr;</a></td>
     </tr>
     {% else %}
     <tr>
-      <td colspan="4">No articles found.</td>
+      <td colspan="5">No articles found.</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -199,7 +201,7 @@
     var sel = document.getElementById('ref-lang-select');
     if (sel) sel.addEventListener('change', function () {
       var lang = this.value;
-      document.querySelectorAll('.row-question_title .ref-text').forEach(function (el) {
+      document.querySelectorAll('.ref-text').forEach(function (el) {
         el.style.display = el.dataset.lang === lang ? '' : 'none';
       });
     });

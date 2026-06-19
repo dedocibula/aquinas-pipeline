@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% set status_labels = {
+  "translated":  "Translated",
+  "needs_human": "Needs review",
+  "pending":     "Pending"
+} %}
+
+{% block title %}{{ status_labels[status] }} — Aquinas Pipeline{% endblock %}
+
+{% block breadcrumb %}
+  &rsaquo; <a href="/status/{{ status }}">{{ status_labels[status] }}</a>
+{% endblock %}
+
+{% block content %}
+<h1>{{ status_labels[status] }}</h1>
+<p class="progress-legend">
+  <span class="badge badge-{{ 'ok' if status == 'translated' else ('warn' if status == 'needs_human' else 'pending') }}">
+    {{ total }} question{% if total != 1 %}s{% endif %} with at least one {{ status_labels[status]|lower }} segment
+  </span>
+</p>
+
+{% for pars, questions in grouped.items() %}
+  <section class="pars-section">
+    <h2>Pars {{ pars }}</h2>
+    <ul class="question-list">
+      {% for q in questions %}
+        <li>
+          <a href="/la/sk/~{{ q['url_locator'] }}">
+            {{ q['url_locator'] }}
+          </a>
+          <span class="seg-count">({{ q['segment_count'] }} segment{% if q['segment_count'] != 1 %}s{% endif %})</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% else %}
+  <p>No questions found with this status.</p>
+{% endfor %}
+{% endblock %}

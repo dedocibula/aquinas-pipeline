@@ -253,6 +253,20 @@ main {
   font-family: sans-serif;
 }
 
+a.badge {
+  text-decoration: none;
+}
+
+a.badge:hover {
+  filter: brightness(0.92);
+}
+
+.seg-count {
+  font-size: 0.8rem;
+  color: #888;
+  margin-left: 0.3em;
+}
+
 .badge-ok {
   background: #d4edda;
   color: #2d6a35;
