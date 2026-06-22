@@ -1,7 +1,7 @@
 """
 Flask preview server — Latin | Slovak parallel text viewer.
 
-URL structure mirrors aquinas.cc: /la/sk/~ST.I.Q3.A1
+URL structure: /~ST.I.Q3.A1
 Read-only for anonymous visitors. Editors authenticate via Google OAuth and
 can approve/edit segments. Editor emails are stored in the `editor` DB table.
 """
@@ -207,7 +207,7 @@ def index():
     )
 
 
-@app.route("/la/sk/~<path:st_locator>")
+@app.route("/~<path:st_locator>")
 def text_view(st_locator: str):
     """Dispatch to question or article view based on path depth."""
     ltree_path = url_to_ltree(st_locator)
@@ -345,6 +345,7 @@ def review_segment_route(segment_id: int):
 
     Body: ``{action, text?, note?, expected_version}``.
     ``action`` must be one of: save, accept, reset, note.
+    For ``action=note``, an empty/absent ``note`` value clears the stored note.
     ``expected_version`` is the optimistic-lock token last read by the client (0 = no review yet).
 
     Returns 200 ``{ok:true, human_version:<new>}`` on success,
@@ -369,9 +370,8 @@ def review_segment_route(segment_id: int):
 
     note: str | None = None
     if action == "note":
-        note = (data.get("note") or "").strip()
-        if not note:
-            return jsonify({"ok": False, "error": "empty note"}), 400
+        raw = (data.get("note") or "").strip()
+        note = raw or None  # None = clear note (writes NULL)
     reviewer_email: str = session["email"]
 
     with get_conn() as conn:

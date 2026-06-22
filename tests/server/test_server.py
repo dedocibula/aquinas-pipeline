@@ -205,27 +205,27 @@ def test_index_returns_200(client):
 
 
 def test_article_view_returns_200(client):
-    """GET /la/sk/~ST.I.Q3.A1 returns 200 when segments are present."""
-    response = client.get("/la/sk/~ST.I.Q3.A1")
+    """GET /~ST.I.Q3.A1 returns 200 when segments are present."""
+    response = client.get("/~ST.I.Q3.A1")
     assert response.status_code == 200
 
 
 def test_question_view_returns_200(client):
-    """GET /la/sk/~ST.I.Q3 returns 200 when articles are present."""
-    response = client.get("/la/sk/~ST.I.Q3")
+    """GET /~ST.I.Q3 returns 200 when articles are present."""
+    response = client.get("/~ST.I.Q3")
     assert response.status_code == 200
 
 
 def test_article_view_404_when_empty(client):
-    """GET /la/sk/~ST.I.Q3.A1 returns 404 when no segments returned."""
+    """GET /~ST.I.Q3.A1 returns 404 when no segments returned."""
     with patch("server.app.get_article_segments", return_value=[]):
-        response = client.get("/la/sk/~ST.I.Q3.A1")
+        response = client.get("/~ST.I.Q3.A1")
     assert response.status_code == 404
 
 
 def test_article_view_has_ref_lang_dropdown(client):
     """Article view includes a <select> with Latin, Czech, English options."""
-    response = client.get("/la/sk/~ST.I.Q3.A1")
+    response = client.get("/~ST.I.Q3.A1")
     html = response.data.decode()
     assert 'id="ref-lang-select"' in html
     assert '<option value="la">Latin</option>' in html
@@ -235,7 +235,7 @@ def test_article_view_has_ref_lang_dropdown(client):
 
 def test_article_view_embeds_all_ref_language_spans(client):
     """Each reference cell has three spans: la (visible), cs and en (hidden)."""
-    response = client.get("/la/sk/~ST.I.Q3.A1")
+    response = client.get("/~ST.I.Q3.A1")
     html = response.data.decode()
     # Latin span visible by default (no inline display:none)
     assert 'class="ref-text" data-lang="la"' in html
@@ -249,7 +249,7 @@ def test_article_view_embeds_all_ref_language_spans(client):
 
 def test_article_view_has_switcher_script(client):
     """Article view includes the JS listener for the language switcher."""
-    response = client.get("/la/sk/~ST.I.Q3.A1")
+    response = client.get("/~ST.I.Q3.A1")
     html = response.data.decode()
     assert "ref-lang-select" in html
     assert "querySelectorAll('.ref-text')" in html
@@ -569,15 +569,19 @@ def test_review_route_empty_text_returns_400(editor_client):
     assert resp.get_json()["ok"] is False
 
 
-def test_review_route_note_without_text_returns_400(editor_client):
-    """POST /api/segment/<id>/review with action=note and no note text returns 400."""
-    resp = editor_client.post(
-        "/api/segment/42/review",
-        json={"action": "note", "expected_version": 0},
-        content_type="application/json",
-    )
-    assert resp.status_code == 400
-    assert resp.get_json()["ok"] is False
+def test_review_route_note_empty_clears_note(editor_client):
+    """POST /api/segment/<id>/review with action=note and empty note clears the note (not 400)."""
+    with patch("server.app.review_segment", return_value=("ok", 2)) as mock_rev:
+        resp = editor_client.post(
+            "/api/segment/42/review",
+            json={"action": "note", "expected_version": 1},
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+    # note kwarg must be None (not empty string) so the DB writes NULL
+    _, kwargs = mock_rev.call_args
+    assert kwargs["note"] is None
 
 
 def test_review_route_invalid_action_returns_400(editor_client):
@@ -763,23 +767,15 @@ def test_logout_link_shown_for_editor(editor_client):
 # ---------------------------------------------------------------------------
 
 
-def test_edit_button_hidden_for_anonymous(client):
-    """Anonymous visitors do not see btn-edit buttons (HTML element) on the article page."""
-    resp = client.get("/la/sk/~ST.I.Q3.A1")
+def test_review_button_hidden_for_anonymous(client):
+    """Anonymous visitors do not see btn-review buttons (HTML element) on the article page."""
+    resp = client.get("/~ST.I.Q3.A1")
     html = resp.data.decode()
-    # JS selectors ('.btn-edit') are always present; check for the HTML button element.
-    assert 'class="btn-edit"' not in html
+    assert 'class="btn-review"' not in html
 
 
-def test_approve_button_hidden_for_anonymous(client):
-    """Anonymous visitors do not see btn-approve buttons (HTML element) on the article page."""
-    resp = client.get("/la/sk/~ST.I.Q3.A1")
-    html = resp.data.decode()
-    assert 'class="btn-approve"' not in html
-
-
-def test_approve_button_visible_for_editor(editor_client):
-    """Editors see the btn-approve button for needs_human segments."""
+def test_review_button_visible_for_editor(editor_client):
+    """Editors see the btn-review button for all segments."""
     needs_human_segments = [
         {
             "segment_id": 10,
@@ -799,9 +795,9 @@ def test_approve_button_visible_for_editor(editor_client):
         }
     ]
     with patch("server.app.get_article_segments", return_value=needs_human_segments):
-        resp = editor_client.get("/la/sk/~ST.I.Q3.A1")
+        resp = editor_client.get("/~ST.I.Q3.A1")
     html = resp.data.decode()
-    assert "btn-approve" in html
+    assert 'class="btn-review' in html
 
 
 # ---------------------------------------------------------------------------
@@ -873,7 +869,7 @@ def test_status_list_shows_question_links(client):
     resp = client.get("/status/translated")
     html = resp.data.decode()
     # I.q3 → ST.I.Q3
-    assert "/la/sk/~ST.I.Q3" in html
+    assert "/~ST.I.Q3" in html
 
 
 def test_status_list_shows_segment_counts(client):
@@ -899,14 +895,14 @@ def test_status_list_page_title_reflects_status(client):
 
 def test_question_view_has_needs_review_header(client):
     """Question article summary table has a 'Needs Review' column header."""
-    resp = client.get("/la/sk/~ST.I.Q3")
+    resp = client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "Needs Review" in html
 
 
 def test_question_view_zero_needs_human_shows_plain_zero(client):
     """Articles with needs_human_count=0 display a plain '0', not a badge."""
-    resp = client.get("/la/sk/~ST.I.Q3")
+    resp = client.get("/~ST.I.Q3")
     html = resp.data.decode()
     # FAKE_ARTICLES has needs_human_count=0; should not render badge-warn for it
     assert "badge-warn" not in html
@@ -915,7 +911,7 @@ def test_question_view_zero_needs_human_shows_plain_zero(client):
 def test_question_view_nonzero_needs_human_renders_badge(client):
     """Articles with needs_human_count>0 display a badge-warn with the count."""
     with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
-        resp = client.get("/la/sk/~ST.I.Q3")
+        resp = client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert 'class="badge badge-warn"' in html
     assert ">3<" in html
@@ -924,14 +920,14 @@ def test_question_view_nonzero_needs_human_renders_badge(client):
 def test_question_view_highlights_needs_human_article_row(client):
     """Article rows with needs_human_count>0 get the row-needs-human CSS class."""
     with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
-        resp = client.get("/la/sk/~ST.I.Q3")
+        resp = client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "row-needs-human" in html
 
 
 def test_question_view_clean_article_has_no_highlight(client):
     """Article rows with needs_human_count=0 do not get the row-needs-human class."""
-    resp = client.get("/la/sk/~ST.I.Q3")
+    resp = client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "row-needs-human" not in html
 

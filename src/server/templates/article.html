@@ -18,14 +18,14 @@
     {% endif %}
   {% endfor %}
   {% set q_url = 'ST.' + q_url_parts | join('.') %}
-  &rsaquo; <a href="/la/sk/~{{ q_url }}">{{ q_url }}</a>
+  &rsaquo; <a href="/~{{ q_url }}">{{ q_url }}</a>
   &rsaquo; <span>{{ article_title }}</span>
 {% endblock %}
 
 {% block content %}
 <div class="article-nav">
   {% if nav.prev %}
-    <a href="/la/sk/~{{ nav.prev }}" class="nav-prev">&larr; {{ nav.prev }}</a>
+    <a href="/~{{ nav.prev }}" class="nav-prev">&larr; {{ nav.prev }}</a>
   {% else %}
     <span class="nav-prev nav-disabled">&larr; (first)</span>
   {% endif %}
@@ -33,7 +33,7 @@
   <h1 class="article-title">{{ article_title }}</h1>
 
   {% if nav.next %}
-    <a href="/la/sk/~{{ nav.next }}" class="nav-next">{{ nav.next }} &rarr;</a>
+    <a href="/~{{ nav.next }}" class="nav-next">{{ nav.next }} &rarr;</a>
   {% else %}
     <span class="nav-next nav-disabled">(last) &rarr;</span>
   {% endif %}
@@ -51,7 +51,7 @@
         </select>
       </th>
       <th class="col-slovak">Slovak</th>
-      <th class="col-status">Status</th>
+      {% if is_editor %}<th class="col-status">Status</th>{% endif %}
     </tr>
   </thead>
   <tbody>
@@ -80,7 +80,7 @@
       {% set ts = seg.translation_status %}
       {% set needs_human = (ts == 'needs_human') %}
 
-      {# Status badge #}
+      {# Machine status badge #}
       {% if ts == 'translated' %}
         {% set badge_class = 'badge-ok' %}
         {% set badge_char  = '&#10003;' %}
@@ -96,13 +96,10 @@
       {% endif %}
 
       {# Parse reviewer_notes safely #}
-      {# reviewer_notes is JSONB — may be a dict, a list, or None #}
       {% set notes = seg.reviewer_notes %}
       {% set iter_count = None %}
       {% set failure_reason = None %}
       {% set approved_with_notes = None %}
-      {# reviewer_notes schema: {"iteration": N, "raw": "..."} for APPROVED_WITH_NOTES;
-         {"iteration": N, "last_feedback": "..."} for needs_human exhausted path #}
       {% if notes is mapping %}
         {% if 'iteration' in notes %}
           {% set iter_count = notes['iteration'] %}
@@ -117,9 +114,10 @@
 
       {# Segment constraints #}
       {% set seg_constraints = constraints.get(seg.segment_id, []) %}
-
-      {# Detail panel ID — unique per segment #}
       {% set panel_id = 'detail-' ~ seg.segment_id %}
+
+      {# Effective display text: human > model > none #}
+      {% set slovak_display = seg.slovak_human or seg.slovak_model %}
 
       <tr class="row-{{ etype }}{% if needs_human %} row-needs-human{% endif %}"
           data-segment-id="{{ seg.segment_id }}">
@@ -132,24 +130,55 @@
           <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
         </td>
         <td class="col-slovak slovak">
-          {% if seg.slovak %}
-            <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
-            <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}"
-                      style="display:none" rows="5">{{ seg.slovak }}</textarea>
-            <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
-              <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
-              <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+          {# Displayed text — hidden while review panel is open #}
+          <div class="slovak-display" id="sdisp-{{ seg.segment_id }}">
+            <span class="slovak-text" id="text-{{ seg.segment_id }}"
+                  {% if not slovak_display %}style="display:none"{% endif %}>{{ slovak_display or '' }}</span>
+            <em class="awaiting" id="awaiting-{{ seg.segment_id }}"
+                {% if slovak_display %}style="display:none"{% endif %}>— awaiting translation —</em>
+            <div class="human-note" id="note-display-{{ seg.segment_id }}"
+                 {% if not seg.human_note %}style="display:none"{% endif %}>{{ seg.human_note or '' }}</div>
+          </div>
+
+          {# Review panel — editor only; button lives in status cell #}
+          {% if is_editor %}
+          <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
+               data-human-version="{{ seg.human_version }}">
+            <div class="review-tabs">
+              <button class="tab-btn tab-active" data-tab="human"
+                      data-segment-id="{{ seg.segment_id }}">Human</button>
+              <button class="tab-btn" data-tab="machine"
+                      data-segment-id="{{ seg.segment_id }}">Machine</button>
             </div>
-          {% else %}
-            <em class="awaiting">— awaiting translation —</em>
+            {# Human pane — shown by default; contains all action buttons #}
+            <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
+              <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
+                        >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
+              <div class="review-actions">
+                <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
+                <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
+                <button class="btn-rev-reset"   data-segment-id="{{ seg.segment_id }}">Reset</button>
+                <button class="btn-rev-addnote" data-segment-id="{{ seg.segment_id }}">Add Note</button>
+              </div>
+              <div class="note-area" id="notearea-{{ seg.segment_id }}" style="display:none">
+                <textarea class="note-textarea" id="ntextarea-{{ seg.segment_id }}"
+                          rows="2" placeholder="Translator note (public)">{{ seg.human_note or '' }}</textarea>
+                <div class="note-actions">
+                  <button class="btn-rev-savenote" data-segment-id="{{ seg.segment_id }}">Save Note</button>
+                  <button class="btn-rev-clearnote" data-segment-id="{{ seg.segment_id }}"
+                          {% if not seg.human_note %}disabled{% endif %}>Clear Note</button>
+                </div>
+              </div>
+            </div>
+            {# Machine pane — read-only, no buttons #}
+            <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
+              <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+            </div>
+          </div>
           {% endif %}
 
-          {# Detail panel — shown for translated and needs_human segments #}
-          {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
-          <button class="btn-edit" data-segment-id="{{ seg.segment_id }}"
-                  title="Edit translation">&#9998; Edit</button>
-          {% endif %}
-          {% if ts in ('translated', 'needs_human') %}
+          {# Detail panel — editor only; locked terms + machine reviewer_notes #}
+          {% if is_editor and ts in ('translated', 'needs_human') %}
             <button class="detail-toggle"
                     data-target="{{ panel_id }}"
                     aria-expanded="{{ 'true' if needs_human else 'false' }}"
@@ -191,30 +220,34 @@
                 {% endif %}
                 {% if iter_count is none and not failure_reason and not approved_with_notes %}
                   {% if needs_human %}
-          <span class="detail-none">No feedback recorded — check pilot log</span>
-        {% else %}
-          <span class="detail-none">no notes</span>
-        {% endif %}
+                    <span class="detail-none">No feedback recorded — check pilot log</span>
+                  {% else %}
+                    <span class="detail-none">no notes</span>
+                  {% endif %}
                 {% endif %}
               </div>
 
             </div>
           {% endif %}
         </td>
+        {% if is_editor %}
         <td class="col-status">
-          <span class="badge {{ badge_class }}"
-                data-badge="{{ seg.segment_id }}"
-                title="{{ badge_title }}">{{ badge_char | safe }}</span>
-          {% if is_editor and needs_human %}
-            <button class="btn-approve"
+          <div class="status-badges">
+            <span class="badge {{ badge_class }}"
+                  data-badge="{{ seg.segment_id }}"
+                  title="{{ badge_title }}">{{ badge_char | safe }}</span>
+            <button class="btn-review{% if seg.human_reviewed_by %} btn-review-done{% endif %}"
                     data-segment-id="{{ seg.segment_id }}"
-                    title="Approve this segment">&#10003; Approve</button>
-          {% endif %}
+                    {% if seg.human_reviewed_by %}title="Reviewed by {{ seg.human_reviewed_by }}"{% endif %}>
+              {% if seg.human_reviewed_by %}&#10003; Reviewed{% else %}&#9998; Review{% endif %}
+            </button>
+          </div>
         </td>
+        {% endif %}
       </tr>
     {% else %}
       <tr>
-        <td colspan="4">No segments found for this article.</td>
+        <td colspan="{% if is_editor %}4{% else %}3{% endif %}">No segments found for this article.</td>
       </tr>
     {% endfor %}
   </tbody>
@@ -258,118 +291,9 @@ document.querySelectorAll('.detail-toggle').forEach(function (btn) {
     btn.innerHTML = '&#9660; details';
   }
 });
-
-// ---------------------------------------------------------------------------
-// Approve button
-// ---------------------------------------------------------------------------
-document.querySelectorAll('.btn-approve').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var segId = btn.dataset.segmentId;
-    btn.disabled = true;
-    btn.textContent = 'Approving…';
-
-    fetch('/api/approve/' + segId, { method: 'POST' })
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
-        if (data.ok) {
-          // Update badge
-          var badge = document.querySelector('[data-badge="' + segId + '"]');
-          if (badge) {
-            badge.className = 'badge badge-ok';
-            badge.innerHTML = '&#10003;';
-            badge.title     = 'translated';
-          }
-          // Remove amber background from the row
-          var row = btn.closest('tr');
-          if (row) {
-            row.classList.remove('row-needs-human');
-          }
-          // Remove the approve button itself
-          btn.remove();
-        } else {
-          btn.disabled    = false;
-          btn.textContent = '✓ Approve';
-          alert('Could not approve segment ' + segId + ' (not in needs_human state).');
-        }
-      })
-      .catch(function (err) {
-        btn.disabled    = false;
-        btn.textContent = '✓ Approve';
-        alert('Approve failed — server error. Check console for details.');
-        console.error('Approve error:', err);
-      });
-  });
-});
-
-// Edit / Save / Cancel
-document.querySelectorAll('.btn-edit').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var segId = btn.dataset.segmentId;
-    document.getElementById('text-' + segId).style.display    = 'none';
-    document.getElementById('edit-' + segId).style.display    = '';
-    document.getElementById('editbtn-' + segId).style.display = '';
-    btn.style.display = 'none';
-  });
-});
-
-document.querySelectorAll('.btn-cancel').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var segId = btn.dataset.segmentId;
-    document.getElementById('text-' + segId).style.display    = '';
-    document.getElementById('edit-' + segId).style.display    = 'none';
-    document.getElementById('editbtn-' + segId).style.display = 'none';
-    var editBtn = document.querySelector('.btn-edit[data-segment-id="' + segId + '"]');
-    if (editBtn) editBtn.style.display = '';
-  });
-});
-
-document.querySelectorAll('.btn-save').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var segId    = btn.dataset.segmentId;
-    var textarea = document.getElementById('edit-' + segId);
-    var text     = textarea.value.trim();
-    if (!text) return;
-    btn.disabled    = true;
-    btn.textContent = 'Saving…';
-    fetch('/api/edit/' + segId, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text: text}),
-    })
-    .then(function (resp) { return resp.json(); })
-    .then(function (data) {
-      if (data.ok) {
-        var textSpan = document.getElementById('text-' + segId);
-        textSpan.textContent = text;
-        textSpan.style.display = '';
-        textarea.style.display = 'none';
-        document.getElementById('editbtn-' + segId).style.display = 'none';
-        var editBtn = document.querySelector('.btn-edit[data-segment-id="' + segId + '"]');
-        if (editBtn) editBtn.style.display = '';
-        // If row was needs_human, flip badge and remove amber
-        var badge = document.querySelector('[data-badge="' + segId + '"]');
-        if (badge && badge.classList.contains('badge-warn')) {
-          badge.className  = 'badge badge-ok';
-          badge.innerHTML  = '&#10003;';
-          badge.title      = 'translated';
-          var row = btn.closest('tr');
-          if (row) row.classList.remove('row-needs-human');
-          var approveBtn = document.querySelector('.btn-approve[data-segment-id="' + segId + '"]');
-          if (approveBtn) approveBtn.remove();
-        }
-      } else {
-        alert('Save failed: ' + (data.error || 'unknown error'));
-      }
-      btn.disabled    = false;
-      btn.textContent = 'Save';
-    })
-    .catch(function (err) {
-      alert('Save failed — server error. Check console for details.');
-      console.error('Edit error:', err);
-      btn.disabled    = false;
-      btn.textContent = 'Save';
-    });
-  });
-});
 </script>
+{% if is_editor %}
+<script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
+<script src="{{ url_for('static', filename='review.js') }}"></script>
+{% endif %}
 {% endblock %}

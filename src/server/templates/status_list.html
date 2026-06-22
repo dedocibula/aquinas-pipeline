@@ -26,7 +26,7 @@
     <ul class="question-list">
       {% for q in questions %}
         <li>
-          <a href="/la/sk/~{{ q['url_locator'] }}">
+          <a href="/~{{ q['url_locator'] }}">
             {{ q['url_locator'] }}
           </a>
           <span class="seg-count">({{ q['segment_count'] }} segment{% if q['segment_count'] != 1 %}s{% endif %})</span>

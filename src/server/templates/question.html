@@ -3,7 +3,7 @@
 {% block title %}{{ question_title }} — Aquinas Pipeline{% endblock %}
 
 {% block breadcrumb %}
-&rsaquo; <a href="/la/sk/~{{ st_locator }}">{{ question_title }}</a>
+&rsaquo; <a href="/~{{ st_locator }}">{{ question_title }}</a>
 {% endblock %}
 
 {% block content %}
@@ -22,18 +22,20 @@
         </select>
       </th>
       <th class="col-slovak">Slovak</th>
-      <th class="col-status">Status</th>
+      {% if is_editor %}<th class="col-status">Status</th>{% endif %}
     </tr>
   </thead>
   <tbody>
+
     {# --- Nadpis row --- #}
     {% if title_seg %}
     {% set seg = title_seg %}
     {% set ts = seg.translation_status %}
     {% set needs_human = (ts == 'needs_human') %}
     {% set panel_id = 'detail-' ~ seg.segment_id %}
+    {% set slovak_display = seg.slovak_human or seg.slovak_model %}
     <tr class="row-question_title{% if needs_human %} row-needs-human{% endif %}"
-      data-segment-id="{{ seg.segment_id }}">
+        data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
       <td class="col-latin">
         <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
@@ -41,25 +43,55 @@
         <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
       </td>
       <td class="col-slovak slovak">
-        {% if seg.slovak %}
-        <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
-        <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}" style="display:none"
-          rows="3">{{ seg.slovak }}</textarea>
-        <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
-          <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
-          <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+        <div class="slovak-display" id="sdisp-{{ seg.segment_id }}">
+          <span class="slovak-text" id="text-{{ seg.segment_id }}"
+                {% if not slovak_display %}style="display:none"{% endif %}>{{ slovak_display or '' }}</span>
+          <em class="awaiting" id="awaiting-{{ seg.segment_id }}"
+              {% if slovak_display %}style="display:none"{% endif %}>— awaiting translation —</em>
+          <div class="human-note" id="note-display-{{ seg.segment_id }}"
+               {% if not seg.human_note %}style="display:none"{% endif %}>{{ seg.human_note or '' }}</div>
         </div>
-        {% else %}
-        <em class="awaiting">— awaiting translation —</em>
+
+        {% if is_editor %}
+        <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
+             data-human-version="{{ seg.human_version }}">
+          <div class="review-tabs">
+            <button class="tab-btn tab-active" data-tab="human"
+                    data-segment-id="{{ seg.segment_id }}">Human</button>
+            <button class="tab-btn" data-tab="machine"
+                    data-segment-id="{{ seg.segment_id }}">Machine</button>
+          </div>
+          <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
+            <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
+                      >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
+            <div class="review-actions">
+              <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
+              <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
+              <button class="btn-rev-reset"   data-segment-id="{{ seg.segment_id }}">Reset</button>
+              <button class="btn-rev-addnote" data-segment-id="{{ seg.segment_id }}">Add Note</button>
+            </div>
+            <div class="note-area" id="notearea-{{ seg.segment_id }}" style="display:none">
+              <textarea class="note-textarea" id="ntextarea-{{ seg.segment_id }}"
+                        rows="2" placeholder="Translator note (public)">{{ seg.human_note or '' }}</textarea>
+              <div class="note-actions">
+                <button class="btn-rev-savenote" data-segment-id="{{ seg.segment_id }}">Save Note</button>
+                <button class="btn-rev-clearnote" data-segment-id="{{ seg.segment_id }}"
+                        {% if not seg.human_note %}disabled{% endif %}>Clear Note</button>
+              </div>
+            </div>
+          </div>
+          <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
+            <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+          </div>
+        </div>
         {% endif %}
-        {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
-        <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
-        {% endif %}
-        {% if ts in ('translated', 'needs_human') %}
+
+        {% if is_editor and ts in ('translated', 'needs_human') %}
         <button class="detail-toggle" data-target="{{ panel_id }}"
-          aria-expanded="{{ 'true' if needs_human else 'false' }}" aria-controls="{{ panel_id }}">&#9654;
-          details</button>
-        <div class="detail-panel" id="{{ panel_id }}" {% if not needs_human %}style="display:none" {% endif %}>
+                aria-expanded="{{ 'true' if needs_human else 'false' }}"
+                aria-controls="{{ panel_id }}">&#9654; details</button>
+        <div class="detail-panel" id="{{ panel_id }}"
+             {% if not needs_human %}style="display:none"{% endif %}>
           <div class="detail-section">
             <span class="detail-label">Locked terms</span>
             {% if title_constraints %}
@@ -79,18 +111,24 @@
         </div>
         {% endif %}
       </td>
+      {% if is_editor %}
       <td class="col-status">
-        {% if ts == 'translated' %}
-        <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
-        {% elif needs_human %}
-        <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
-        {% if is_editor %}
-        <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
-        {% endif %}
-        {% else %}
-        <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
-        {% endif %}
+        <div class="status-badges">
+          {% if ts == 'translated' %}
+          <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
+          {% elif needs_human %}
+          <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+          {% else %}
+          <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
+          {% endif %}
+          <button class="btn-review{% if seg.human_reviewed_by %} btn-review-done{% endif %}"
+                  data-segment-id="{{ seg.segment_id }}"
+                  {% if seg.human_reviewed_by %}title="Reviewed by {{ seg.human_reviewed_by }}"{% endif %}>
+            {% if seg.human_reviewed_by %}&#10003; Reviewed{% else %}&#9998; Review{% endif %}
+          </button>
+        </div>
       </td>
+      {% endif %}
     </tr>
     {% endif %}
 
@@ -100,8 +138,9 @@
     {% set ts = seg.translation_status %}
     {% set needs_human = (ts == 'needs_human') %}
     {% set panel_id = 'detail-' ~ seg.segment_id %}
+    {% set slovak_display = seg.slovak_human or seg.slovak_model %}
     <tr class="row-preamble{% if needs_human %} row-needs-human{% endif %}"
-      data-segment-id="{{ seg.segment_id }}">
+        data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Preambula</td>
       <td class="col-latin">
         <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
@@ -109,25 +148,55 @@
         <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
       </td>
       <td class="col-slovak slovak">
-        {% if seg.slovak %}
-        <span class="slovak-text" id="text-{{ seg.segment_id }}">{{ seg.slovak }}</span>
-        <textarea class="slovak-edit" id="edit-{{ seg.segment_id }}" style="display:none"
-          rows="5">{{ seg.slovak }}</textarea>
-        <div class="edit-actions" id="editbtn-{{ seg.segment_id }}" style="display:none">
-          <button class="btn-save" data-segment-id="{{ seg.segment_id }}">Save</button>
-          <button class="btn-cancel" data-segment-id="{{ seg.segment_id }}">Cancel</button>
+        <div class="slovak-display" id="sdisp-{{ seg.segment_id }}">
+          <span class="slovak-text" id="text-{{ seg.segment_id }}"
+                {% if not slovak_display %}style="display:none"{% endif %}>{{ slovak_display or '' }}</span>
+          <em class="awaiting" id="awaiting-{{ seg.segment_id }}"
+              {% if slovak_display %}style="display:none"{% endif %}>— awaiting translation —</em>
+          <div class="human-note" id="note-display-{{ seg.segment_id }}"
+               {% if not seg.human_note %}style="display:none"{% endif %}>{{ seg.human_note or '' }}</div>
         </div>
-        {% else %}
-        <em class="awaiting">— awaiting translation —</em>
+
+        {% if is_editor %}
+        <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
+             data-human-version="{{ seg.human_version }}">
+          <div class="review-tabs">
+            <button class="tab-btn tab-active" data-tab="human"
+                    data-segment-id="{{ seg.segment_id }}">Human</button>
+            <button class="tab-btn" data-tab="machine"
+                    data-segment-id="{{ seg.segment_id }}">Machine</button>
+          </div>
+          <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
+            <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
+                      >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
+            <div class="review-actions">
+              <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
+              <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
+              <button class="btn-rev-reset"   data-segment-id="{{ seg.segment_id }}">Reset</button>
+              <button class="btn-rev-addnote" data-segment-id="{{ seg.segment_id }}">Add Note</button>
+            </div>
+            <div class="note-area" id="notearea-{{ seg.segment_id }}" style="display:none">
+              <textarea class="note-textarea" id="ntextarea-{{ seg.segment_id }}"
+                        rows="2" placeholder="Translator note (public)">{{ seg.human_note or '' }}</textarea>
+              <div class="note-actions">
+                <button class="btn-rev-savenote" data-segment-id="{{ seg.segment_id }}">Save Note</button>
+                <button class="btn-rev-clearnote" data-segment-id="{{ seg.segment_id }}"
+                        {% if not seg.human_note %}disabled{% endif %}>Clear Note</button>
+              </div>
+            </div>
+          </div>
+          <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
+            <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+          </div>
+        </div>
         {% endif %}
-        {% if is_editor and seg.slovak and ts in ('translated', 'needs_human') %}
-        <button class="btn-edit" data-segment-id="{{ seg.segment_id }}" title="Edit translation">&#9998; Edit</button>
-        {% endif %}
-        {% if ts in ('translated', 'needs_human') %}
+
+        {% if is_editor and ts in ('translated', 'needs_human') %}
         <button class="detail-toggle" data-target="{{ panel_id }}"
-          aria-expanded="{{ 'true' if needs_human else 'false' }}" aria-controls="{{ panel_id }}">&#9654;
-          details</button>
-        <div class="detail-panel" id="{{ panel_id }}" {% if not needs_human %}style="display:none" {% endif %}>
+                aria-expanded="{{ 'true' if needs_human else 'false' }}"
+                aria-controls="{{ panel_id }}">&#9654; details</button>
+        <div class="detail-panel" id="{{ panel_id }}"
+             {% if not needs_human %}style="display:none"{% endif %}>
           <div class="detail-section">
             <span class="detail-label">Locked terms</span>
             {% if preamble_constraints %}
@@ -147,18 +216,24 @@
         </div>
         {% endif %}
       </td>
+      {% if is_editor %}
       <td class="col-status">
-        {% if ts == 'translated' %}
-        <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
-        {% elif needs_human %}
-        <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
-        {% if is_editor %}
-        <button class="btn-approve" data-segment-id="{{ seg.segment_id }}" title="Approve">&#10003; Approve</button>
-        {% endif %}
-        {% else %}
-        <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
-        {% endif %}
+        <div class="status-badges">
+          {% if ts == 'translated' %}
+          <span class="badge badge-ok" data-badge="{{ seg.segment_id }}" title="translated">&#10003;</span>
+          {% elif needs_human %}
+          <span class="badge badge-warn" data-badge="{{ seg.segment_id }}" title="needs review">&#9888;</span>
+          {% else %}
+          <span class="badge badge-pending" data-badge="{{ seg.segment_id }}" title="pending">&#8230;</span>
+          {% endif %}
+          <button class="btn-review{% if seg.human_reviewed_by %} btn-review-done{% endif %}"
+                  data-segment-id="{{ seg.segment_id }}"
+                  {% if seg.human_reviewed_by %}title="Reviewed by {{ seg.human_reviewed_by }}"{% endif %}>
+            {% if seg.human_reviewed_by %}&#10003; Reviewed{% else %}&#9998; Review{% endif %}
+          </button>
+        </div>
       </td>
+      {% endif %}
     </tr>
     {% endif %}
   </tbody>
@@ -183,7 +258,7 @@
       <td>{{ a.translated_count }}</td>
       <td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count }}</span>{% else %}0{% endif %}</td>
       <td>{{ a.total_count }}</td>
-      <td><a href="/la/sk/~{{ a.url_locator }}">View &rarr;</a></td>
+      <td><a href="/~{{ a.url_locator }}">View &rarr;</a></td>
     </tr>
     {% else %}
     <tr>
@@ -198,6 +273,7 @@
 {% if title_seg or preamble_seg %}
 <script>
   (function () {
+    // Language switcher
     var sel = document.getElementById('ref-lang-select');
     if (sel) sel.addEventListener('change', function () {
       var lang = this.value;
@@ -206,6 +282,7 @@
       });
     });
 
+    // Detail panel toggles
     document.querySelectorAll('.detail-toggle').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var panel = document.getElementById(btn.dataset.target);
@@ -217,76 +294,11 @@
       });
     });
 
-    document.querySelectorAll('.btn-edit').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = btn.dataset.segmentId;
-        document.getElementById('text-' + id).style.display = 'none';
-        document.getElementById('edit-' + id).style.display = '';
-        document.getElementById('editbtn-' + id).style.display = '';
-        btn.style.display = 'none';
-      });
-    });
-
-    document.querySelectorAll('.btn-cancel').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = btn.dataset.segmentId;
-        document.getElementById('text-' + id).style.display = '';
-        document.getElementById('edit-' + id).style.display = 'none';
-        document.getElementById('editbtn-' + id).style.display = 'none';
-        var eb = document.querySelector('.btn-edit[data-segment-id="' + id + '"]');
-        if (eb) eb.style.display = '';
-      });
-    });
-
-    document.querySelectorAll('.btn-save').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = btn.dataset.segmentId;
-        var text = document.getElementById('edit-' + id).value.trim();
-        if (!text) return;
-        btn.disabled = true; btn.textContent = 'Saving…';
-        fetch('/api/edit/' + id, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: text })
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data.ok) {
-              document.getElementById('text-' + id).textContent = text;
-              document.getElementById('text-' + id).style.display = '';
-              document.getElementById('edit-' + id).style.display = 'none';
-              document.getElementById('editbtn-' + id).style.display = 'none';
-              var eb = document.querySelector('.btn-edit[data-segment-id="' + id + '"]');
-              if (eb) eb.style.display = '';
-              var badge = document.querySelector('[data-badge="' + id + '"]');
-              if (badge && badge.classList.contains('badge-warn')) {
-                badge.className = 'badge badge-ok'; badge.innerHTML = '&#10003;'; badge.title = 'translated';
-                var row = btn.closest('tr'); if (row) row.classList.remove('row-needs-human');
-                var ab = document.querySelector('.btn-approve[data-segment-id="' + id + '"]');
-                if (ab) ab.remove();
-              }
-            } else { alert('Save failed: ' + (data.error || 'unknown')); }
-            btn.disabled = false; btn.textContent = 'Save';
-          });
-      });
-    });
-
-    document.querySelectorAll('.btn-approve').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = btn.dataset.segmentId;
-        btn.disabled = true; btn.textContent = 'Approving…';
-        fetch('/api/approve/' + id, { method: 'POST' })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data.ok) {
-              var badge = document.querySelector('[data-badge="' + id + '"]');
-              if (badge) { badge.className = 'badge badge-ok'; badge.innerHTML = '&#10003;'; badge.title = 'translated'; }
-              var row = btn.closest('tr'); if (row) row.classList.remove('row-needs-human');
-              btn.remove();
-            } else { btn.disabled = false; btn.textContent = '✓ Approve'; }
-          });
-      });
-    });
   }());
 </script>
+{% if is_editor %}
+<script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
+<script src="{{ url_for('static', filename='review.js') }}"></script>
+{% endif %}
 {% endif %}
 {% endblock %}

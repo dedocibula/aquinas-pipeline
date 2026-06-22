@@ -355,7 +355,10 @@ def review_segment(
             )
             if cur.rowcount == 0:
                 cur.execute("SELECT 1 FROM segment_review WHERE segment_id = %s", (segment_id,))
-                if cur.fetchone() is not None:
+                row_exists = cur.fetchone() is not None
+                # Conflict if wrong version (row still there) OR row was already deleted
+                # by another editor (expected_version > 0 but row is gone).
+                if row_exists or expected_version != 0:
                     return ("conflict", None)
             human_src_id = source_id(conn, "human")
             cur.execute(

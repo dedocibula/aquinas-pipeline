@@ -29,7 +29,7 @@
     <ul class="question-list">
       {% for q in questions %}
         <li>
-          <a href="/la/sk/~{{ ltree_to_url(q['question_path']) }}">
+          <a href="/~{{ ltree_to_url(q['question_path']) }}">
             {{ ltree_to_url(q['question_path']) }}
           </a>
         </li>

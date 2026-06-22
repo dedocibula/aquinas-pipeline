@@ -3,7 +3,9 @@
    ----------------------------------------------------------------------- */
 
 /* --- Reset & base --- */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -190,10 +192,23 @@ main {
 }
 
 /* Column widths */
-.col-label  { width: 13%; }
-.col-latin  { width: 40%; }
-.col-slovak { width: 40%; }
-.col-status { width: 7%;  text-align: center; }
+.col-label {
+  width: 10%;
+  font-size: small;
+}
+
+.col-latin {
+  width: 40%;
+}
+
+.col-slovak {
+  width: 40%;
+}
+
+.col-status {
+  width: 10%;
+  text-align: center;
+}
 
 /* --- Element-type colour coding --- */
 .row-arg td {
@@ -473,4 +488,284 @@ a.badge:hover {
 
 .btn-cancel:hover {
   background: #e8e8e8;
+}
+
+/* ── Review panel ─────────────────────────────────────────────────────────── */
+
+/* Status cell: machine badge stacked above review button */
+.status-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-review {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: 2px 4px;
+  font-size: 0.72rem;
+  font-family: sans-serif;
+  border: 1px solid #8a6040;
+  border-radius: 3px;
+  background: #f5ede0;
+  color: #5a3e1b;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.btn-review:hover {
+  background: #e8d8c0;
+}
+
+.btn-review.btn-review-done {
+  background: #eaf5ea;
+  color: #3a6e3a;
+  border-color: #5a8e5a;
+}
+
+.btn-review.btn-review-done:hover {
+  background: #d0ebd0;
+}
+
+.review-panel {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: #fdf8f2;
+  border: 1px solid #c8b090;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  font-family: sans-serif;
+}
+
+.review-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.tab-btn {
+  padding: 0.2em 0.8em;
+  font-size: 0.8rem;
+  font-family: sans-serif;
+  background: #f0ebe0;
+  border: 1px solid #c8bfa8;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  cursor: pointer;
+  color: #666;
+}
+
+.tab-btn.tab-active {
+  background: #fff;
+  color: #2c1a0e;
+  font-weight: bold;
+  border-color: #c8b090;
+}
+
+.tab-pane {
+  padding: 0.4rem 0;
+}
+
+.machine-text-ro {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  color: #555;
+  padding: 0.4rem 0.5rem;
+  background: #f8f8f6;
+  border: 1px solid #e0d8cc;
+  border-radius: 3px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.human-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #8a6040;
+  border-radius: 3px;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.6;
+  min-height: 3em;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 0.5rem;
+}
+
+.btn-rev-save {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #2e7d32;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  cursor: pointer;
+}
+
+.btn-rev-save:hover:not(:disabled) {
+  background: #c8e6c9;
+}
+
+.btn-rev-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-rev-cancel {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #f5f5f5;
+  color: #555;
+  cursor: pointer;
+}
+
+.btn-rev-cancel:hover {
+  background: #e8e8e8;
+}
+
+.btn-rev-reset {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #c62828;
+  border-radius: 3px;
+  background: #ffebee;
+  color: #c62828;
+  cursor: pointer;
+}
+
+.btn-rev-reset:hover:not(:disabled) {
+  background: #ffcdd2;
+}
+
+.btn-rev-reset:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-rev-accept {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #5a8e5a;
+  border-radius: 3px;
+  background: #eaf5ea;
+  color: #3a6e3a;
+  cursor: pointer;
+}
+
+.btn-rev-accept:hover:not(:disabled) {
+  background: #d0ebd0;
+}
+
+.btn-rev-accept:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-rev-addnote {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #6b8ec4;
+  border-radius: 3px;
+  background: #e8f0fb;
+  color: #3a5e9e;
+  cursor: pointer;
+}
+
+.btn-rev-addnote:hover {
+  background: #d0e4f8;
+}
+
+.note-area {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.9rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #6b8ec4;
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.btn-rev-savenote {
+  align-self: flex-start;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #6b8ec4;
+  border-radius: 3px;
+  background: #e8f0fb;
+  color: #3a5e9e;
+  cursor: pointer;
+}
+
+.btn-rev-savenote:hover:not(:disabled) {
+  background: #d0e4f8;
+}
+
+.btn-rev-savenote:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.note-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-rev-clearnote {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #c08080;
+  border-radius: 3px;
+  background: #fbeaea;
+  color: #8e3a3a;
+  cursor: pointer;
+}
+
+.btn-rev-clearnote:hover:not(:disabled) {
+  background: #f4d0d0;
+}
+
+.btn-rev-clearnote:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.human-note {
+  margin-top: 0.3rem;
+  font-size: 0.88rem;
+  color: #5a4a2e;
+  font-style: italic;
+  border-left: 2px solid #c8b090;
+  padding-left: 0.5rem;
 }
