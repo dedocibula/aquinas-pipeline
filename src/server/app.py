@@ -19,7 +19,6 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, ses
 load_dotenv()
 
 from server.db import (  # noqa: E402
-    approve_segment,
     get_all_questions,
     get_article_segments,
     get_prev_next_article,
@@ -30,7 +29,7 @@ from server.db import (  # noqa: E402
     get_segment_constraints,
     get_structural_formulas,
     get_translation_progress,
-    save_segment_text,
+    review_segment,
 )
 from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
@@ -339,36 +338,56 @@ def status():
     return jsonify(progress)
 
 
-@app.route("/api/approve/<int:segment_id>", methods=["POST"])
+@app.route("/api/segment/<int:segment_id>/review", methods=["POST"])
 @requires_editor
-def approve(segment_id: int):
-    """Flip a segment from needs_human → translated.
+def review_segment_route(segment_id: int):
+    """Create or update a human review for a segment.
 
-    Returns {"ok": true} if the status was changed, {"ok": false} if the
-    segment was not in needs_human state (idempotent; never 4xx for that case).
-    """
-    with get_conn() as conn:
-        changed = approve_segment(conn, segment_id)
-    return jsonify({"ok": changed})
+    Body: ``{action, text?, note?, expected_version}``.
+    ``action`` must be one of: save, accept, reset, note.
+    ``expected_version`` is the optimistic-lock token last read by the client (0 = no review yet).
 
-
-@app.route("/api/edit/<int:segment_id>", methods=["POST"])
-@requires_editor
-def edit_segment(segment_id: int):
-    """Save a human-edited Slovak translation.
-
-    Body: {"text": "..."}. Returns {"ok": true} on success, 400 on empty text.
-    Always sets translation_status=translated.
+    Returns 200 ``{ok:true, human_version:<new>}`` on success,
+    400 on bad input, 404 on unknown segment, 409 ``{ok:false, error:"conflict"}``
+    on concurrent edit.
     """
     data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"ok": False, "error": "empty text"}), 400
+    action = data.get("action", "")
+    if action not in {"save", "accept", "reset", "note"}:
+        return jsonify({"ok": False, "error": "invalid action"}), 400
+
+    try:
+        expected_version = int(data.get("expected_version", 0))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid expected_version"}), 400
+
+    text: str | None = None
+    if action == "save":
+        text = (data.get("text") or "").strip()
+        if not text:
+            return jsonify({"ok": False, "error": "empty text"}), 400
+
+    note: str | None = None
+    if action == "note":
+        note = (data.get("note") or "").strip()
+        if not note:
+            return jsonify({"ok": False, "error": "empty note"}), 400
+    reviewer_email: str = session["email"]
+
     with get_conn() as conn:
-        updated = save_segment_text(conn, segment_id, text)
-    if not updated:
-        return jsonify({"ok": False, "error": "segment not found or not editable"}), 404
-    return jsonify({"ok": True})
+        result, new_version = review_segment(
+            conn, segment_id, action,
+            expected_version=expected_version,
+            reviewer_email=reviewer_email,
+            text=text,
+            note=note,
+        )
+
+    if result == "ok":
+        return jsonify({"ok": True, "human_version": new_version})
+    if result == "notfound":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": False, "error": "conflict"}), 409
 
 
 # ---------------------------------------------------------------------------

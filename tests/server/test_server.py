@@ -1,9 +1,11 @@
 """
-DB-free unit tests for src/server/app.py.
+DB-free unit tests for src/server/app.py and src/server/db.py.
 
 Tests cover:
-  1–3. url_to_ltree conversion
-  4–8. Route responses (monkeypatched DB helpers)
+  1–3.  url_to_ltree conversion
+  4–8.  Route responses (monkeypatched DB helpers)
+  9–15. review_segment DB unit tests
+  16–22. /api/segment/<id>/review route tests
 """
 
 from __future__ import annotations
@@ -49,17 +51,35 @@ FAKE_QUESTIONS = [
 ]
 
 FAKE_ARTICLES = [
-    {"article_path": "I.q3.a1", "translated_count": 5, "needs_human_count": 0, "total_count": 7},
+    {
+        "article_path": "I.q3.a1",
+        "translated_count": 5,
+        "needs_human_count": 0,
+        "reviewed_count": 0,
+        "total_count": 7,
+    },
 ]
 
 FAKE_ARTICLES_WITH_NEEDS_HUMAN = [
-    {"article_path": "I.q3.a1", "translated_count": 2, "needs_human_count": 3, "total_count": 7},
-    {"article_path": "I.q3.a2", "translated_count": 7, "needs_human_count": 0, "total_count": 7},
+    {
+        "article_path": "I.q3.a1",
+        "translated_count": 2,
+        "needs_human_count": 3,
+        "reviewed_count": 1,
+        "total_count": 7,
+    },
+    {
+        "article_path": "I.q3.a2",
+        "translated_count": 7,
+        "needs_human_count": 0,
+        "reviewed_count": 0,
+        "total_count": 7,
+    },
 ]
 
 FAKE_QUESTIONS_BY_STATUS = [
-    {"question_path": "I.q3", "segment_count": 4},
-    {"question_path": "II-I.q1", "segment_count": 2},
+    {"question_path": "I.q3", "segment_count": 4, "reviewed_count": 0},
+    {"question_path": "II-I.q1", "segment_count": 2, "reviewed_count": 0},
 ]
 
 FAKE_SEGMENTS = [
@@ -73,7 +93,11 @@ FAKE_SEGMENTS = [
         "latin": "Videtur quod non.",
         "czech": "Zdá se, že ne.",
         "english": "It seems that not.",
-        "slovak": None,
+        "slovak_model": None,
+        "slovak_human": None,
+        "human_note": None,
+        "human_reviewed_by": None,
+        "human_version": 0,
     },
     {
         "segment_id": 2,
@@ -85,7 +109,11 @@ FAKE_SEGMENTS = [
         "latin": "Sed contra est quod.",
         "czech": "Avšak proti tomu.",
         "english": "On the contrary.",
-        "slovak": "Na druhej strane:",
+        "slovak_model": "Na druhej strane:",
+        "slovak_human": None,
+        "human_note": None,
+        "human_reviewed_by": None,
+        "human_version": 0,
     },
     {
         "segment_id": 3,
@@ -97,7 +125,11 @@ FAKE_SEGMENTS = [
         "latin": "Respondeo dicendum.",
         "czech": "Odpovídám.",
         "english": "I answer that.",
-        "slovak": "Odpoveď:",
+        "slovak_model": "Odpoveď:",
+        "slovak_human": None,
+        "human_note": None,
+        "human_reviewed_by": None,
+        "human_version": 0,
     },
     {
         "segment_id": 4,
@@ -109,11 +141,15 @@ FAKE_SEGMENTS = [
         "latin": "Ad primum dicendum.",
         "czech": "K první námitce.",
         "english": "Reply to objection 1.",
-        "slovak": "K námietke 1.",
+        "slovak_model": "K námietke 1.",
+        "slovak_human": None,
+        "human_note": None,
+        "human_reviewed_by": None,
+        "human_version": 0,
     },
 ]
 
-FAKE_PROGRESS = {"pending": 10, "translated": 5, "needs_human": 2}
+FAKE_PROGRESS = {"pending": 10, "translated": 5, "needs_human": 2, "reviewed": 1}
 FAKE_NAV = {"prev": "I.q3.a0", "next": "I.q3.a2"}
 
 
@@ -230,7 +266,7 @@ def test_status_endpoint_returns_progress_keys(client):
 
 
 # ---------------------------------------------------------------------------
-# server.db unit tests: save_segment_text and approve_segment
+# Helper: mock connection builder for DB-level unit tests
 # ---------------------------------------------------------------------------
 
 
@@ -249,99 +285,176 @@ def _make_db_conn(fetchone_side_effect=None, rowcount=1):
     return conn, cursor
 
 
-def test_save_segment_text_upserts_and_updates_status():
-    """save_segment_text inserts into segment_text and updates translation_status."""
-    from server.db import save_segment_text
+# ---------------------------------------------------------------------------
+# review_segment DB unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_review_segment_save_on_pending_writes_text_and_review():
+    """save action creates segment_review and segment_text, leaves translation_status alone."""
+    from server.db import review_segment
 
     conn, cursor = _make_db_conn()
-    # First fetchone: segment existence check returns a row (segment exists, not pending)
-    cursor.fetchone.side_effect = [(1,), None]
-    with patch("server.db.source_id", return_value=42):
-        result = save_segment_text(conn, segment_id=7, text="Preložený text.")
+    # fetchone calls: existence check → found; upsert RETURNING → version 1
+    cursor.fetchone.side_effect = [(1,), (1,)]
 
-    assert result is True
-    calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
-    assert any("INSERT INTO segment_text" in c for c in calls)
-    assert any("UPDATE segment SET translation_status" in c for c in calls)
-    # Does NOT call conn.commit() — caller's context manager handles it
+    with patch("server.db.source_id", return_value=42):
+        result, new_version = review_segment(
+            conn, segment_id=1, action="save",
+            expected_version=0,
+            reviewer_email="ed@example.com",
+            text="Preložený text.",
+        )
+
+    assert result == "ok"
+    assert new_version == 1
+
+    sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
+    assert not any("translation_status" in c for c in sql_calls), \
+        "save must not touch translation_status"
+    assert any("INSERT INTO segment_review" in c for c in sql_calls)
+    assert any("INSERT INTO segment_text" in c for c in sql_calls)
     conn.commit.assert_not_called()
 
 
-def test_save_segment_text_returns_false_for_nonexistent_or_pending_segment():
-    """save_segment_text returns False when segment is missing or pending."""
-    from server.db import save_segment_text
+def test_review_segment_accept_creates_review_row_no_text():
+    """accept action creates segment_review without writing segment_text."""
+    from server.db import review_segment
 
     conn, cursor = _make_db_conn()
-    # Existence check returns None → segment not found or pending
-    cursor.fetchone.return_value = None
-    result = save_segment_text(conn, segment_id=999, text="text")
-    assert result is False
+    cursor.fetchone.side_effect = [(1,), (1,)]  # existence + RETURNING
+
+    result, new_version = review_segment(
+        conn, segment_id=2, action="accept",
+        expected_version=0,
+        reviewer_email="ed@example.com",
+    )
+
+    assert result == "ok"
+    assert new_version == 1
+
+    sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
+    assert any("INSERT INTO segment_review" in c for c in sql_calls)
+    assert not any("INSERT INTO segment_text" in c for c in sql_calls)
 
 
-def test_save_segment_text_raises_when_human_source_missing():
-    """save_segment_text raises RuntimeError when 'human' source is absent."""
-    from server.db import save_segment_text
+def test_review_segment_note_roundtrips():
+    """note action upserts segment_review with human_note, does not write segment_text."""
+    from server.db import review_segment
 
     conn, cursor = _make_db_conn()
-    cursor.fetchone.return_value = (1,)  # segment exists
-    with patch("server.db.source_id", side_effect=RuntimeError("Source 'human' not found")):
-        with pytest.raises(RuntimeError, match="Source 'human' not found"):
-            save_segment_text(conn, segment_id=7, text="text")
+    cursor.fetchone.side_effect = [(1,), (2,)]  # existence + RETURNING (version bump)
+
+    result, new_version = review_segment(
+        conn, segment_id=3, action="note",
+        expected_version=1,
+        reviewer_email="ed@example.com",
+        note="Terminological note here.",
+    )
+
+    assert result == "ok"
+    assert new_version == 2
+
+    sql_calls = [c[0][0] for c in cursor.execute.call_args_list]
+    assert any("human_note" in c for c in sql_calls)
+    assert not any("segment_text" in c for c in sql_calls)
 
 
-def test_approve_segment_returns_true_when_updated():
-    """approve_segment returns True when rowcount > 0."""
-    from server.db import approve_segment
+def test_review_segment_reset_deletes_both():
+    """reset action deletes segment_review and segment_text rows."""
+    from server.db import review_segment
 
     conn, cursor = _make_db_conn(rowcount=1)
-    result = approve_segment(conn, segment_id=5)
+    cursor.fetchone.side_effect = [(1,)]  # segment existence check
 
-    assert result is True
-    conn.commit.assert_not_called()  # commit handled by get_conn() context manager
-
-
-def test_approve_segment_returns_false_when_not_needs_human():
-    """approve_segment returns False when segment is not in needs_human state."""
-    from server.db import approve_segment
-
-    conn, cursor = _make_db_conn(rowcount=0)
-    result = approve_segment(conn, segment_id=5)
-
-    assert result is False
-
-
-# ---------------------------------------------------------------------------
-# /api/edit endpoint
-# ---------------------------------------------------------------------------
-
-
-def test_edit_segment_returns_ok(editor_client):
-    """POST /api/edit/<id> with valid text returns {"ok": true} for editors."""
-    with patch("server.app.save_segment_text", return_value=True) as mock_save:
-        resp = editor_client.post(
-            "/api/edit/42",
-            json={"text": "Opravený text."},
-            content_type="application/json",
+    with patch("server.db.source_id", return_value=42):
+        result, new_version = review_segment(
+            conn, segment_id=4, action="reset",
+            expected_version=1,
+            reviewer_email="ed@example.com",
         )
-    assert resp.status_code == 200
-    assert resp.get_json() == {"ok": True}
-    mock_save.assert_called_once()
-    _, seg_id, text = mock_save.call_args[0]
-    assert seg_id == 42
-    assert text == "Opravený text."
+
+    assert result == "ok"
+    assert new_version == 0
+
+    sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
+    assert any("DELETE FROM segment_review" in c for c in sql_calls)
+    assert any("DELETE FROM segment_text" in c for c in sql_calls)
 
 
-def test_edit_segment_rejects_empty_text(editor_client):
-    """POST /api/edit/<id> with empty text returns 400."""
-    resp = editor_client.post("/api/edit/42", json={"text": "   "}, content_type="application/json")
-    assert resp.status_code == 400
-    assert resp.get_json()["ok"] is False
+def test_review_segment_stale_version_returns_conflict():
+    """Stale expected_version on save returns conflict without writing anything."""
+    from server.db import review_segment
+
+    conn, cursor = _make_db_conn()
+    # existence check → found; upsert RETURNING → None (version guard rejected)
+    cursor.fetchone.side_effect = [(1,), None]
+
+    result, new_version = review_segment(
+        conn, segment_id=5, action="save",
+        expected_version=0,    # stale — real version is 1
+        reviewer_email="ed@example.com",
+        text="Some text",
+    )
+
+    assert result == "conflict"
+    assert new_version is None
 
 
-def test_edit_segment_rejects_missing_body(editor_client):
-    """POST /api/edit/<id> with no body returns 400."""
-    resp = editor_client.post("/api/edit/42", content_type="application/json")
-    assert resp.status_code == 400
+def test_review_segment_unknown_segment_returns_notfound():
+    """Unknown segment_id returns notfound immediately."""
+    from server.db import review_segment
+
+    conn, cursor = _make_db_conn()
+    cursor.fetchone.return_value = None  # segment does not exist
+
+    result, new_version = review_segment(
+        conn, segment_id=9999, action="save",
+        expected_version=0,
+        reviewer_email="ed@example.com",
+        text="text",
+    )
+
+    assert result == "notfound"
+    assert new_version is None
+
+
+def test_review_segment_reset_ok_when_no_review_row():
+    """reset with expected_version=0 and no review row returns ok (already clean state)."""
+    from server.db import review_segment
+
+    conn, cursor = _make_db_conn()
+    # DELETE matches 0 rows; SELECT finds nothing → not a conflict, just already reset
+    cursor.rowcount = 0
+    cursor.fetchone.side_effect = [(1,), None]  # segment exists; no review row
+
+    with patch("server.db.source_id", return_value=42):
+        result, new_version = review_segment(
+            conn, segment_id=7, action="reset",
+            expected_version=0,
+            reviewer_email="ed@example.com",
+        )
+
+    assert result == "ok"
+    assert new_version == 0
+
+
+def test_review_segment_reset_conflict_when_row_exists_with_different_version():
+    """reset with wrong expected_version returns conflict when the row still exists."""
+    from server.db import review_segment
+
+    conn, cursor = _make_db_conn()
+    # DELETE matched 0 rows (wrong version), then SELECT finds the row still there
+    cursor.rowcount = 0
+    cursor.fetchone.side_effect = [(1,), (1,)]  # segment exists; review row still exists
+
+    result, _ = review_segment(
+        conn, segment_id=6, action="reset",
+        expected_version=0,   # wrong; actual is 2
+        reviewer_email="ed@example.com",
+    )
+
+    assert result == "conflict"
 
 
 # ---------------------------------------------------------------------------
@@ -379,58 +492,130 @@ def editor_client():
 
 
 # ---------------------------------------------------------------------------
-# @requires_editor decorator
+# /api/segment/<id>/review route tests
 # ---------------------------------------------------------------------------
 
 
-def test_approve_returns_403_without_session(client):
-    """POST /api/approve/<id> returns 403 when no editor session is set."""
-    resp = client.post("/api/approve/1")
-    assert resp.status_code == 403
-    assert resp.get_json() == {"ok": False, "error": "forbidden"}
-
-
-def test_edit_returns_403_without_session(client):
-    """POST /api/edit/<id> returns 403 when no editor session is set."""
-    resp = client.post("/api/edit/1", json={"text": "text"})
-    assert resp.status_code == 403
-    assert resp.get_json() == {"ok": False, "error": "forbidden"}
-
-
-def test_approve_returns_403_for_non_editor(client):
-    """POST /api/approve/<id> returns 403 when session has is_editor=False."""
-    with client.session_transaction() as sess:
-        sess["email"] = "visitor@example.com"
-        sess["is_editor"] = False
-    resp = client.post("/api/approve/1")
-    assert resp.status_code == 403
-
-
-def test_approve_allowed_for_editor(editor_client):
-    """POST /api/approve/<id> reaches the handler for editor sessions."""
-    with patch("server.app.approve_segment", return_value=True):
-        resp = editor_client.post("/api/approve/1")
-    assert resp.status_code == 200
-    assert resp.get_json()["ok"] is True
-
-
-def test_edit_allowed_for_editor(editor_client):
-    """POST /api/edit/<id> reaches the handler for editor sessions."""
-    with patch("server.app.save_segment_text", return_value=True):
+def test_review_route_save_returns_ok_with_version(editor_client):
+    """POST /api/segment/<id>/review with action=save returns 200 with human_version."""
+    with patch("server.app.review_segment", return_value=("ok", 1)) as mock_rv:
         resp = editor_client.post(
-            "/api/edit/1",
-            json={"text": "Opravený text."},
+            "/api/segment/42/review",
+            json={"action": "save", "text": "Preložený text.", "expected_version": 0},
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["human_version"] == 1
+    mock_rv.assert_called_once()
+
+
+def test_review_route_accept_returns_ok(editor_client):
+    """POST /api/segment/<id>/review with action=accept returns 200."""
+    with patch("server.app.review_segment", return_value=("ok", 1)):
+        resp = editor_client.post(
+            "/api/segment/42/review",
+            json={"action": "accept", "expected_version": 0},
             content_type="application/json",
         )
     assert resp.status_code == 200
     assert resp.get_json()["ok"] is True
 
 
-def test_edit_still_rejects_empty_text_for_editor(editor_client):
-    """POST /api/edit/<id> with empty text returns 400 even for editors."""
-    resp = editor_client.post("/api/edit/1", json={"text": "   "})
+def test_review_route_reset_returns_version_zero(editor_client):
+    """POST /api/segment/<id>/review with action=reset returns human_version=0."""
+    with patch("server.app.review_segment", return_value=("ok", 0)):
+        resp = editor_client.post(
+            "/api/segment/42/review",
+            json={"action": "reset", "expected_version": 1},
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["human_version"] == 0
+
+
+def test_review_route_conflict_returns_409(editor_client):
+    """POST /api/segment/<id>/review returns 409 on stale expected_version."""
+    with patch("server.app.review_segment", return_value=("conflict", None)):
+        resp = editor_client.post(
+            "/api/segment/42/review",
+            json={"action": "save", "text": "text", "expected_version": 0},
+            content_type="application/json",
+        )
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "conflict"
+
+
+def test_review_route_unknown_segment_returns_404(editor_client):
+    """POST /api/segment/<id>/review returns 404 for unknown segment_id."""
+    with patch("server.app.review_segment", return_value=("notfound", None)):
+        resp = editor_client.post(
+            "/api/segment/9999/review",
+            json={"action": "accept", "expected_version": 0},
+            content_type="application/json",
+        )
+    assert resp.status_code == 404
+
+
+def test_review_route_empty_text_returns_400(editor_client):
+    """POST /api/segment/<id>/review with action=save and empty text returns 400."""
+    resp = editor_client.post(
+        "/api/segment/42/review",
+        json={"action": "save", "text": "   ", "expected_version": 0},
+        content_type="application/json",
+    )
     assert resp.status_code == 400
     assert resp.get_json()["ok"] is False
+
+
+def test_review_route_note_without_text_returns_400(editor_client):
+    """POST /api/segment/<id>/review with action=note and no note text returns 400."""
+    resp = editor_client.post(
+        "/api/segment/42/review",
+        json={"action": "note", "expected_version": 0},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_review_route_invalid_action_returns_400(editor_client):
+    """POST /api/segment/<id>/review with unknown action returns 400."""
+    resp = editor_client.post(
+        "/api/segment/42/review",
+        json={"action": "bogus", "expected_version": 0},
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_review_route_returns_403_for_non_editor(client):
+    """POST /api/segment/<id>/review returns 403 when no editor session is set."""
+    resp = client.post(
+        "/api/segment/42/review",
+        json={"action": "accept", "expected_version": 0},
+        content_type="application/json",
+    )
+    assert resp.status_code == 403
+    assert resp.get_json() == {"ok": False, "error": "forbidden"}
+
+
+# ---------------------------------------------------------------------------
+# @requires_editor decorator (new route)
+# ---------------------------------------------------------------------------
+
+
+def test_review_route_returns_403_for_non_editor_session(client):
+    """POST /api/segment/<id>/review returns 403 when is_editor=False in session."""
+    with client.session_transaction() as sess:
+        sess["email"] = "visitor@example.com"
+        sess["is_editor"] = False
+    resp = client.post(
+        "/api/segment/42/review",
+        json={"action": "accept", "expected_version": 0},
+    )
+    assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +641,10 @@ def test_logout_clears_session(editor_client):
     assert resp.status_code == 302
     assert resp.headers["Location"] in ("/", "http://localhost/")
     # After logout, write endpoints return 403.
-    resp2 = editor_client.post("/api/approve/1")
+    resp2 = editor_client.post(
+        "/api/segment/1/review",
+        json={"action": "accept", "expected_version": 0},
+    )
     assert resp2.status_code == 403
 
 
@@ -590,13 +778,6 @@ def test_approve_button_hidden_for_anonymous(client):
     assert 'class="btn-approve"' not in html
 
 
-def test_edit_button_visible_for_editor(editor_client):
-    """Editors see the btn-edit button for translated segments with Slovak text."""
-    resp = editor_client.get("/la/sk/~ST.I.Q3.A1")
-    html = resp.data.decode()
-    assert 'class="btn-edit"' in html
-
-
 def test_approve_button_visible_for_editor(editor_client):
     """Editors see the btn-approve button for needs_human segments."""
     needs_human_segments = [
@@ -610,7 +791,11 @@ def test_approve_button_visible_for_editor(editor_client):
             "latin": "Videtur quod.",
             "czech": "Zdá se.",
             "english": "It seems.",
-            "slovak": "Zdá sa.",
+            "slovak_model": "Zdá sa.",
+            "slovak_human": None,
+            "human_note": None,
+            "human_reviewed_by": None,
+            "human_version": 0,
         }
     ]
     with patch("server.app.get_article_segments", return_value=needs_human_segments):
@@ -775,8 +960,8 @@ def test_get_questions_by_status_returns_list_of_dicts():
 
     conn, cursor = _make_db_conn()
     cursor.fetchall.return_value = [
-        {"question_path": "I.q3", "_sort_key": "I.q3", "segment_count": 5},
-        {"question_path": "I.q4", "_sort_key": "I.q4", "segment_count": 1},
+        {"question_path": "I.q3", "_sort_key": "I.q3", "segment_count": 5, "reviewed_count": 0},
+        {"question_path": "I.q4", "_sort_key": "I.q4", "segment_count": 1, "reviewed_count": 0},
     ]
     result = get_questions_by_status(conn, "translated")
 
