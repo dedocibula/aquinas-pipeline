@@ -169,6 +169,35 @@ All five implementation steps complete and committed:
 ### Pending cleanup
 - `_drop_habere_ppp_constraints` in `loop.py` is TEMPORARY — delete after POS-aware resolver fix + term_usage purge (scheduled as Part 1 re-resolution).
 
+## Server: Concurrent Review Surface (2026-06-22)
+
+All three phases of `.claude/server_concurrent_review_plan.md` are done and verified.
+
+| Phase | Commits | Status |
+|---|---|---|
+| Phase 1 — Migration 009 (`segment_review` DDL) | archived | DONE |
+| Phase 2 — Backend (db.py + app.py + tests) | aa89d29 | DONE |
+| Phase 3 — Templates + JS (article.html, question.html, review.js) | cfe1d27 | DONE |
+
+**Verified behaviors:**
+- `human → machine → awaiting` fallback renders correctly (anonymous + editor)
+- `human_note` renders publicly beneath segment when set
+- Review panel, status column, and "Reviewed by" line are editor-only (`{% if is_editor %}`)
+- `review_segment(save)` upserts `segment_review` + `segment_text(sk,human)`; leaves `translation_status` untouched
+- `review_segment(accept)` creates review row only (no human text)
+- `review_segment(note)` stores/clears note without touching text
+- `review_segment(reset)` deletes both `segment_review` and `segment_text(sk,human)`; machine text survives
+- Optimistic-lock conflict → `("conflict", None)` → HTTP 409
+- Save on `pending` segments works (guard removed)
+- Old `/api/edit` and `/api/approve` endpoints are gone; `git grep` confirms no references in src/ or tests/
+- 58 server tests green
+
+**Design note:** The "Save" and "Accept" buttons from the spec were merged into one **Accept** button. When the textarea has content it sends `action:'save'`; when empty it sends `action:'accept'`. Intentional UX simplification — confirmed no DB-level issues.
+
+**M5 follow-ups still pending** (from plan § Out of scope):
+- `rerun_stale` should clear `segment_review` when flagging human-edited segment `needs_human`
+- Decide whether `segment_review`-only rows (accept without text) should be treated as "human-touched" in the stale guard
+
 ## Known Gaps / Next Actions
 1. **Export polysemy candidates to Sheets** — run `sense_mining --all --label --write`, then `export_sheet.py` for proposed senses → human review → `import_approvals` → `rerun_stale`.
 2. **`ratio` sense coverage** — cs mining blind to it; needs English-cue path or manual sense entry.
