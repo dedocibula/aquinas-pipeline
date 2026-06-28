@@ -26,8 +26,8 @@ Conventional Commits and show the diff before committing.
 ## Phase status
 
 - [x] **Phase 0** — `polish` source row (DDL — human-gated)
-- [ ] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper
-- [ ] **Phase 2** — Polish core (`src/polish/`)
+- [x] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper
+- [x] **Phase 2** — Polish core (`src/polish/`)
 - [ ] **Phase 3** — Pilot = full-pipeline subset run (writes to DB)
 - [ ] **Phase 4** — Semi-supervised refinement (`src/optimize/`)
 - [ ] **Phase 5** — Interactive editor step ("Accept + Polish")

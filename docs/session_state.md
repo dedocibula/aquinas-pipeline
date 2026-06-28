@@ -201,14 +201,22 @@ All three phases of `.claude/server_concurrent_review_plan.md` are done and veri
 ## M5 Polish Pass — Phase Status (2026-06-28)
 
 - [x] **Phase 0** — `polish` source row: migration `010_polish_source.sql` applied; `source_id=8`, `authority_rank=85`.
-- [ ] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper
-- [ ] **Phase 2** — Polish core (`src/polish/`)
+- [x] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper (commit eb05b28)
+  - `src/common/anthropic_client.py` — `AnthropicClient` + `AnthropicAPIError`; mirrors `DeepSeekClient`; system prompt cached via `cache_control: ephemeral`; lazy `ANTHROPIC_API_KEY`.
+  - `src/common/pricing.py` — `claude-sonnet-4-6` + `claude-sonnet-4-6-batch` rates; `extract_anthropic_usage()` adapter.
+  - `src/common/prompt_blocks.py` — `build_hard_constraints_block()` extracted from `translator.py` (no behaviour change).
+  - `pyproject.toml` — `anthropic>=0.40` (installed 0.112.0).
+  - 44 tests green in `tests/common/`; 147 translate tests unaffected.
+- [x] **Phase 2** — Polish core (`src/polish/`) — 35 tests green
+  - `prompts/polish_system.txt` — generalised to "Scholastic theological text" (not Summa-specific); particle union (totiž/teda/avšak/lebo/preto/však/odtiaľ/ale).
+  - `src/polish/guards.py` — `sentence_count_delta`, `locked_term_retention`, `particle_retention`, `length_ratio`, `run_guards`; advisory; ok=True requires delta=0 + all terms + all particles + ratio∈[0.5,2.0].
+  - `src/polish/polisher.py` — `polish_segment(id,conn,*,_client) -> (status,[UsageInfo],PolishOutcome)`; skips on (sk,human); uses lemma-form constraints only (no CLTK surface expansion — polisher works on Slovak text); guards advisory; always writes (sk,polish) on success.
 - [ ] **Phase 3** — Pilot = full-pipeline subset run
 - [ ] **Phase 4** — Semi-supervised refinement
 - [ ] **Phase 5** — Interactive editor step
 - [ ] **Phase 6** — Production Batch run
 
-**Next step:** Phase 1 (no dependencies; builds `AnthropicClient`, pricing rates, `build_hard_constraints_block`).
+**Next step:** Phase 3 — depends on Phase 2 (done). Read `src/optimize/pilot.py`, `src/translate/prompt_logger.py`, `src/translate/run.py`.
 
 ## Known Gaps / Next Actions
 
