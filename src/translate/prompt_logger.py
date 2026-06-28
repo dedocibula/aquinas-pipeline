@@ -94,6 +94,7 @@ class PromptLogger:
         status: str,
         guard_flags: dict,
         cost_usd: float,
+        polished_text: str | None = None,
     ) -> None:
         self._write(
             {
@@ -103,6 +104,7 @@ class PromptLogger:
                 "status": status,
                 "guard_flags": guard_flags,
                 "cost_usd": cost_usd,
+                "polished_text": polished_text,
             }
         )
 

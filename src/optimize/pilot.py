@@ -211,6 +211,7 @@ def run_pilot() -> None:
                     status=p_status,
                     guard_flags=p_outcome.guard_flags if p_outcome else {},
                     cost_usd=sum(u.cost_usd for u in p_usages),
+                    polished_text=p_outcome.polished_text if p_outcome else None,
                 )
             lengths = fetch_segment_text_lengths(wconn, seg["segment_id"])
         return seg, status, usages, outcome, lengths, p_status, p_usages, p_outcome

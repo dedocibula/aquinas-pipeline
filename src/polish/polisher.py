@@ -54,10 +54,14 @@ class PolishOutcome:
 
     guard_flags mirrors the dict returned by run_guards(); recorded in pilot JSONL
     and reports for per-element-type guard pass-rate analysis.
+    polished_text is the actual polished SK content, stored in the JSONL so that
+    cross-run polish comparisons (polish_compare.py) can show prior vs current text
+    even after reset_golden deletes segment_text(sk,polish) rows between epochs.
     """
 
     segment_id: int
     guard_flags: dict = field(default_factory=dict)
+    polished_text: str | None = None
 
 
 def _get_sk_text(conn, segment_id: int, src_code: str) -> str | None:
@@ -136,6 +140,9 @@ def polish_segment(
     src_polish_id = source_id(conn, "polish")
     seg_repo.write_segment_text(segment_id, "sk", src_polish_id, polished)
     conn.commit()
+    # Set polished_text only after the DB write commits — a pre-commit assignment
+    # would make parse_polish_jsonl include ghost records for failed writes.
+    outcome.polished_text = polished
 
     log.info(
         "segment_id=%d: polished ok=%s ratio=%.2f",
