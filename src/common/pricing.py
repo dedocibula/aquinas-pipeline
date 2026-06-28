@@ -1,11 +1,14 @@
-"""DeepSeek API pricing and usage extraction.
+"""API pricing and usage extraction for DeepSeek and Anthropic.
 
 Single source of truth for model rates and the UsageInfo dataclass.
 All prices are in USD per token.
 
-Source: https://api-docs.deepseek.com/quick_start/pricing
-Note: deepseek-chat and deepseek-reasoner are deprecated aliases retiring 2026-07-24;
-they currently route to deepseek-v4-flash (non-thinking) and deepseek-v4-pro (thinking).
+Sources:
+  DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
+    deepseek-chat and deepseek-reasoner are deprecated aliases retiring 2026-07-24;
+    they currently route to deepseek-v4-flash and deepseek-v4-pro.
+  Anthropic: https://www.anthropic.com/pricing (claude-sonnet-4-6)
+    Batch API = 50% off all rates.
 """
 
 from __future__ import annotations
@@ -49,6 +52,22 @@ PRICING: dict[str, dict[str, float]] = {
         "cache_hit":  0.003625 / 1_000_000,
         "cache_miss": 0.435    / 1_000_000,
         "output":     0.87     / 1_000_000,
+    },
+    # Anthropic — cache_creation is the cost to *write* a cache slot (distinct from
+    # cache_miss which is regular uncached input).  Both are tracked separately so
+    # extract_anthropic_usage can compute an exact cost despite different per-token rates.
+    "claude-sonnet-4-6": {
+        "cache_hit":      0.30 / 1_000_000,   # cache read
+        "cache_miss":     3.00 / 1_000_000,   # uncached input (input_tokens field)
+        "cache_creation": 3.75 / 1_000_000,   # writing a new cache slot
+        "output":        15.00 / 1_000_000,
+    },
+    # Batch API is 50% off every rate above.
+    "claude-sonnet-4-6-batch": {
+        "cache_hit":      0.15 / 1_000_000,
+        "cache_miss":     1.50 / 1_000_000,
+        "cache_creation": 1.875 / 1_000_000,
+        "output":         7.50 / 1_000_000,
     },
 }
 
@@ -112,4 +131,56 @@ def zero_usage(model: str) -> UsageInfo:
         cache_miss_tokens=0,
         completion_tokens=0,
         cost_usd=0.0,
+    )
+
+
+def extract_anthropic_usage(model: str, resp: object) -> UsageInfo:
+    """Parse a UsageInfo from a synchronous Anthropic SDK response object.
+
+    Anthropic usage field mapping:
+      cache_read_input_tokens        → cache_hit_tokens
+      input_tokens                   → uncached miss (regular input, no cache slot)
+      cache_creation_input_tokens    → cache write (combined into cache_miss_tokens,
+                                       but billed at the higher cache_creation rate)
+      output_tokens                  → completion_tokens
+
+    cache_miss_tokens = input_tokens + cache_creation_input_tokens (combined in UsageInfo
+    because the dataclass has a single miss field; cost is computed with exact per-tier rates).
+
+    Raises:
+        ValueError: If model is not in PRICING.
+        RuntimeError: If the response has no usage attribute.
+    """
+    rates = PRICING.get(model)
+    if rates is None:
+        raise ValueError(
+            f"No pricing entry for model {model!r}. "
+            f"Known models: {list(PRICING)}"
+        )
+
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        raise RuntimeError(
+            f"Anthropic response for model {model!r} has no 'usage' attribute. "
+            "Cannot compute cost."
+        )
+
+    hit        = int(getattr(usage, "cache_read_input_tokens",    0) or 0)
+    miss       = int(getattr(usage, "input_tokens",               0) or 0)
+    creation   = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    completion = int(getattr(usage, "output_tokens",              0) or 0)
+
+    cost = (
+        hit        * rates["cache_hit"]
+        + miss       * rates["cache_miss"]
+        + creation   * rates.get("cache_creation", rates["cache_miss"])
+        + completion * rates["output"]
+    )
+
+    return UsageInfo(
+        model=model,
+        cache_hit_tokens=hit,
+        cache_miss_tokens=miss + creation,
+        completion_tokens=completion,
+        cost_usd=cost,
     )

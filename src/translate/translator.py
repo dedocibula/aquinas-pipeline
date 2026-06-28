@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import functools
 import os
-from collections import defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from common.deepseek_client import DeepSeekClient
 from common.pricing import UsageInfo
+from common.prompt_blocks import build_hard_constraints_block
 
 load_dotenv()
 
@@ -85,29 +85,7 @@ def build_initial_user_turn(
     """
     parts: list[str] = []
 
-    # Hard term constraints via XML.
-    # Group surface-form entries by (required_slovak, context_label) so that
-    # e.g. 'virtute → čnosť' and 'virtutem → čnosť' collapse into one line.
-    # This prevents the model from seeing the same Slovak obligation many times,
-    # which inflates prompt length and dilutes attention on each constraint.
-    parts.append("<hard_constraints>")
-    if constraints:
-        grouped: dict[tuple, list[str]] = defaultdict(list)
-        for c in constraints:
-            key = (c["required_slovak"], c.get("context_label") or "")
-            grouped[key].append(c["latin_lemma"])
-        for (required_slovak, context_label), latin_forms in grouped.items():
-            latin = ", ".join(sorted(set(latin_forms)))
-            qualifier = f' context="{context_label}"' if context_label else ""
-            parts.append(f'  <term latin="{latin}" required_slovak="{required_slovak}"{qualifier} />')
-        parts.append("</hard_constraints>")
-        parts.append(
-            "\n⚠ CRITICAL: The terms in <hard_constraints> are compiler locks. "
-            "They must appear exactly as required, inflected for Slovak grammar. "
-            "No synonyms are permitted; failure results in immediate machine rejection."
-        )
-    else:
-        parts.append("  \n</hard_constraints>")
+    parts.append(build_hard_constraints_block(constraints))
     parts.append("")
 
     # Czech reference
