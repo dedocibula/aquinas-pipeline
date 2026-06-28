@@ -198,14 +198,34 @@ All three phases of `.claude/server_concurrent_review_plan.md` are done and veri
 - `rerun_stale` should clear `segment_review` when flagging human-edited segment `needs_human`
 - Decide whether `segment_review`-only rows (accept without text) should be treated as "human-touched" in the stale guard
 
+## M5 Polish Pass — Phase Status (2026-06-28)
+
+- [x] **Phase 0** — `polish` source row: migration `010_polish_source.sql` applied; `source_id=8`, `authority_rank=85`.
+- [ ] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper
+- [ ] **Phase 2** — Polish core (`src/polish/`)
+- [ ] **Phase 3** — Pilot = full-pipeline subset run
+- [ ] **Phase 4** — Semi-supervised refinement
+- [ ] **Phase 5** — Interactive editor step
+- [ ] **Phase 6** — Production Batch run
+
+**Next step:** Phase 1 (no dependencies; builds `AnthropicClient`, pricing rates, `build_hard_constraints_block`).
+
 ## Known Gaps / Next Actions
-1. **Export polysemy candidates to Sheets** — run `sense_mining --all --label --write`, then `export_sheet.py` for proposed senses → human review → `import_approvals` → `rerun_stale`.
-2. **`ratio` sense coverage** — cs mining blind to it; needs English-cue path or manual sense entry.
-3. **Permanent accepts** — mark seg 199 (`toto niečo`) as accepted; evaluate `habitus`.
-4. **Seg 3429 semantic error** — final cause vs efficient cause; needs manual inspection.
-5. **POS-aware resolver fix** — use `pos_tag_latin` to prevent PPP + esse from mapping to noun; purge bogus `habitus` term_usage rows; then delete `_drop_habere_ppp_constraints`.
-6. **Restart partial run** — I/I_II/III pars q1–q20 still have ~2,268 pending; II_II q1–q20 already done.
-7. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER review cycle.
+
+*(Verified 2026-06-22 against live DB and source.)*
+
+1. **Full corpus run** — 24,686 pending (93%); only q1–q20 done. This is the only M5 Step 1 blocker.
+2. **`rerun_stale` + `segment_review` integration** — two open decisions:
+   - `rerun_stale` should clear `segment_review` when flagging a human-edited segment `needs_human`.
+   - Decide whether `segment_review`-only rows (accept without text) count as "human-touched" in the stale guard.
+3. **Seg 199 (`toto niečo`) permanent accept** — single segment, still `pending`; not a blocker.
+4. **M5 Steps 2–4** — polish (Anthropic Batch API), consistency report, XLIFF export — AFTER corpus run and review cycle.
+
+### Resolved (no longer open)
+- POS-aware resolver: `_HABERE_PPP_RE`/`_HABERE_PPP_FORMS` live in `resolver.py:246–275`; `loop.py` is clean.
+- `ratio` polysemy: 4 senses with Slovak (`rozum`, `hľadisko`, `dôvod`, `ráz`) — added manually.
+- Sense mining export: no `proposed_sense` table; ratio gap closed without the Sheets mining cycle.
+- Bogus `habitus` term_usage rows: all 723 rows are `krystal_single`; no PPP-sourced rows remain.
 
 ## Formula Terms — DB State (applied 2026-06-11)
 
