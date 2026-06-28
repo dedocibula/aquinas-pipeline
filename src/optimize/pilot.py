@@ -40,6 +40,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from common.pricing import UsageInfo
+from polish.polisher import PolishOutcome, polish_segment
 from storage.db import get_conn
 from translate.loop import translate_segment
 from translate.prompt_logger import PromptLogger
@@ -73,10 +74,14 @@ _DEFAULT_WORKERS = 1
 @dataclass
 class SegmentStats:
     segment_id: int
+    element_type: str = ""
     usages: list[UsageInfo] = field(default_factory=list)
     latin_chars: int = 0
     czech_chars: int = 0
     english_chars: int = 0
+    polish_status: str | None = None
+    polish_usages: list[UsageInfo] = field(default_factory=list)
+    guard_flags: dict = field(default_factory=dict)
 
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────
@@ -171,6 +176,7 @@ def run_pilot() -> None:
             elapsed=time.time() - start,
             sample_file=sample_file,
         )
+        _write_polish_report(stats_list=[], sample_file=sample_file)
         return
 
     try:
@@ -190,19 +196,31 @@ def run_pilot() -> None:
 
     def _translate_worker(
         seg: dict, pl: PromptLogger
-    ) -> tuple[dict, str, list, object, dict]:
-        """Translate one segment in its own DB connection."""
+    ) -> tuple[dict, str, list, object, dict, str | None, list, PolishOutcome | None]:
+        """Translate one segment then polish it (if translated); single DB connection."""
         with get_conn() as wconn:
             status, usages, outcome = translate_segment(seg["segment_id"], wconn, prompt_log=pl)
+            p_status: str | None = None
+            p_usages: list = []
+            p_outcome: PolishOutcome | None = None
+            if status == "translated":
+                p_status, p_usages, p_outcome = polish_segment(seg["segment_id"], wconn)
+                pl.log_polish(
+                    segment_id=seg["segment_id"],
+                    locator_path=seg["locator_path"],
+                    status=p_status,
+                    guard_flags=p_outcome.guard_flags if p_outcome else {},
+                    cost_usd=sum(u.cost_usd for u in p_usages),
+                )
             lengths = fetch_segment_text_lengths(wconn, seg["segment_id"])
-        return seg, status, usages, outcome, lengths
+        return seg, status, usages, outcome, lengths, p_status, p_usages, p_outcome
 
     completed = 0
     with PromptLogger(debug_log_path) as prompt_log, ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = {pool.submit(_translate_worker, seg, prompt_log): seg for seg in pending}
         for fut in as_completed(futures):
             try:
-                seg, status, usages, outcome, lengths = fut.result()
+                seg, status, usages, outcome, lengths, p_status, p_usages, p_outcome = fut.result()
             except Exception as exc:
                 orig_seg = futures[fut]
                 log.error(
@@ -232,14 +250,19 @@ def run_pilot() -> None:
 
             seg_stats = SegmentStats(
                 segment_id=sid,
+                element_type=seg["locator_path"].rsplit(".", 1)[-1],
                 usages=usages,
                 latin_chars=lengths.get("la", 0),
                 czech_chars=lengths.get("cs", 0),
                 english_chars=lengths.get("en", 0),
+                polish_status=p_status,
+                polish_usages=p_usages,
+                guard_flags=p_outcome.guard_flags if p_outcome else {},
             )
             stats_list.append(seg_stats)
 
             article_result.usages.extend(usages)
+            article_result.usages.extend(p_usages)
             if status == "translated":
                 translated_count += 1
                 article_result.translated += 1
@@ -284,6 +307,7 @@ def run_pilot() -> None:
         elapsed=elapsed,
         sample_file=sample_file,
     )
+    _write_polish_report(stats_list=stats_list, sample_file=sample_file)
 
     avg_iters = sum(iterations_list) / total_run if iterations_list else 0.0
     needs_human_rate = needs_human_count / total_run if total_run else 0.0
@@ -422,6 +446,77 @@ def _write_report(
     report_path = _REPORTS_DIR / _REPORT_NAME
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("Report written: %s", report_path)
+
+
+def _write_polish_report(
+    *,
+    stats_list: list[SegmentStats],
+    sample_file: Path,
+) -> None:
+    """Write reports/m5_polish_sample.txt: guard pass-rates and polish cost."""
+    polished = [s for s in stats_list if s.polish_status == "polished"]
+    skipped  = [s for s in stats_list if s.polish_status == "skipped"]
+    no_src   = [s for s in stats_list if s.polish_status == "no_source"]
+    errors   = [s for s in stats_list if s.polish_status == "error"]
+    total    = len(stats_list)
+
+    all_polish_usages = [u for s in polished for u in s.polish_usages]
+    polish_cost = sum(u.cost_usd for u in all_polish_usages)
+
+    guard_ok   = [s for s in polished if s.guard_flags.get("ok")]
+    guard_fail = [s for s in polished if not s.guard_flags.get("ok")]
+    pass_rate  = len(guard_ok) / len(polished) if polished else 0.0
+
+    by_type: dict[str, list[SegmentStats]] = {}
+    for s in polished:
+        by_type.setdefault(s.element_type, []).append(s)
+
+    lines = [
+        "M5 POLISH PASS SAMPLE REPORT",
+        f"  Sample file:       {sample_file.name}",
+        f"  Pilot segments:    {total}",
+        f"  Polished:          {len(polished)}",
+        f"  Skipped (human):   {len(skipped)}",
+        f"  No source:         {len(no_src)}",
+        f"  Errors:            {len(errors)}",
+        "",
+        "GUARD PASS-RATES",
+        f"  Overall:           {len(guard_ok)}/{len(polished)}  ({pass_rate * 100:.1f}%)",
+        "",
+        "  By element type:",
+    ]
+    for et, segs in sorted(by_type.items()):
+        ok = sum(1 for s in segs if s.guard_flags.get("ok"))
+        lines.append(f"    {et:<30} {ok}/{len(segs)}  ({ok / len(segs) * 100:.1f}%)")
+
+    avg_cost = f"${polish_cost / len(polished):.5f}" if polished else "N/A"
+    lines += [
+        "",
+        "POLISH COST (Anthropic claude-sonnet-4-6)",
+        f"  Total:             ${polish_cost:.4f}",
+        f"  Avg per segment:   {avg_cost}",
+    ]
+
+    if guard_fail:
+        lines += ["", "GUARD FAILURES (segment_id — failing flags)"]
+        for s in guard_fail:
+            f = s.guard_flags
+            failing = []
+            if f.get("sentence_delta", 0) != 0:
+                failing.append(f"sentence_delta={f['sentence_delta']}")
+            if not f.get("term_retention_ok", True):
+                failing.append(f"missing_terms={f.get('missing_terms')}")
+            if not f.get("particle_retention_ok", True):
+                failing.append(f"missing_particles={f.get('missing_particles')}")
+            ratio = f.get("length_ratio", 1.0)
+            if not (0.5 <= ratio <= 2.0):
+                failing.append(f"length_ratio={ratio}")
+            lines.append(f"  segment_id={s.segment_id} ({s.element_type}): {'; '.join(failing)}")
+
+    _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = _REPORTS_DIR / "m5_polish_sample.txt"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log.info("Polish sample report written: %s", path)
 
 
 if __name__ == "__main__":

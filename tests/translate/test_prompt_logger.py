@@ -221,3 +221,52 @@ def test_creates_parent_directory(tmp_path):
             chosen_draft="text",
         )
     assert path.exists()
+
+
+# ── log_polish ────────────────────────────────────────────────────────────────
+
+
+def test_polish_record_written(tmp_path):
+    path = tmp_path / "debug.jsonl"
+    with PromptLogger(path) as pl:
+        pl.log_polish(
+            segment_id=42,
+            locator_path="I.q1.a1.arg1",
+            status="polished",
+            guard_flags={"ok": True, "sentence_delta": 0, "length_ratio": 1.02},
+            cost_usd=0.0015,
+        )
+    records = _read_records(path)
+    assert len(records) == 1
+    r = records[0]
+    assert r["type"] == "polish"
+    assert r["segment_id"] == 42
+    assert r["locator_path"] == "I.q1.a1.arg1"
+    assert r["status"] == "polished"
+    assert r["guard_flags"]["ok"] is True
+    assert abs(r["cost_usd"] - 0.0015) < 1e-9
+
+
+def test_polish_record_after_final(tmp_path):
+    """Each translated segment emits a final then a polish record in sequence."""
+    path = tmp_path / "debug.jsonl"
+    with PromptLogger(path) as pl:
+        pl.log_final(
+            segment_id=1,
+            locator_path="I.q1.a1.arg1",
+            status="translated",
+            chosen_iteration=1,
+            chosen_draft="draft text",
+        )
+        pl.log_polish(
+            segment_id=1,
+            locator_path="I.q1.a1.arg1",
+            status="polished",
+            guard_flags={"ok": False, "missing_particles": ["totiž"]},
+            cost_usd=0.002,
+        )
+    records = _read_records(path)
+    assert len(records) == 2
+    assert records[0]["type"] == "final"
+    assert records[1]["type"] == "polish"
+    assert records[1]["guard_flags"]["missing_particles"] == ["totiž"]

@@ -86,6 +86,26 @@ class PromptLogger:
             }
         )
 
+    def log_polish(
+        self,
+        *,
+        segment_id: int,
+        locator_path: str,
+        status: str,
+        guard_flags: dict,
+        cost_usd: float,
+    ) -> None:
+        self._write(
+            {
+                "type": "polish",
+                "segment_id": segment_id,
+                "locator_path": locator_path,
+                "status": status,
+                "guard_flags": guard_flags,
+                "cost_usd": cost_usd,
+            }
+        )
+
     def _write(self, record: dict) -> None:
         self._queue.put(record)
 

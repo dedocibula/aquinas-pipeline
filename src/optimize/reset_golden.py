@@ -25,7 +25,14 @@ def main() -> None:
             )
             updated = cur.rowcount
             cur.execute(
-                "DELETE FROM segment_text WHERE segment_id = ANY(%s) AND lang = 'sk'",
+                """
+                DELETE FROM segment_text st
+                USING source s
+                WHERE st.source_id = s.source_id
+                  AND st.segment_id = ANY(%s)
+                  AND st.lang = 'sk'
+                  AND s.code IN ('model', 'polish')
+                """,
                 (ids,),
             )
             deleted = cur.rowcount
