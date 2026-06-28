@@ -31,7 +31,7 @@ Conventional Commits and show the diff before committing.
 - [x] **Phase 3** — Pilot = full-pipeline subset run (writes to DB)
 - [x] **Phase 4** — Semi-supervised refinement (`src/optimize/`)
 - [x] **Phase 5** — Interactive editor step ("Accept + Polish")
-- [ ] **Phase 6** — Production Batch run
+- [x] **Phase 6** — Production Batch run
 
 Dependency graph: `0 → 2`, `1 → 2`, `2 → {3, 5, 6}`, `3 → 4`. Phases 4/5/6 may be built in any order
 once their deps are Done.

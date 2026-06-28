@@ -229,9 +229,16 @@ All three phases of `.claude/server_concurrent_review_plan.md` are done and veri
   - `src/server/templates/article.html` — polish-draft-section; "Accept + Polish" (needs_human) + "Re-polish" (translated) buttons.
   - `src/server/static/review.js` — `_doPolish()`, `_updatePolishDisplay()`, button handlers.
   - 7 new server tests; 65 total green.
-- [ ] **Phase 6** — Production Batch run
+- [x] **Phase 6** — Production Batch run (commits 87cf06b, 331ea6f)
+  - `src/polish/batch.py` — `fetch_batch_candidates` (skip already-done), `_build_request` (cache_control ephemeral), `_poll_batch` (60s loop + request_counts log), `_process_results` (custom_id keyed, per-result commit, try/except continues on write failure, three-bucket pricing), `run_batch`, `_write_report` → `reports/m5_polish_production.txt`. `_REPORTS_DIR` anchored to `__file__`.
+  - `src/polish/steps.py` — `PolishCorpusStep` thin wrapper.
+  - `src/pipeline/interactive.py` — "Polish corpus (Batch API)" menu item (position 11, between rerun-stale and reset-corpus).
+  - `src/server/static/style.css` — machine tab fonts (#222), btn-accept-polish (green), btn-repolish (grey), polish-text-ro (green-tinted), machine-actions flex, machine-label, polish-guard-info.
+  - `src/server/templates/article.html` — `data-needs-human="1"` on review panel.
+  - `src/server/static/review.js` — `needs_human` segments open to machine tab (Accept + Polish immediately visible).
+  - 17 tests in `tests/polish/test_batch.py`, 52 total polish tests green.
 
-**Next step:** Phase 6 — depends on Phase 2 (done). Also requires: M5 Step 1 full-corpus translation done, and element-type scope approved by Phase 3/4 cycle. Read `claude-api` skill (Batches) before building.
+**All M5 polish phases complete.** Next: trigger full corpus run via `uv run python -m pipeline` → "Polish corpus (Batch API)" once ANTHROPIC_API_KEY is populated in `.env`.
 
 ## Known Gaps / Next Actions
 
