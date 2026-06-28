@@ -262,4 +262,106 @@
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Polish helpers
+  // ---------------------------------------------------------------------------
+
+  function _doPolish(segId) {
+    return fetch('/api/segment/' + segId + '/polish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }).then(function (resp) {
+      return resp.json().then(function (data) {
+        return { status: resp.status, data: data };
+      });
+    });
+  }
+
+  function _updatePolishDisplay(segId, polishedText, guardFlags, flipped) {
+    // Show polished text in the machine pane
+    var polishSection = document.getElementById('polish-draft-' + segId);
+    var polishText    = document.getElementById('polish-text-'  + segId);
+    if (polishSection) polishSection.style.display = '';
+    if (polishText)    polishText.textContent = polishedText;
+
+    // Show guard info
+    var guardEl = document.getElementById('polish-guard-' + segId);
+    if (guardEl && guardFlags) {
+      var ok = guardFlags.ok;
+      guardEl.textContent = ok
+        ? '✓ Guards: ok'
+        : '⚠ Guards: ' + JSON.stringify(guardFlags);
+      guardEl.style.display = '';
+    }
+
+    // If the segment was needs_human and we flipped it, update badge + row class
+    if (flipped) {
+      var badge = document.querySelector('[data-badge="' + segId + '"]');
+      if (badge) {
+        badge.className = badge.className.replace(/badge-warn\b/, 'badge-ok');
+        badge.innerHTML = '&#10003;';
+        badge.title = 'translated';
+      }
+      var row = document.querySelector('tr[data-segment-id="' + segId + '"]');
+      if (row) row.classList.remove('row-needs-human');
+      // Hide the "Accept + Polish" button (segment no longer needs_human)
+      var acceptBtn = document.querySelector('.btn-accept-polish[data-segment-id="' + segId + '"]');
+      if (acceptBtn) acceptBtn.style.display = 'none';
+    }
+
+    // Update the main display text to show polished version (human takes precedence, but if
+    // there's no human text the display should show the polished version)
+    var humanText = document.getElementById('htextarea-' + segId);
+    var hasHuman  = humanText && humanText.value.trim() !== '';
+    if (!hasHuman) {
+      _updateDisplayText(segId, polishedText);
+    }
+  }
+
+  // Accept + Polish — for needs_human segments: polishes draft and flips status
+  document.querySelectorAll('.btn-accept-polish').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var segId = btn.dataset.segmentId;
+      btn.disabled = true; btn.textContent = 'Polishing…';
+      _doPolish(segId)
+        .then(function (result) {
+          if (result.status === 200 && result.data.ok) {
+            _updatePolishDisplay(segId, result.data.polished_text,
+                                 result.data.guard_flags, result.data.flipped);
+            _closePanel(segId);
+          } else {
+            alert('Polish failed: ' + ((result.data && result.data.error) || 'server error'));
+            btn.disabled = false; btn.textContent = 'Accept + Polish';
+          }
+        })
+        .catch(function () {
+          alert('Accept + Polish failed — server error.');
+          btn.disabled = false; btn.textContent = 'Accept + Polish';
+        });
+    });
+  });
+
+  // Re-polish — for translated segments: updates polish text without changing status
+  document.querySelectorAll('.btn-repolish').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var segId = btn.dataset.segmentId;
+      var label = btn.textContent.trim();
+      btn.disabled = true; btn.textContent = 'Polishing…';
+      _doPolish(segId)
+        .then(function (result) {
+          if (result.status === 200 && result.data.ok) {
+            _updatePolishDisplay(segId, result.data.polished_text,
+                                 result.data.guard_flags, result.data.flipped);
+          } else {
+            alert('Re-polish failed: ' + ((result.data && result.data.error) || 'server error'));
+          }
+          btn.disabled = false; btn.textContent = label;
+        })
+        .catch(function () {
+          alert('Re-polish failed — server error.');
+          btn.disabled = false; btn.textContent = label;
+        });
+    });
+  });
+
 }());

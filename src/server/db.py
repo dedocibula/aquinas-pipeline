@@ -23,7 +23,9 @@ def _segment_select_sql(where_clause: str) -> str:
 
     Columns returned: segment_id, locator_path, element_type, reply_to,
     translation_status, reviewer_notes, latin, czech, english,
-    slovak_model, slovak_human, human_note, human_reviewed_by, human_version.
+    slovak_model, slovak_polish, slovak_human, human_note, human_reviewed_by, human_version.
+
+    Display precedence: human → polish → model.
     """
     return f"""
         SELECT
@@ -37,6 +39,7 @@ def _segment_select_sql(where_clause: str) -> str:
             czech.content      AS czech,
             english.content    AS english,
             sk_model.content   AS slovak_model,
+            sk_polish.content  AS slovak_polish,
             sk_human.content   AS slovak_human,
             sr.human_note,
             sr.human_reviewed_by,
@@ -72,6 +75,15 @@ def _segment_select_sql(where_clause: str) -> str:
               AND src_m.code = 'model'
             LIMIT 1
         ) sk_model ON true
+        LEFT JOIN LATERAL (
+            SELECT st_p.content
+            FROM segment_text st_p
+            JOIN source src_p ON src_p.source_id = st_p.source_id
+            WHERE st_p.segment_id = s.segment_id
+              AND st_p.lang = 'sk'
+              AND src_p.code = 'polish'
+            LIMIT 1
+        ) sk_polish ON true
         LEFT JOIN LATERAL (
             SELECT st_h.content
             FROM segment_text st_h

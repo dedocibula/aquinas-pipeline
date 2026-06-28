@@ -18,6 +18,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, ses
 
 load_dotenv()
 
+from polish.polisher import polish_segment  # noqa: E402
 from server.db import (  # noqa: E402
     get_all_questions,
     get_article_segments,
@@ -388,6 +389,69 @@ def review_segment_route(segment_id: int):
     if result == "notfound":
         return jsonify({"ok": False, "error": "not found"}), 404
     return jsonify({"ok": False, "error": "conflict"}), 409
+
+
+# ---------------------------------------------------------------------------
+# Polish endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/segment/<int:segment_id>/polish", methods=["POST"])
+@requires_editor
+def polish_segment_route(segment_id: int):
+    """Run the polish pass on a translated segment's machine draft.
+
+    Calls polish_segment() on the (sk, model) row, writes (sk, polish), and
+    returns the polished text + guard flags as JSON.
+
+    If the segment was 'needs_human', flips translation_status → 'translated'
+    in the same request (the "Accept + Polish" rescue path).
+
+    Returns:
+        200  {ok:true, polished_text:str, guard_flags:{...}, flipped:bool}
+        404  segment not found, or no (sk,model) draft to polish
+        409  a (sk,human) row already exists — polish blocked
+        502  AnthropicClient raised an API error
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT translation_status FROM segment WHERE segment_id = %s",
+                (segment_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        original_status = row[0]
+
+        p_status, _usages, outcome = polish_segment(segment_id, conn)
+
+        if p_status == "skipped":
+            return jsonify({"ok": False, "error": "human text exists"}), 409
+        if p_status == "no_source":
+            return jsonify({"ok": False, "error": "no model draft to polish"}), 404
+        if p_status == "error":
+            return jsonify({"ok": False, "error": "polish API error"}), 502
+
+        # p_status == "polished"; polish_segment already committed the (sk,polish) row.
+        polished_text = outcome.polished_text or ""
+
+        flipped = False
+        if original_status == "needs_human":
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE segment SET translation_status = 'translated' WHERE segment_id = %s",
+                    (segment_id,),
+                )
+            conn.commit()
+            flipped = True
+
+    return jsonify({
+        "ok": True,
+        "polished_text": polished_text,
+        "guard_flags": outcome.guard_flags,
+        "flipped": flipped,
+    })
 
 
 # ---------------------------------------------------------------------------

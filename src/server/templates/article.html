@@ -116,8 +116,8 @@
       {% set seg_constraints = constraints.get(seg.segment_id, []) %}
       {% set panel_id = 'detail-' ~ seg.segment_id %}
 
-      {# Effective display text: human > model > none #}
-      {% set slovak_display = seg.slovak_human or seg.slovak_model %}
+      {# Effective display text: human > polish > model > none #}
+      {% set slovak_display = seg.slovak_human or seg.slovak_polish or seg.slovak_model %}
 
       <tr class="row-{{ etype }}{% if needs_human %} row-needs-human{% endif %}"
           data-segment-id="{{ seg.segment_id }}">
@@ -170,9 +170,29 @@
                 </div>
               </div>
             </div>
-            {# Machine pane — read-only, no buttons #}
+            {# Machine pane — model draft + polish (if any) + polish action buttons #}
             <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
-              <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+              <div class="machine-draft-section">
+                <div class="machine-label">Model draft:</div>
+                <div class="machine-text-ro" id="machine-text-{{ seg.segment_id }}">{{ seg.slovak_model or '— no machine translation —' }}</div>
+              </div>
+              <div class="polish-draft-section" id="polish-draft-{{ seg.segment_id }}"
+                   {% if not seg.slovak_polish %}style="display:none"{% endif %}>
+                <div class="machine-label">Polished:</div>
+                <div class="polish-text-ro" id="polish-text-{{ seg.segment_id }}">{{ seg.slovak_polish or '' }}</div>
+              </div>
+              {% if ts in ('translated', 'needs_human') %}
+              <div class="machine-actions" id="machine-actions-{{ seg.segment_id }}">
+                {% if needs_human %}
+                <button class="btn-accept-polish" data-segment-id="{{ seg.segment_id }}">Accept + Polish</button>
+                {% endif %}
+                <button class="btn-repolish{% if needs_human %} btn-repolish-secondary{% endif %}"
+                        data-segment-id="{{ seg.segment_id }}">
+                  {% if needs_human %}Re-polish only{% else %}Re-polish{% endif %}
+                </button>
+                <div class="polish-guard-info" id="polish-guard-{{ seg.segment_id }}" style="display:none"></div>
+              </div>
+              {% endif %}
             </div>
           </div>
           {% endif %}
