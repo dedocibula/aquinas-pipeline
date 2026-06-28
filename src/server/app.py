@@ -424,7 +424,9 @@ def polish_segment_route(segment_id: int):
             return jsonify({"ok": False, "error": "not found"}), 404
         original_status = row[0]
 
-        p_status, _usages, outcome = polish_segment(segment_id, conn)
+        # _autocommit=False: the (sk,polish) write is held open so we can bundle
+        # it with the optional status flip in a single atomic commit below.
+        p_status, _usages, outcome = polish_segment(segment_id, conn, _autocommit=False)
 
         if p_status == "skipped":
             return jsonify({"ok": False, "error": "human text exists"}), 409
@@ -433,7 +435,7 @@ def polish_segment_route(segment_id: int):
         if p_status == "error":
             return jsonify({"ok": False, "error": "polish API error"}), 502
 
-        # p_status == "polished"; polish_segment already committed the (sk,polish) row.
+        # p_status == "polished"; (sk,polish) is written but not yet committed.
         polished_text = outcome.polished_text or ""
 
         flipped = False
@@ -443,8 +445,10 @@ def polish_segment_route(segment_id: int):
                     "UPDATE segment SET translation_status = 'translated' WHERE segment_id = %s",
                     (segment_id,),
                 )
-            conn.commit()
             flipped = True
+
+        # Single commit: (sk,polish) write + optional status flip are atomic.
+        conn.commit()
 
     return jsonify({
         "ok": True,

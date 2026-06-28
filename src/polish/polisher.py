@@ -86,13 +86,18 @@ def polish_segment(
     conn,
     *,
     _client: AnthropicClient | None = None,
+    _autocommit: bool = True,
 ) -> tuple[str, list[UsageInfo], PolishOutcome]:
     """Polish one translated segment and write (sk, polish) to DB.
 
     _client is the test seam: inject a fake AnthropicClient to avoid live API
     calls in unit tests.  In production, a new AnthropicClient(MODEL) is created.
 
-    Always commits before returning 'polished'.  Other statuses commit nothing.
+    _autocommit controls whether this function commits the (sk,polish) write itself.
+    Pass False when the caller needs to bundle this write with additional changes
+    (e.g. a status flip) in a single atomic commit — the caller must then commit.
+    When True (default, pilot path), commits before returning 'polished'.
+    Other statuses commit nothing regardless of _autocommit.
     """
     outcome = PolishOutcome(segment_id=segment_id)
 
@@ -139,9 +144,11 @@ def polish_segment(
     seg_repo = SegmentRepository(conn)
     src_polish_id = source_id(conn, "polish")
     seg_repo.write_segment_text(segment_id, "sk", src_polish_id, polished)
-    conn.commit()
-    # Set polished_text only after the DB write commits — a pre-commit assignment
-    # would make parse_polish_jsonl include ghost records for failed writes.
+    if _autocommit:
+        conn.commit()
+    # polished_text is set after any autocommit so the pilot JSONL path never
+    # records a ghost entry for a write that didn't commit.  When _autocommit=False
+    # the caller commits; there is no JSONL logging on that path.
     outcome.polished_text = polished
 
     log.info(

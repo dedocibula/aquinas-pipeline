@@ -94,6 +94,7 @@ FAKE_SEGMENTS = [
         "czech": "Zdá se, že ne.",
         "english": "It seems that not.",
         "slovak_model": None,
+        "slovak_polish": None,
         "slovak_human": None,
         "human_note": None,
         "human_reviewed_by": None,
@@ -1047,7 +1048,11 @@ def test_polish_route_polishes_translated_segment(editor_client):
 
 
 def test_polish_route_flips_needs_human_to_translated(editor_client):
-    """POST /api/segment/<id>/polish flips needs_human → translated and sets flipped=True."""
+    """POST /api/segment/<id>/polish flips needs_human → translated and sets flipped=True.
+
+    Atomicity: both the (sk,polish) write (inside polish_segment with _autocommit=False)
+    and the status flip must be committed exactly once, together.
+    """
     from contextlib import contextmanager
 
     from polish.polisher import PolishOutcome
@@ -1078,9 +1083,85 @@ def test_polish_route_flips_needs_human_to_translated(editor_client):
     data = resp.get_json()
     assert data["ok"] is True
     assert data["flipped"] is True
-    # Verify an UPDATE was issued for translation_status
+    # The status UPDATE must be present
     sql_calls = [c[0][0] for c in cur.execute.call_args_list]
     assert any("translation_status" in s and "translated" in s for s in sql_calls)
+    # Exactly one commit: (sk,polish) write + status flip are atomic
+    assert stub.commit.call_count == 1
+
+
+def test_polish_route_single_commit_when_no_flip(editor_client):
+    """No status flip for translated segments — still exactly one commit."""
+    from contextlib import contextmanager
+
+    from polish.polisher import PolishOutcome
+
+    outcome = PolishOutcome(
+        segment_id=2,
+        guard_flags={"ok": True, "length_ratio": 1.0},
+        polished_text="Polished.",
+    )
+    stub = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = ("translated",)
+    stub.cursor.return_value = cur
+
+    @contextmanager
+    def fake_gc():
+        yield stub
+
+    with (
+        patch("server.app.get_conn", fake_gc),
+        patch("server.app.polish_segment", return_value=("polished", [], outcome)),
+    ):
+        resp = editor_client.post("/api/segment/2/polish")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["flipped"] is False
+    assert stub.commit.call_count == 1
+
+
+def test_polish_route_calls_polish_segment_with_autocommit_false(editor_client):
+    """The endpoint must pass _autocommit=False so both writes share one commit.
+
+    Without _autocommit=False, polish_segment would commit the (sk,polish) write
+    internally and the status flip would land in a separate transaction.
+    """
+    from contextlib import contextmanager
+
+    from polish.polisher import PolishOutcome
+
+    outcome = PolishOutcome(
+        segment_id=6,
+        guard_flags={"ok": True, "length_ratio": 1.0},
+        polished_text="Polished.",
+    )
+    stub = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = ("translated",)
+    stub.cursor.return_value = cur
+
+    captured_kwargs: dict = {}
+
+    def fake_polish(segment_id, conn, **kwargs):
+        captured_kwargs.update(kwargs)
+        return "polished", [], outcome
+
+    @contextmanager
+    def fake_gc():
+        yield stub
+
+    with (
+        patch("server.app.get_conn", fake_gc),
+        patch("server.app.polish_segment", side_effect=fake_polish),
+    ):
+        editor_client.post("/api/segment/6/polish")
+
+    assert captured_kwargs.get("_autocommit") is False
 
 
 def test_polish_route_returns_409_when_human_exists(editor_client):
