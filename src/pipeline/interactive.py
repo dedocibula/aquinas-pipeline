@@ -215,6 +215,11 @@ def build_menu() -> list[MenuItem]:
 
         return RerunStaleStep()
 
+    def _polish() -> PipelineStep:
+        from polish.steps import PolishCorpusStep
+
+        return PolishCorpusStep()
+
     def _reset_corpus() -> PipelineStep:
         from translate.steps import ResetCorpusStep
 
@@ -236,6 +241,7 @@ def build_menu() -> list[MenuItem]:
         MenuItem("import-approvals", "Import approvals + flag stale", _import),
         MenuItem("translate", "Translate corpus", _translate),
         MenuItem("rerun-stale", "Re-translate stale segments", _rerun),
+        MenuItem("polish-corpus", "Polish corpus (Batch API)", _polish),
         MenuItem("reset-corpus", "Re-translate entire corpus", _reset_corpus),
         MenuItem("report", "Coverage / provenance report", _report),
     ]
