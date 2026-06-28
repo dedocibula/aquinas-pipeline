@@ -1,4 +1,4 @@
-# M5 Step 2 — Polish Pass: Phased Build Plan
+/# M5 Step 2 — Polish Pass: Phased Build Plan
 
 ## Purpose
 
@@ -28,9 +28,9 @@ Conventional Commits and show the diff before committing.
 - [x] **Phase 0** — `polish` source row (DDL — human-gated)
 - [x] **Phase 1** — LLM client encapsulation + pricing + shared constraint helper
 - [x] **Phase 2** — Polish core (`src/polish/`)
-- [ ] **Phase 3** — Pilot = full-pipeline subset run (writes to DB)
-- [ ] **Phase 4** — Semi-supervised refinement (`src/optimize/`)
-- [ ] **Phase 5** — Interactive editor step ("Accept + Polish")
+- [x] **Phase 3** — Pilot = full-pipeline subset run (writes to DB)
+- [x] **Phase 4** — Semi-supervised refinement (`src/optimize/`)
+- [x] **Phase 5** — Interactive editor step ("Accept + Polish")
 - [ ] **Phase 6** — Production Batch run
 
 Dependency graph: `0 → 2`, `1 → 2`, `2 → {3, 5, 6}`, `3 → 4`. Phases 4/5/6 may be built in any order

@@ -211,12 +211,27 @@ All three phases of `.claude/server_concurrent_review_plan.md` are done and veri
   - `prompts/polish_system.txt` — generalised to "Scholastic theological text" (not Summa-specific); particle union (totiž/teda/avšak/lebo/preto/však/odtiaľ/ale).
   - `src/polish/guards.py` — `sentence_count_delta`, `locked_term_retention`, `particle_retention`, `length_ratio`, `run_guards`; advisory; ok=True requires delta=0 + all terms + all particles + ratio∈[0.5,2.0].
   - `src/polish/polisher.py` — `polish_segment(id,conn,*,_client) -> (status,[UsageInfo],PolishOutcome)`; skips on (sk,human); uses lemma-form constraints only (no CLTK surface expansion — polisher works on Slovak text); guards advisory; always writes (sk,polish) on success.
-- [ ] **Phase 3** — Pilot = full-pipeline subset run
-- [ ] **Phase 4** — Semi-supervised refinement
-- [ ] **Phase 5** — Interactive editor step
+- [x] **Phase 3** — Pilot = full-pipeline subset run (commit c3a755a)
+  - `src/translate/prompt_logger.py` — `log_polish()` method added (type="polish" JSONL record).
+  - `src/optimize/pilot.py` — `SegmentStats` extended (element_type, polish_status, polish_usages, guard_flags); `_translate_worker` calls `polish_segment` in same connection after successful translation; `_write_polish_report` writes `reports/m5_polish_sample.txt` with per-element-type guard pass-rates + Anthropic cost; early-return path also writes polish report.
+  - `src/optimize/reset_golden.py` — DELETE now joins `source` and restricts to `code IN ('model','polish')`; never deletes `(sk,human)` rows.
+  - 66 tests green.
+- [x] **Phase 4** — Semi-supervised refinement (commit 58e4ca7)
+  - `src/optimize/run_compare.py` — `--polish` mode: `parse_polish_jsonl`, `_guard_line`, `_render_polish_pair`, `build_polish_report` (interactive 1/2/s, writes `reports/polish_decisions_<ts>.txt`); fail-loud on malformed JSONL.
+  - `src/optimize/polish_optimize_loop.sh` — per-epoch loop; POSIX-compatible (no mapfile); overfitting guard in claude -p prompt.
+  - `src/optimize/polish_prompt_changelog.md` — empty table.
+  - `src/polish/polisher.py` — `PolishOutcome.polished_text` set after `conn.commit()` to prevent ghost JSONL records.
+  - `src/translate/prompt_logger.py` — `log_polish` carries `polished_text`.
+  - 24 new tests green.
+- [x] **Phase 5** — Interactive editor step (commit a03e9a8)
+  - `src/server/db.py` — `_segment_select_sql` adds `sk_polish` LATERAL join; `slovak_polish` column; `human → polish → model` fallback.
+  - `src/server/app.py` — `POST /api/segment/<id>/polish` (editor-only): runs `polish_segment`, flips `needs_human → translated`, returns `{ok, polished_text, guard_flags, flipped}`.
+  - `src/server/templates/article.html` — polish-draft-section; "Accept + Polish" (needs_human) + "Re-polish" (translated) buttons.
+  - `src/server/static/review.js` — `_doPolish()`, `_updatePolishDisplay()`, button handlers.
+  - 7 new server tests; 65 total green.
 - [ ] **Phase 6** — Production Batch run
 
-**Next step:** Phase 3 — depends on Phase 2 (done). Read `src/optimize/pilot.py`, `src/translate/prompt_logger.py`, `src/translate/run.py`.
+**Next step:** Phase 6 — depends on Phase 2 (done). Also requires: M5 Step 1 full-corpus translation done, and element-type scope approved by Phase 3/4 cycle. Read `claude-api` skill (Batches) before building.
 
 ## Known Gaps / Next Actions
 
