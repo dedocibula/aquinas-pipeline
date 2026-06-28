@@ -125,7 +125,9 @@
         _closePanel(segId);
       } else {
         panel.style.display = '';
-        _showTab(segId, 'human');
+        // needs_human segments open on the machine tab so "Accept + Polish" is immediately visible
+        var defaultTab = (panel.dataset.needsHuman === '1') ? 'machine' : 'human';
+        _showTab(segId, defaultTab);
         _showSlovakDisplay(segId, false);
         var ta = document.getElementById('htextarea-' + segId);
         if (ta) _autoResize(ta);
