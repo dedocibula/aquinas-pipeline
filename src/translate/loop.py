@@ -301,20 +301,18 @@ def translate_segment(
     outcome.chosen_iteration = chosen_iter
     outcome.last_feedback = last_feedback
     if final_draft is None:
-        # No draft was ever produced (e.g., translator raised on every iteration).
-        # Still mark needs_human so the segment doesn't stay stuck as 'pending'.
-        log.error("segment_id=%d: no draft produced; marking needs_human", segment_id)
-        seg_repo.update_translation_status(segment_id, "needs_human")
-        conn.commit()
+        # No draft was ever produced — translator raised on every iteration (API error).
+        # Leave status as 'pending' so the next run can retry this segment.
+        log.error("segment_id=%d: no draft produced (API error); leaving pending for retry", segment_id)
         if prompt_log:
             prompt_log.log_final(
                 segment_id=segment_id,
                 locator_path=locator,
-                status="needs_human",
+                status="error",
                 chosen_iteration=None,
                 chosen_draft=None,
             )
-        return "needs_human", usages, outcome
+        return "error", usages, outcome
 
     seg_repo.write_segment_text(segment_id, "sk", src_model, final_draft)
     seg_repo.update_translation_status(segment_id, "needs_human")

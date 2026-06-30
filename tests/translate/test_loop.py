@@ -439,14 +439,14 @@ def test_translate_segment_revision_feedback_passed_to_translator():
 # ── translate_segment — translator error ─────────────────────────────────────
 
 
-def test_translate_segment_translator_error_on_first_returns_needs_human():
+def test_translate_segment_translator_error_on_first_returns_error():
     conn = _make_conn()
     with (
         patch(_PATCH_SOURCE_ID, return_value=1),
         patch(_PATCH_TRANSLATOR, side_effect=RuntimeError("API down")),
     ):
         status, _, _ = translate_segment(1, conn)
-    assert status == "needs_human"
+    assert status == "error"
 
 
 def test_translate_segment_translator_error_no_db_write():
@@ -816,6 +816,6 @@ def test_translate_segment_outcome_translator_error():
         patch(_PATCH_REVIEWER, return_value=_approved()),
     ):
         status, _, outcome = translate_segment(1, conn)
-    assert status == "needs_human"
+    assert status == "error"
     assert outcome.failure_classes == [{"iter": 1, "class": "translator_error"}]
     assert outcome.chosen_iteration is None

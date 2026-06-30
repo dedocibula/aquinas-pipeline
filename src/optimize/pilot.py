@@ -175,6 +175,7 @@ def run_pilot() -> None:
             total_segments=0,
             translated=0,
             needs_human=0,
+            errors=0,
             iterations_list=[],
             stats_list=[],
             elapsed=time.time() - start,
@@ -194,6 +195,7 @@ def run_pilot() -> None:
 
     translated_count = 0
     needs_human_count = 0
+    error_count = 0
     iterations_list: list[int] = []
     stats_list: list[SegmentStats] = []
     article_result = ArticleResult(locator="pilot_sample")
@@ -251,7 +253,8 @@ def run_pilot() -> None:
             completed += 1
 
             iters = outcome.iterations_used
-            iterations_list.append(iters)
+            if status != "error":
+                iterations_list.append(iters)
 
             seg_stats = SegmentStats(
                 segment_id=sid,
@@ -271,6 +274,9 @@ def run_pilot() -> None:
             if status == "translated":
                 translated_count += 1
                 article_result.translated += 1
+            elif status == "error":
+                # API error — segment left as pending; not counted against needs_human threshold.
+                error_count += 1
             else:
                 needs_human_count += 1
                 article_result.needs_human += 1
@@ -314,6 +320,7 @@ def run_pilot() -> None:
         total_segments=total_run,
         translated=translated_count,
         needs_human=needs_human_count,
+        errors=error_count,
         iterations_list=iterations_list,
         stats_list=stats_list,
         elapsed=elapsed,
@@ -355,6 +362,7 @@ def _write_report(
     total_segments: int,
     translated: int,
     needs_human: int,
+    errors: int = 0,
     iterations_list: list[int],
     stats_list: list[SegmentStats],
     elapsed: float,
@@ -426,6 +434,7 @@ def _write_report(
         f"  Total segments:    {total_segments}",
         f"  Translated:        {translated}  ({pct(translated)})",
         f"  Needs human:       {needs_human}  ({pct(needs_human)})",
+        f"  API errors:        {errors}  (left pending for retry)",
         f"  Avg iterations:    {avg_iters:.2f}",
         f"  Time elapsed:      {mins}m {secs}s",
         "",
