@@ -26,7 +26,7 @@ load_dotenv()
 _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
-_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 TRANSLATOR_TEMPERATURE = 0.3  # also recorded in translation_run for run comparison
 
 _client = DeepSeekClient(_DEEPSEEK_MODEL, url=_DEEPSEEK_URL, timeout=60)
@@ -64,6 +64,7 @@ def call_translator_v3(
         messages,
         temperature=TRANSLATOR_TEMPERATURE,
         max_tokens=2048,
+        thinking={"type": "disabled"},
     )
     draft = result.content.strip()
     if not draft:

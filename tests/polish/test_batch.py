@@ -149,7 +149,7 @@ def test_build_request_sets_custom_id_and_model():
         req = _build_request(payload, system_text)
 
     assert req["custom_id"] == "77"
-    assert req["params"]["model"] == "claude-sonnet-4-6"
+    assert req["params"]["model"] == "claude-haiku-4-5-20251001"
     assert req["params"]["max_tokens"] == 2048
 
 
@@ -282,12 +282,12 @@ def test_process_results_accumulates_cost():
             _process_results(client, "batch_id", {10: payload}, conn, src_polish_id=8, stats=stats)
 
     # Fixture: input=100, cache_write=80, output=50, cache_read=200
-    # Batch pricing per 1M: input $1.50, cache-write $1.875, output $7.50, cache-read $0.15
+    # Haiku batch pricing per 1M: input $0.40, cache-write $0.50, output $2.00, cache-read $0.04
     expected = (
-        100 * 1.500 / 1_000_000
-        + 80 * 1.875 / 1_000_000
-        + 50 * 7.500 / 1_000_000
-        + 200 * 0.150 / 1_000_000
+        100 * 0.400 / 1_000_000
+        + 80 * 0.500 / 1_000_000
+        + 50 * 2.000 / 1_000_000
+        + 200 * 0.040 / 1_000_000
     )
     assert stats.cost_usd == pytest.approx(expected)
 

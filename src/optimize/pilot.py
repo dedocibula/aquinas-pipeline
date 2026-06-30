@@ -40,6 +40,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from common.pricing import UsageInfo
+from polish.batch import _BatchStats as PolishBatchStats
+from polish.batch import run_batch as run_batch_polish
+from polish.polisher import MODEL as POLISH_MODEL
 from polish.polisher import PolishOutcome, polish_segment
 from storage.db import get_conn
 from translate.loop import translate_segment
@@ -69,6 +72,7 @@ def _resolve_sample_file() -> Path:
 _ABORT_NEEDS_HUMAN_RATE = 0.20
 _ABORT_AVG_ITERATIONS = 2.5
 _DEFAULT_WORKERS = 1
+_BATCH_POLISH = os.environ.get("PILOT_BATCH_POLISH", "").lower() in ("1", "true", "yes")
 
 
 @dataclass
@@ -203,7 +207,7 @@ def run_pilot() -> None:
             p_status: str | None = None
             p_usages: list = []
             p_outcome: PolishOutcome | None = None
-            if status == "translated":
+            if status == "translated" and not _BATCH_POLISH:
                 p_status, p_usages, p_outcome = polish_segment(seg["segment_id"], wconn)
                 pl.log_polish(
                     segment_id=seg["segment_id"],
@@ -298,6 +302,13 @@ def run_pilot() -> None:
     elapsed = time.time() - start
     _close_run(run_id, [article_result])
 
+    # Batch polish pass: runs after all translations so the Batch API can process
+    # the full set in one shot (50% discount vs synchronous).
+    batch_polish_stats: PolishBatchStats | None = None
+    if _BATCH_POLISH and translated_count > 0:
+        log.info("Starting batch polish pass for %d translated segments…", translated_count)
+        batch_polish_stats = run_batch_polish()
+
     total_run = len(pending)
     _write_report(
         total_segments=total_run,
@@ -308,7 +319,11 @@ def run_pilot() -> None:
         elapsed=elapsed,
         sample_file=sample_file,
     )
-    _write_polish_report(stats_list=stats_list, sample_file=sample_file)
+    _write_polish_report(
+        stats_list=stats_list,
+        sample_file=sample_file,
+        batch_stats=batch_polish_stats,
+    )
 
     avg_iters = sum(iterations_list) / total_run if iterations_list else 0.0
     needs_human_rate = needs_human_count / total_run if total_run else 0.0
@@ -357,8 +372,8 @@ def _write_report(
     all_usages = [u for s in stats_list for u in s.usages]
     # Use the same env-resolved model IDs that translator.py and reviewer.py use,
     # so filtering works correctly even if overridden via DEEPSEEK_MODEL env vars.
-    translator_model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-    reviewer_model   = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-reasoner")
+    translator_model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    reviewer_model   = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-v4-flash")
 
     t_usages = [u for u in all_usages if u.model == translator_model]
     r_usages = [u for u in all_usages if u.model == reviewer_model]
@@ -453,66 +468,93 @@ def _write_polish_report(
     *,
     stats_list: list[SegmentStats],
     sample_file: Path,
+    batch_stats: PolishBatchStats | None = None,
 ) -> None:
     """Write reports/m5_polish_sample.txt: guard pass-rates and polish cost."""
-    polished = [s for s in stats_list if s.polish_status == "polished"]
-    skipped  = [s for s in stats_list if s.polish_status == "skipped"]
-    no_src   = [s for s in stats_list if s.polish_status == "no_source"]
-    errors   = [s for s in stats_list if s.polish_status == "error"]
-    total    = len(stats_list)
+    total = len(stats_list)
 
-    all_polish_usages = [u for s in polished for u in s.polish_usages]
-    polish_cost = sum(u.cost_usd for u in all_polish_usages)
+    if batch_stats is not None:
+        # Batch mode: per-segment guard flags not available; report from BatchStats.
+        n_polished   = batch_stats.polished
+        n_guard_fail = batch_stats.guard_failed
+        n_errors     = batch_stats.errored
+        polish_cost  = batch_stats.cost_usd
+        pass_rate    = n_polished / (n_polished + n_guard_fail) if (n_polished + n_guard_fail) else 0.0
+        avg_cost_str = f"${polish_cost / n_polished:.5f}" if n_polished else "N/A"
+        lines = [
+            "M5 POLISH PASS SAMPLE REPORT",
+            f"  Sample file:       {sample_file.name}",
+            f"  Pilot segments:    {total}",
+            f"  Polished:          {n_polished}",
+            f"  Guard-failed:      {n_guard_fail}",
+            f"  Errors:            {n_errors}",
+            "  Mode:              Batch API",
+            "",
+            "GUARD PASS-RATES",
+            f"  Overall:           {n_polished}/{n_polished + n_guard_fail}  ({pass_rate * 100:.1f}%)",
+            "  (per-element breakdown not available in batch mode)",
+            "",
+            f"POLISH COST (Anthropic {POLISH_MODEL}, batch)",
+            f"  Total:             ${polish_cost:.4f}",
+            f"  Avg per segment:   {avg_cost_str}",
+        ]
+    else:
+        polished = [s for s in stats_list if s.polish_status == "polished"]
+        skipped  = [s for s in stats_list if s.polish_status == "skipped"]
+        no_src   = [s for s in stats_list if s.polish_status == "no_source"]
+        errors   = [s for s in stats_list if s.polish_status == "error"]
 
-    guard_ok   = [s for s in polished if s.guard_flags.get("ok")]
-    guard_fail = [s for s in polished if not s.guard_flags.get("ok")]
-    pass_rate  = len(guard_ok) / len(polished) if polished else 0.0
+        all_polish_usages = [u for s in polished for u in s.polish_usages]
+        polish_cost = sum(u.cost_usd for u in all_polish_usages)
 
-    by_type: dict[str, list[SegmentStats]] = {}
-    for s in polished:
-        by_type.setdefault(s.element_type, []).append(s)
+        guard_ok   = [s for s in polished if s.guard_flags.get("ok")]
+        guard_fail = [s for s in polished if not s.guard_flags.get("ok")]
+        pass_rate  = len(guard_ok) / len(polished) if polished else 0.0
 
-    lines = [
-        "M5 POLISH PASS SAMPLE REPORT",
-        f"  Sample file:       {sample_file.name}",
-        f"  Pilot segments:    {total}",
-        f"  Polished:          {len(polished)}",
-        f"  Skipped (human):   {len(skipped)}",
-        f"  No source:         {len(no_src)}",
-        f"  Errors:            {len(errors)}",
-        "",
-        "GUARD PASS-RATES",
-        f"  Overall:           {len(guard_ok)}/{len(polished)}  ({pass_rate * 100:.1f}%)",
-        "",
-        "  By element type:",
-    ]
-    for et, segs in sorted(by_type.items()):
-        ok = sum(1 for s in segs if s.guard_flags.get("ok"))
-        lines.append(f"    {et:<30} {ok}/{len(segs)}  ({ok / len(segs) * 100:.1f}%)")
+        by_type: dict[str, list[SegmentStats]] = {}
+        for s in polished:
+            by_type.setdefault(s.element_type, []).append(s)
 
-    avg_cost = f"${polish_cost / len(polished):.5f}" if polished else "N/A"
-    lines += [
-        "",
-        "POLISH COST (Anthropic claude-sonnet-4-6)",
-        f"  Total:             ${polish_cost:.4f}",
-        f"  Avg per segment:   {avg_cost}",
-    ]
+        lines = [
+            "M5 POLISH PASS SAMPLE REPORT",
+            f"  Sample file:       {sample_file.name}",
+            f"  Pilot segments:    {total}",
+            f"  Polished:          {len(polished)}",
+            f"  Skipped (human):   {len(skipped)}",
+            f"  No source:         {len(no_src)}",
+            f"  Errors:            {len(errors)}",
+            "",
+            "GUARD PASS-RATES",
+            f"  Overall:           {len(guard_ok)}/{len(polished)}  ({pass_rate * 100:.1f}%)",
+            "",
+            "  By element type:",
+        ]
+        for et, segs in sorted(by_type.items()):
+            ok = sum(1 for s in segs if s.guard_flags.get("ok"))
+            lines.append(f"    {et:<30} {ok}/{len(segs)}  ({ok / len(segs) * 100:.1f}%)")
 
-    if guard_fail:
-        lines += ["", "GUARD FAILURES (segment_id — failing flags)"]
-        for s in guard_fail:
-            f = s.guard_flags
-            failing = []
-            if f.get("sentence_delta", 0) != 0:
-                failing.append(f"sentence_delta={f['sentence_delta']}")
-            if not f.get("term_retention_ok", True):
-                failing.append(f"missing_terms={f.get('missing_terms')}")
-            if not f.get("particle_retention_ok", True):
-                failing.append(f"missing_particles={f.get('missing_particles')}")
-            ratio = f.get("length_ratio", 1.0)
-            if not (0.5 <= ratio <= 2.0):
-                failing.append(f"length_ratio={ratio}")
-            lines.append(f"  segment_id={s.segment_id} ({s.element_type}): {'; '.join(failing)}")
+        avg_cost = f"${polish_cost / len(polished):.5f}" if polished else "N/A"
+        lines += [
+            "",
+            f"POLISH COST (Anthropic {POLISH_MODEL})",
+            f"  Total:             ${polish_cost:.4f}",
+            f"  Avg per segment:   {avg_cost}",
+        ]
+        if guard_fail:
+            lines += ["", "GUARD FAILURES (segment_id — failing flags)"]
+            for s in guard_fail:
+                f = s.guard_flags
+                failing = []
+                if f.get("sentence_delta", 0) != 0:
+                    failing.append(f"sentence_delta={f['sentence_delta']}")
+                if not f.get("term_retention_ok", True):
+                    failing.append(f"missing_terms={f.get('missing_terms')}")
+                if not f.get("particle_retention_ok", True):
+                    failing.append(f"missing_particles={f.get('missing_particles')}")
+                ratio = f.get("length_ratio", 1.0)
+                if not (0.5 <= ratio <= 2.0):
+                    failing.append(f"length_ratio={ratio}")
+                lines.append(f"  segment_id={s.segment_id} ({s.element_type}): {'; '.join(failing)}")
 
     _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     path = _REPORTS_DIR / "m5_polish_sample.txt"

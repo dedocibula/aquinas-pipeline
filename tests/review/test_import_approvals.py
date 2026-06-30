@@ -199,9 +199,10 @@ def test_process_approval_blank_db_version_is_conflict(fake_conn):
 
 
 def test_process_approval_already_confirmed_on_rerun(fake_conn):
-    """Re-run: version bumped by prior import → approved + version mismatch → ALREADY_CONFIRMED."""
+    """Re-run: already approved and SK unchanged → ALREADY_CONFIRMED, no version bump."""
     conn = fake_conn(fetchone_results=[
-        (101, 2, "approved"),   # DB version 2, sheet still has 1 from before first import
+        (101, 2, "approved"),   # get_current_sense
+        ("rozum",),             # get_sk_rendering_content — same as _row default → no bump
     ])
     status, bumped = process_approval(conn, _row(db_version=1), human_src_id=6)
     assert status == "ALREADY_CONFIRMED"

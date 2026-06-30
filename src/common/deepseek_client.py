@@ -81,9 +81,15 @@ class DeepSeekClient:
         temperature: float,
         max_tokens: int,
         response_format: dict | None = None,
+        thinking: dict | None = None,
         timeout: int | None = None,
     ) -> ChatResult:
         """POST one chat completion and return its content + usage.
+
+        ``thinking`` controls V4 thinking mode: pass ``{"type": "disabled"}``
+        for non-reasoning calls (translator) or ``{"type": "enabled"}`` for
+        reasoning calls (reviewer).  Omit for legacy model aliases that ignore
+        the field.
 
         Raises:
             RuntimeError: if the API key is unset, the transport fails, or the
@@ -104,6 +110,8 @@ class DeepSeekClient:
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if thinking is not None:
+            payload["thinking"] = thinking
 
         try:
             resp = requests.post(

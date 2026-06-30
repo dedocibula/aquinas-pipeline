@@ -54,8 +54,13 @@ WITH base AS (
         )                   AS group_id
     FROM glossary_term gt
     JOIN glossary_sense gs ON gs.term_id = gt.term_id
-    LEFT JOIN sense_rendering sr_sk
-           ON sr_sk.sense_id = gs.sense_id AND sr_sk.lang = 'sk'
+    LEFT JOIN (
+        SELECT DISTINCT ON (sr.sense_id) sr.sense_id, sr.content
+        FROM sense_rendering sr
+        JOIN source src ON src.source_id = sr.source_id
+        WHERE sr.lang = 'sk'
+        ORDER BY sr.sense_id, src.authority_rank
+    ) sr_sk ON sr_sk.sense_id = gs.sense_id
     LEFT JOIN (
         SELECT tu.sense_id,
                mode() WITHIN GROUP (ORDER BY tu.resolution_method)              AS method,

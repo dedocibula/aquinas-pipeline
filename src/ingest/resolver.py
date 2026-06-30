@@ -34,7 +34,7 @@ Determinism: all intermediate collections are sorted; no randomness.
 DeepSeek env vars:
   DEEPSEEK_API_KEY  — required when gap terms exist
   DEEPSEEK_API_URL  — default: https://api.deepseek.com/v1/chat/completions
-  DEEPSEEK_MODEL    — default: deepseek-chat
+  DEEPSEEK_MODEL    — default: deepseek-v4-flash
 
 Run:
   uv run python -m ingest.resolver

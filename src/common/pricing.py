@@ -5,9 +5,10 @@ All prices are in USD per token.
 
 Sources:
   DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
-    deepseek-chat and deepseek-reasoner are deprecated aliases retiring 2026-07-24;
-    they currently route to deepseek-v4-flash and deepseek-v4-pro.
-  Anthropic: https://www.anthropic.com/pricing (claude-sonnet-4-6)
+    Pipeline defaults: deepseek-v4-flash (translator, thinking disabled) and
+    deepseek-v4-flash (reviewer, thinking enabled).  Legacy aliases deepseek-chat
+    and deepseek-reasoner retire 2026-07-24 and are kept for pricing lookups only.
+  Anthropic: https://www.anthropic.com/pricing (claude-sonnet-4-6, claude-haiku-4-5-20251001)
     Batch API = 50% off all rates.
 """
 
@@ -68,6 +69,18 @@ PRICING: dict[str, dict[str, float]] = {
         "cache_miss":     1.50 / 1_000_000,
         "cache_creation": 1.875 / 1_000_000,
         "output":         7.50 / 1_000_000,
+    },
+    "claude-haiku-4-5-20251001": {
+        "cache_hit":      0.08 / 1_000_000,
+        "cache_miss":     0.80 / 1_000_000,
+        "cache_creation": 1.00 / 1_000_000,
+        "output":         4.00 / 1_000_000,
+    },
+    "claude-haiku-4-5-20251001-batch": {
+        "cache_hit":      0.04 / 1_000_000,
+        "cache_miss":     0.40 / 1_000_000,
+        "cache_creation": 0.50 / 1_000_000,
+        "output":         2.00 / 1_000_000,
     },
 }
 

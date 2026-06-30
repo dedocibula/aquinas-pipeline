@@ -26,6 +26,7 @@ from anthropic.types.message_create_params import MessageCreateParamsNonStreamin
 from anthropic.types.messages.batch_create_params import Request
 from dotenv import load_dotenv
 
+from common.pricing import extract_anthropic_usage
 from common.prompt_blocks import build_hard_constraints_block
 from polish.guards import run_guards
 from storage.db import get_conn, source_id
@@ -35,7 +36,8 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5-20251001"
+_BATCH_MODEL = MODEL + "-batch"  # pricing key for 50%-off batch rates
 MAX_TOKENS = 2048
 BATCH_SIZE = 10_000  # well under the 100,000 limit per batch
 POLL_INTERVAL = 60  # seconds
@@ -116,6 +118,7 @@ class _SegmentPayload:
     segment_id: int
     model_text: str
     constraints: list[dict] = field(default_factory=list)
+    reviewer_notes: str | None = None
 
 
 def _build_payload(conn, segment_id: int) -> _SegmentPayload | None:
@@ -137,13 +140,24 @@ def _build_payload(conn, segment_id: int) -> _SegmentPayload | None:
         return None
 
     constraints = [c.to_prompt_dict() for c in GlossaryRepository(conn).locked_terms(segment_id)]
-    return _SegmentPayload(segment_id=segment_id, model_text=row[0], constraints=constraints)
+    reviewer_notes = SegmentRepository(conn).get_reviewer_notes_text(segment_id)
+    return _SegmentPayload(
+        segment_id=segment_id,
+        model_text=row[0],
+        constraints=constraints,
+        reviewer_notes=reviewer_notes,
+    )
 
 
 def _build_request(payload: _SegmentPayload, system_text: str) -> Request:
     constraints_block = build_hard_constraints_block(payload.constraints)
+    notes_block = (
+        f"<reviewer_notes>\n{payload.reviewer_notes}\n</reviewer_notes>\n\n"
+        if payload.reviewer_notes else ""
+    )
     user_content = (
         f"<source_draft>\n{payload.model_text}\n</source_draft>\n\n"
+        f"{notes_block}"
         f"{constraints_block}\n\n"
         "Polish the Slovak draft above. Output only the polished Slovak text."
     )
@@ -239,20 +253,9 @@ def _process_results(
             stats.errored += 1
             continue
 
-        # accumulate cost — batch = 50% off standard rates
-        # Three separate billing buckets: input, cache-write, cache-read
-        usage = msg.usage
-        input_tokens  = usage.input_tokens or 0
-        cache_write   = usage.cache_creation_input_tokens or 0
-        output_tokens = usage.output_tokens or 0
-        cache_read    = usage.cache_read_input_tokens or 0
-        # Batch pricing per 1M: input $1.50, cache-write $1.875, output $7.50, cache-read $0.15
-        stats.cost_usd += (
-            input_tokens  * 1.500 / 1_000_000
-            + cache_write * 1.875 / 1_000_000
-            + output_tokens * 7.50 / 1_000_000
-            + cache_read  * 0.150 / 1_000_000
-        )
+        # accumulate cost via pricing.py (50%-off batch rates)
+        usage_info = extract_anthropic_usage(_BATCH_MODEL, msg)
+        stats.cost_usd += usage_info.cost_usd
 
         flags = run_guards(payload.model_text, polished, payload.constraints)
         if not flags["ok"]:

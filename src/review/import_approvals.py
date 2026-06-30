@@ -112,9 +112,19 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     if sheet_version is None:
         return "CONFLICT", False
 
+    raw_label = (row.get("context_label") or "").strip()
+    new_label = raw_label if raw_label else None
+
     if current["status"] == "approved":
-        # Already approved — idempotent skip regardless of version.
-        return "ALREADY_CONFIRMED", False
+        # Sense already approved — apply content corrections if anything changed.
+        current_sk = glossary.get_sk_rendering_content(sense_id_val)
+        version_bumped = False
+        if new_slovak and new_slovak != current_sk:
+            glossary.write_human_rendering(sense_id_val, new_slovak, human_src_id)
+            glossary.bump_sense_version(sense_id_val)
+            version_bumped = True
+        glossary.write_context_label(sense_id_val, new_label)
+        return ("OK" if version_bumped else "ALREADY_CONFIRMED"), version_bumped
 
     # For proposed senses, a version mismatch means the DB was bumped after export
     # (e.g. sense-mining re-resolution). The human has seen this sense and explicitly
@@ -123,8 +133,7 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
     glossary.write_human_rendering(sense_id_val, new_slovak, human_src_id)
 
     # Write context_label — empty string becomes NULL; does NOT bump version.
-    raw_label = (row.get("context_label") or "").strip()
-    glossary.write_context_label(sense_id_val, raw_label if raw_label else None)
+    glossary.write_context_label(sense_id_val, new_label)
 
     # Always bump on approval: marks all term_usage rows using any prior version
     # as stale so rerun_stale picks them up.
@@ -197,6 +206,45 @@ def process_new_term(conn, row: dict, human_src_id: int) -> str:
     return "UPDATED"
 
 
+def _sort_label_updates(conn, rows: list[dict]) -> list[dict]:
+    """Sort rows so a sense vacating a label comes before a sense claiming that same label.
+
+    Without this, a label-swap within the same term (e.g. A→X and B→A where B currently
+    holds A) triggers a unique constraint violation if B is processed before A.
+    """
+    sense_ids = [r["sense_id"] for r in rows if r["sense_id"] is not None]
+    if not sense_ids:
+        return rows
+
+    current_label = GlossaryRepository(conn).get_context_labels(sense_ids)
+
+    # label → sense_id that currently holds it (only for senses in this batch)
+    holder_of: dict[str, int] = {
+        lbl: sid for sid, lbl in current_label.items() if lbl is not None
+    }
+
+    result = list(rows)
+    changed = True
+    while changed:
+        changed = False
+        for i, row in enumerate(result):
+            if row["sense_id"] is None:
+                continue
+            new_label = (row.get("context_label") or "").strip() or None
+            if new_label is None:
+                continue
+            holder_id = holder_of.get(new_label)
+            if holder_id is None or holder_id == row["sense_id"]:
+                continue
+            # Find the holder later in the list and move it before this row
+            for j in range(i + 1, len(result)):
+                if result[j].get("sense_id") == holder_id:
+                    result.insert(i, result.pop(j))
+                    changed = True
+                    break
+    return result
+
+
 def run() -> None:
     spreadsheet_id = get_spreadsheet_id()
     client = authenticate()
@@ -214,6 +262,7 @@ def run() -> None:
 
     with get_conn() as conn:
         human_src_id = source_id(conn, "human")
+        approved_rows = _sort_label_updates(conn, approved_rows)
         for row in approved_rows:
             if row["sense_id"] is None:
                 status = process_new_term(conn, row, human_src_id)

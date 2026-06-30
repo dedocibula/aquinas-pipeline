@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT: str | None = None
 _PROMPTS_DIR = pathlib.Path(__file__).resolve().parents[2] / "prompts"
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 2048
 
 
@@ -119,8 +119,14 @@ def polish_segment(
     constraints = [c.to_prompt_dict() for c in locked_terms]
 
     constraints_block = build_hard_constraints_block(constraints)
+    reviewer_notes = SegmentRepository(conn).get_reviewer_notes_text(segment_id)
+    notes_block = (
+        f"<reviewer_notes>\n{reviewer_notes}\n</reviewer_notes>\n\n"
+        if reviewer_notes else ""
+    )
     user_content = (
         f"<source_draft>\n{model_text}\n</source_draft>\n\n"
+        f"{notes_block}"
         f"{constraints_block}\n\n"
         "Polish the Slovak draft above. Output only the polished Slovak text."
     )

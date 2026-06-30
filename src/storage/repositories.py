@@ -310,6 +310,19 @@ class GlossaryRepository:
             row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_context_labels(self, sense_ids: list[int]) -> dict[int, str | None]:
+        """Return {sense_id: context_label} for the given sense IDs."""
+        if not sense_ids:
+            return {}
+        placeholders = ",".join(["%s"] * len(sense_ids))
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"SELECT sense_id, context_label FROM glossary_sense"
+                f" WHERE sense_id IN ({placeholders})",
+                sense_ids,
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+
     def get_sk_rendering_content(self, sense_id: int) -> str | None:
         """Return highest-authority SK content for a sense, or None if absent."""
         with self.conn.cursor() as cur:
@@ -502,6 +515,19 @@ class SegmentRepository:
                 "UPDATE segment SET reviewer_notes = %s WHERE segment_id = %s",
                 (psycopg2.extras.Json(payload), segment_id),
             )
+
+    def get_reviewer_notes_text(self, segment_id: int) -> str | None:
+        """Return the raw APPROVED_WITH_NOTES text for a segment, or None."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT reviewer_notes FROM segment WHERE segment_id = %s",
+                (segment_id,),
+            )
+            row = cur.fetchone()
+        if not row or not row[0]:
+            return None
+        notes = row[0]
+        return notes.get("raw") if isinstance(notes, dict) else None
 
     def update_sense_version_used(self, segment_id: int, sense_id: int, version: int) -> None:
         with self.conn.cursor() as cur:

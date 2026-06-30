@@ -114,7 +114,7 @@ def test_avg_iterations_counts_translator_calls():
     r = _result(
         "I.q1.a1",
         translated=2,
-        usages=[_usage(0.01, model="deepseek-chat"), _usage(0.01, model="deepseek-chat")],
+        usages=[_usage(0.01, model="deepseek-v4-flash"), _usage(0.01, model="deepseek-v4-flash")],
     )
     assert abs(_avg_iterations([r]) - 1.0) < 1e-9
 

@@ -387,7 +387,7 @@ def _cache_hit_rate(usages: list[UsageInfo]) -> float:
 
 def _avg_iterations(results: list[ArticleResult]) -> float:
     total_segs = sum(r.translated + r.needs_human for r in results)
-    # Approximate iterations by counting translator (deepseek-chat) API calls.
+    # Approximate iterations by counting translator (deepseek-v4-flash) API calls.
     # Each loop iteration calls the translator once, so calls / segments ≈ avg iterations.
     from translate.translator import _DEEPSEEK_MODEL  # avoid circular at module level
 

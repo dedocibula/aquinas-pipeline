@@ -18,7 +18,7 @@ load_dotenv()
 _DEEPSEEK_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
-_DEEPSEEK_R1_MODEL = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-reasoner")
+_DEEPSEEK_R1_MODEL = os.environ.get("DEEPSEEK_R1_MODEL", "deepseek-v4-flash")
 
 # R1 spends its token budget on reasoning + output; give it a long ceiling and timeout.
 _client = DeepSeekClient(_DEEPSEEK_R1_MODEL, url=_DEEPSEEK_URL, timeout=150)
@@ -97,7 +97,8 @@ def call_reviewer_r1(
             {"role": "user", "content": user_content},
         ],
         temperature=0.0,
-        max_tokens=8000,  # R1 reasoning + output share this budget; 1024 was too low
+        max_tokens=8000,  # reasoning + output share this budget; 1024 was too low
+        thinking={"type": "enabled"},
     )
 
     result = _parse_verdict(chat.content.strip())

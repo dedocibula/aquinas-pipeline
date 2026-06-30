@@ -294,7 +294,7 @@ def test_write_polish_report_cost(tmp_path):
     with patch("optimize.pilot._REPORTS_DIR", tmp_path):
         _write_polish_report(stats_list=stats, sample_file=_SAMPLE_FILE)
     content = (tmp_path / "m5_polish_sample.txt").read_text()
-    assert "claude-sonnet-4-6" in content
+    assert "claude-haiku-4-5-20251001" in content
     assert "0.0020" in content
 
 
