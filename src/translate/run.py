@@ -52,7 +52,6 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
 # Batches are submitted fire-and-forget while translation continues; all
 # outstanding batches are collected (blocking) at the end of the run.
 # 0 (default) disables pipelined polish entirely.
-_POLISH_BATCH_SIZE = int(os.getenv("POLISH_BATCH_SIZE", "0"))
 
 
 def _filter_locators(
@@ -275,27 +274,46 @@ def translate_corpus(
 
     results: list[ArticleResult] = []
     pending_polish_ids: list[str] = []
+    # Read at call time so tests can set the env var after module import.
+    polish_batch_size = int(os.getenv("POLISH_BATCH_SIZE", "0"))
 
-    if _POLISH_BATCH_SIZE > 0:
+    if polish_batch_size > 0:
         # Pipelined mode: collect article results one at a time and submit polish
-        # batches every POLISH_BATCH_SIZE translated segments.  Other article
-        # tasks continue running in the thread pool while we submit each batch,
-        # so Anthropic processes polish while translation is still going.
+        # batches every POLISH_BATCH_SIZE translated segments.  Pass the exact
+        # segment IDs translated since the last submit so we never re-queue
+        # segments that are already in-flight in a previous batch.
+        # Errors in _submit_polish_batch are caught and logged — a submit failure
+        # must not abort the translation run.
+        new_translated_ids: list[int] = []
         translated_since_last_batch = 0
         for fut in futures:
             article = fut.result()
             results.append(article)
+            new_translated_ids.extend(
+                r["segment_id"]
+                for r in (article.segment_records or [])
+                if r.get("final_status") == "translated"
+            )
             translated_since_last_batch += article.translated
-            if translated_since_last_batch >= _POLISH_BATCH_SIZE:
-                batch_ids = _submit_polish_batch()
-                if batch_ids:
-                    pending_polish_ids.append(batch_ids)
-                    log.info("pipelined polish: submitted batch %s", batch_ids)
+            if translated_since_last_batch >= polish_batch_size:
+                try:
+                    batch_ids = _submit_polish_batch(segment_ids=new_translated_ids)
+                    if batch_ids:
+                        pending_polish_ids.append(batch_ids)
+                        log.info("pipelined polish: submitted batch %s", batch_ids)
+                except Exception as exc:
+                    log.error("pipelined polish: submit failed (continuing): %s", exc)
+                new_translated_ids = []
                 translated_since_last_batch = 0
         # Final batch for segments translated since the last threshold
-        final_ids = _submit_polish_batch()
-        if final_ids:
-            pending_polish_ids.append(final_ids)
+        try:
+            final_ids = _submit_polish_batch(
+                segment_ids=new_translated_ids if new_translated_ids else None
+            )
+            if final_ids:
+                pending_polish_ids.append(final_ids)
+        except Exception as exc:
+            log.error("pipelined polish: final submit failed: %s", exc)
     else:
         results = [f.result() for f in futures]
 

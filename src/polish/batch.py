@@ -64,12 +64,14 @@ def fetch_batch_candidates(
     *,
     element_types: list[str] | None = None,
     limit: int | None = None,
+    segment_ids: list[int] | None = None,
 ) -> list[int]:
     """Return segment_ids eligible for batch polishing.
 
     Eligible = translation_status='translated' AND no (sk,human) row AND no
     existing (sk,polish) row (skip-already-done rule).  Optionally filtered by
-    element_type and capped by limit.
+    element_type, capped by limit, or restricted to a specific set of IDs
+    (used by the pipelined path to avoid re-queuing in-flight segments).
     """
     type_clause = ""
     params: list = []
@@ -77,6 +79,11 @@ def fetch_batch_candidates(
         placeholders = ", ".join(["%s"] * len(element_types))
         type_clause = f"AND seg.element_type IN ({placeholders})"
         params.extend(element_types)
+
+    id_clause = ""
+    if segment_ids is not None:
+        id_clause = "AND seg.segment_id = ANY(%s)"
+        params.append(segment_ids)
 
     limit_clause = ""
     if limit is not None:
@@ -102,6 +109,7 @@ def fetch_batch_candidates(
                 AND s.code = 'polish'
           )
           {type_clause}
+          {id_clause}
         ORDER BY seg.segment_id
         {limit_clause}
     """
@@ -215,17 +223,16 @@ class _BatchStats:
 
 
 def _process_results(
-    client: anthropic.Anthropic,
-    batch_id: str,
+    results_list: list,
     payloads: dict[int, _SegmentPayload],
     conn,
     src_polish_id: int,
     stats: _BatchStats,
 ) -> None:
-    """Iterate results keyed by custom_id; write guard-passing segments immediately."""
+    """Iterate pre-fetched results keyed by custom_id; write guard-passing segments."""
     seg_repo = SegmentRepository(conn)
 
-    for result in client.messages.batches.results(batch_id):
+    for result in results_list:
         seg_id = int(result.custom_id)
         stats.total += 1
 
@@ -321,6 +328,7 @@ def submit_batch(
     *,
     element_types: list[str] | None = None,
     limit: int | None = None,
+    segment_ids: list[int] | None = None,
     _client: anthropic.Anthropic | None = None,
 ) -> str | None:
     """Fetch pending-polish segments, build payloads, submit Batch API chunks.
@@ -328,22 +336,28 @@ def submit_batch(
     Returns a comma-joined batch_id string (one id per BATCH_SIZE chunk), or
     None when there are no eligible candidates.  Does NOT poll or process
     results — call collect_batch() when ready to wait for completion.
+
+    segment_ids: when provided, only consider these specific segments (used by
+    the pipelined path in translate.run to avoid re-queuing in-flight segments
+    that were submitted in a previous batch but not yet collected).
     """
     client = _client if _client is not None else anthropic.Anthropic()
     system_text = _load_system()
 
     with get_conn() as conn:
-        segment_ids = fetch_batch_candidates(conn, element_types=element_types, limit=limit)
+        candidate_ids = fetch_batch_candidates(
+            conn, element_types=element_types, limit=limit, segment_ids=segment_ids
+        )
 
-    if not segment_ids:
+    if not candidate_ids:
         log.info("submit_batch: no candidates; nothing to submit")
         return None
 
-    log.info("submit_batch: %d candidate segments", len(segment_ids))
+    log.info("submit_batch: %d candidate segments", len(candidate_ids))
 
     payloads: dict[int, _SegmentPayload] = {}
     with get_conn() as conn:
-        for seg_id in segment_ids:
+        for seg_id in candidate_ids:
             p = _build_payload(conn, seg_id)
             if p is not None:
                 payloads[seg_id] = p
@@ -384,21 +398,37 @@ def collect_batch(
     for batch_id in batch_ids:
         _poll_batch(client, batch_id)
 
+        # Materialise once — avoids a second HTTP round-trip and ensures both
+        # passes see the exact same result set.
+        results_list = list(client.messages.batches.results(batch_id))
+
         with get_conn() as conn:
             src_polish_id = source_id(conn, "polish")
-            # First pass: collect segment_ids to rebuild payload map.
-            # batches.results() makes a fresh HTTP request each call, so two
-            # passes are safe and cheaper than persisting payloads across time.
-            seg_ids = [int(r.custom_id) for r in client.messages.batches.results(batch_id)]
+            # First pass: rebuild payload map from result custom_ids.
+            # Skip segments already polished (crash-and-resume safety: a prior
+            # collect_batch may have committed some rows before crashing).
             payloads: dict[int, _SegmentPayload] = {}
-            for seg_id in seg_ids:
+            for r in results_list:
+                seg_id = int(r.custom_id)
+                # Already-polished check (same guard as fetch_batch_candidates)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM segment_text st"
+                        " JOIN source s ON s.source_id = st.source_id"
+                        " WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'polish'"
+                        " LIMIT 1",
+                        (seg_id,),
+                    )
+                    if cur.fetchone():
+                        stats.polished += 1  # count as done, skip re-processing
+                        continue
                 p = _build_payload(conn, seg_id)
                 if p is not None:
                     payloads[seg_id] = p
                 else:
                     stats.no_source += 1
-            # Second pass: process results
-            _process_results(client, batch_id, payloads, conn, src_polish_id, stats)
+            # Second pass: process results using the materialised list
+            _process_results(results_list, payloads, conn, src_polish_id, stats)
 
     return stats
 
@@ -462,9 +492,10 @@ def run_batch(
         _poll_batch(client, batch_id)
 
         chunk_payloads = {p.segment_id: p for p in chunk}
+        results_list = list(client.messages.batches.results(batch_id))
         with get_conn() as conn:
             src_polish_id = source_id(conn, "polish")
-            _process_results(client, batch_id, chunk_payloads, conn, src_polish_id, stats)
+            _process_results(results_list, chunk_payloads, conn, src_polish_id, stats)
 
     elapsed = time.monotonic() - start
     _write_report(stats, elapsed, num_batches)

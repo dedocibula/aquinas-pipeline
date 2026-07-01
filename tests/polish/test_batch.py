@@ -185,8 +185,6 @@ def test_process_results_writes_guard_passing_segment():
     payload = _SegmentPayload(segment_id=1, model_text=model_text, constraints=[])
 
     succeeded = _make_succeeded_result("1", polished_text)
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([succeeded])
 
     conn = MagicMock()
     seg_repo = MagicMock()
@@ -204,7 +202,7 @@ def test_process_results_writes_guard_passing_segment():
 
     with patch("polish.batch.SegmentRepository", return_value=seg_repo):
         with patch("polish.batch.run_guards", return_value=guard_ok):
-            _process_results(client, "batch_id", {1: payload}, conn, src_polish_id=8, stats=stats)
+            _process_results([succeeded], {1: payload}, conn, src_polish_id=8, stats=stats)
 
     seg_repo.write_segment_text.assert_called_once_with(1, "sk", 8, polished_text)
     conn.commit.assert_called_once()
@@ -219,8 +217,6 @@ def test_process_results_skips_guard_failing_segment():
     payload = _SegmentPayload(segment_id=2, model_text=model_text, constraints=[])
 
     succeeded = _make_succeeded_result("2", polished_text)
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([succeeded])
 
     conn = MagicMock()
     seg_repo = MagicMock()
@@ -238,7 +234,7 @@ def test_process_results_skips_guard_failing_segment():
 
     with patch("polish.batch.SegmentRepository", return_value=seg_repo):
         with patch("polish.batch.run_guards", return_value=guard_fail):
-            _process_results(client, "batch_id", {2: payload}, conn, src_polish_id=8, stats=stats)
+            _process_results([succeeded], {2: payload}, conn, src_polish_id=8, stats=stats)
 
     seg_repo.write_segment_text.assert_not_called()
     conn.commit.assert_not_called()
@@ -248,15 +244,13 @@ def test_process_results_skips_guard_failing_segment():
 
 def test_process_results_counts_errored_results():
     errored = _make_errored_result("3")
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([errored])
 
     conn = MagicMock()
     seg_repo = MagicMock()
     stats = _BatchStats()
 
     with patch("polish.batch.SegmentRepository", return_value=seg_repo):
-        _process_results(client, "batch_id", {}, conn, src_polish_id=8, stats=stats)
+        _process_results([errored], {}, conn, src_polish_id=8, stats=stats)
 
     seg_repo.write_segment_text.assert_not_called()
     assert stats.errored == 1
@@ -268,8 +262,6 @@ def test_process_results_accumulates_cost():
     # Give cache_creation_input_tokens a non-zero value to exercise the cache-write bucket
     result_ns = _make_succeeded_result("10", "polished text")
     result_ns.result.message.usage.cache_creation_input_tokens = 80
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([result_ns])
 
     conn = MagicMock()
     stats = _BatchStats()
@@ -281,7 +273,7 @@ def test_process_results_accumulates_cost():
 
     with patch("polish.batch.SegmentRepository", return_value=MagicMock()):
         with patch("polish.batch.run_guards", return_value=guard_ok):
-            _process_results(client, "batch_id", {10: payload}, conn, src_polish_id=8, stats=stats)
+            _process_results([result_ns], {10: payload}, conn, src_polish_id=8, stats=stats)
 
     # Fixture: input=100, cache_write=80, output=50, cache_read=200
     # Haiku batch pricing per 1M: input $0.40, cache-write $0.50, output $2.00, cache-read $0.04
@@ -301,8 +293,6 @@ def test_process_results_db_write_error_continues_iteration():
 
     r1 = _make_succeeded_result("1", "polished 1")
     r2 = _make_succeeded_result("2", "polished 2")
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([r1, r2])
 
     conn = MagicMock()
     seg_repo = MagicMock()
@@ -317,7 +307,7 @@ def test_process_results_db_write_error_continues_iteration():
 
     with patch("polish.batch.SegmentRepository", return_value=seg_repo):
         with patch("polish.batch.run_guards", return_value=guard_ok):
-            _process_results(client, "batch_id", {1: payload_1, 2: payload_2},
+            _process_results([r1, r2], {1: payload_1, 2: payload_2},
                              conn, src_polish_id=8, stats=stats)
 
     assert stats.errored == 1
@@ -333,8 +323,6 @@ def test_process_results_unordered_results_matched_by_custom_id():
     # Results arrive in reverse order
     r20 = _make_succeeded_result("20", "polished B")
     r10 = _make_succeeded_result("10", "polished A")
-    client = MagicMock()
-    client.messages.batches.results.return_value = iter([r20, r10])
 
     conn = MagicMock()
     seg_repo = MagicMock()
@@ -347,7 +335,7 @@ def test_process_results_unordered_results_matched_by_custom_id():
 
     with patch("polish.batch.SegmentRepository", return_value=seg_repo):
         with patch("polish.batch.run_guards", return_value=guard_ok):
-            _process_results(client, "batch_id", {10: payload_10, 20: payload_20},
+            _process_results([r20, r10], {10: payload_10, 20: payload_20},
                              conn, src_polish_id=8, stats=stats)
 
     assert stats.polished == 2
@@ -564,15 +552,18 @@ def test_collect_batch_polls_and_processes():
 
     succeeded = _make_succeeded_result("1", polished_text)
     fake_client = _fake_client([succeeded])
-    # First results() call (ID collection) and second (processing) return same data
-    fake_client.messages.batches.results.side_effect = [
-        iter([succeeded]),
-        iter([succeeded]),
-    ]
+    # Single results() call — list is materialised once and used for both passes.
+    fake_client.messages.batches.results.return_value = iter([succeeded])
 
     conn = MagicMock()
     conn.__enter__ = lambda s: conn
     conn.__exit__ = MagicMock(return_value=False)
+    # Already-polished check must return None (no existing polish row).
+    cur = MagicMock()
+    cur.__enter__ = lambda s: cur
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = None
+    conn.cursor.return_value = cur
 
     with patch("polish.batch.get_conn", return_value=conn):
         with patch("polish.batch._build_payload", return_value=payload):
@@ -581,6 +572,7 @@ def test_collect_batch_polls_and_processes():
                     with patch("polish.batch.run_guards", return_value=guard_ok):
                         stats = collect_batch("msgbatch_test001", _client=fake_client)
 
+    assert fake_client.messages.batches.results.call_count == 1
     assert stats.polished == 1
     assert stats.errored == 0
 
