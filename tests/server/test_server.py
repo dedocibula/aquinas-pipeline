@@ -111,6 +111,7 @@ FAKE_SEGMENTS = [
         "czech": "Avšak proti tomu.",
         "english": "On the contrary.",
         "slovak_model": "Na druhej strane:",
+        "slovak_polish": None,
         "slovak_human": None,
         "human_note": None,
         "human_reviewed_by": None,
@@ -127,6 +128,7 @@ FAKE_SEGMENTS = [
         "czech": "Odpovídám.",
         "english": "I answer that.",
         "slovak_model": "Odpoveď:",
+        "slovak_polish": None,
         "slovak_human": None,
         "human_note": None,
         "human_reviewed_by": None,
@@ -143,6 +145,7 @@ FAKE_SEGMENTS = [
         "czech": "K první námitce.",
         "english": "Reply to objection 1.",
         "slovak_model": "K námietke 1.",
+        "slovak_polish": None,
         "slovak_human": None,
         "human_note": None,
         "human_reviewed_by": None,
@@ -996,272 +999,69 @@ def test_get_question_articles_sql_includes_needs_human_count():
 
 
 # ---------------------------------------------------------------------------
-# /api/segment/<id>/polish route tests
+# /api/segment/<id>/approve and /unapprove route tests
 # ---------------------------------------------------------------------------
 
 
-def test_polish_route_returns_403_for_non_editor(client):
-    """POST /api/segment/<id>/polish returns 403 for non-editor."""
-    resp = client.post("/api/segment/1/polish")
+def test_approve_route_returns_403_for_non_editor(client):
+    """POST /api/segment/<id>/approve returns 403 for non-editor."""
+    resp = client.post("/api/segment/1/approve")
     assert resp.status_code == 403
     assert resp.get_json() == {"ok": False, "error": "forbidden"}
 
 
-def test_polish_route_polishes_translated_segment(editor_client):
-    """POST /api/segment/<id>/polish returns 200 with polished_text + guard_flags."""
-    from polish.polisher import PolishOutcome
-
-    outcome = PolishOutcome(
-        segment_id=1,
-        guard_flags={"ok": True, "length_ratio": 1.02},
-        polished_text="Polished text.",
-    )
-    with (
-        patch("server.app.get_conn", make_fake_get_conn()),
-        patch(
-            "server.app.polish_segment",
-            return_value=("polished", [], outcome),
-        ),
-    ):
-        # Patch the DB query for translation_status inside get_conn
-        from contextlib import contextmanager
-        stub = MagicMock()
-        cur = MagicMock()
-        cur.__enter__ = MagicMock(return_value=cur)
-        cur.__exit__ = MagicMock(return_value=False)
-        cur.fetchone.return_value = ("translated",)
-        stub.cursor.return_value = cur
-
-        @contextmanager
-        def fake_gc_translated():
-            yield stub
-
-        with patch("server.app.get_conn", fake_gc_translated):
-            resp = editor_client.post("/api/segment/1/polish")
-
+def test_approve_route_flips_needs_human_to_translated(editor_client):
+    """POST /api/segment/<id>/approve returns 200 when segment is needs_human."""
+    with patch("server.app.approve_segment", return_value="ok"):
+        resp = editor_client.post("/api/segment/1/approve")
     assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["ok"] is True
-    assert data["polished_text"] == "Polished text."
-    assert data["guard_flags"] == {"ok": True, "length_ratio": 1.02}
-    assert data["flipped"] is False
+    assert resp.get_json() == {"ok": True}
 
 
-def test_polish_route_flips_needs_human_to_translated(editor_client):
-    """POST /api/segment/<id>/polish flips needs_human → translated and sets flipped=True.
-
-    Atomicity: both the (sk,polish) write (inside polish_segment with _autocommit=False)
-    and the status flip must be committed exactly once, together.
-    """
-    from contextlib import contextmanager
-
-    from polish.polisher import PolishOutcome
-
-    outcome = PolishOutcome(
-        segment_id=2,
-        guard_flags={"ok": True, "length_ratio": 1.0},
-        polished_text="Polished.",
-    )
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("needs_human",)
-    stub.cursor.return_value = cur
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", return_value=("polished", [], outcome)),
-    ):
-        resp = editor_client.post("/api/segment/2/polish")
-
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["ok"] is True
-    assert data["flipped"] is True
-    # The status UPDATE must be present
-    sql_calls = [c[0][0] for c in cur.execute.call_args_list]
-    assert any("translation_status" in s and "translated" in s for s in sql_calls)
-    # Exactly one commit: (sk,polish) write + status flip are atomic
-    assert stub.commit.call_count == 1
-
-
-def test_polish_route_single_commit_when_no_flip(editor_client):
-    """No status flip for translated segments — still exactly one commit."""
-    from contextlib import contextmanager
-
-    from polish.polisher import PolishOutcome
-
-    outcome = PolishOutcome(
-        segment_id=2,
-        guard_flags={"ok": True, "length_ratio": 1.0},
-        polished_text="Polished.",
-    )
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("translated",)
-    stub.cursor.return_value = cur
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", return_value=("polished", [], outcome)),
-    ):
-        resp = editor_client.post("/api/segment/2/polish")
-
-    assert resp.status_code == 200
-    assert resp.get_json()["flipped"] is False
-    assert stub.commit.call_count == 1
-
-
-def test_polish_route_calls_polish_segment_with_autocommit_false(editor_client):
-    """The endpoint must pass _autocommit=False so both writes share one commit.
-
-    Without _autocommit=False, polish_segment would commit the (sk,polish) write
-    internally and the status flip would land in a separate transaction.
-    """
-    from contextlib import contextmanager
-
-    from polish.polisher import PolishOutcome
-
-    outcome = PolishOutcome(
-        segment_id=6,
-        guard_flags={"ok": True, "length_ratio": 1.0},
-        polished_text="Polished.",
-    )
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("translated",)
-    stub.cursor.return_value = cur
-
-    captured_kwargs: dict = {}
-
-    def fake_polish(segment_id, conn, **kwargs):
-        captured_kwargs.update(kwargs)
-        return "polished", [], outcome
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", side_effect=fake_polish),
-    ):
-        editor_client.post("/api/segment/6/polish")
-
-    assert captured_kwargs.get("_autocommit") is False
-
-
-def test_polish_route_returns_409_when_human_exists(editor_client):
-    """POST /api/segment/<id>/polish returns 409 when (sk,human) row blocks polish."""
-    from contextlib import contextmanager
-
-    from polish.polisher import PolishOutcome
-
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("translated",)
-    stub.cursor.return_value = cur
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    outcome = PolishOutcome(segment_id=3)
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", return_value=("skipped", [], outcome)),
-    ):
-        resp = editor_client.post("/api/segment/3/polish")
-
+def test_approve_route_wrong_status(editor_client):
+    """POST /api/segment/<id>/approve returns 409 when segment is not needs_human."""
+    with patch("server.app.approve_segment", return_value="wrong_status"):
+        resp = editor_client.post("/api/segment/1/approve")
     assert resp.status_code == 409
-    assert resp.get_json()["error"] == "human text exists"
+    assert resp.get_json()["error"] == "wrong_status"
 
 
-def test_polish_route_returns_404_for_missing_segment(editor_client):
-    """POST /api/segment/<id>/polish returns 404 when segment not found."""
-    from contextlib import contextmanager
-
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = None   # segment does not exist
-    stub.cursor.return_value = cur
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    with patch("server.app.get_conn", fake_gc):
-        resp = editor_client.post("/api/segment/9999/polish")
-
+def test_approve_route_not_found(editor_client):
+    """POST /api/segment/<id>/approve returns 404 when segment does not exist."""
+    with patch("server.app.approve_segment", return_value="notfound"):
+        resp = editor_client.post("/api/segment/9999/approve")
     assert resp.status_code == 404
 
 
-def test_polish_route_returns_404_when_no_model_draft(editor_client):
-    """POST /api/segment/<id>/polish returns 404 when no (sk,model) draft exists."""
-    from contextlib import contextmanager
-
-    from polish.polisher import PolishOutcome
-
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("translated",)
-    stub.cursor.return_value = cur
-
-    @contextmanager
-    def fake_gc():
-        yield stub
-
-    outcome = PolishOutcome(segment_id=4)
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", return_value=("no_source", [], outcome)),
-    ):
-        resp = editor_client.post("/api/segment/4/polish")
-
-    assert resp.status_code == 404
+def test_unapprove_route_returns_403_for_non_editor(client):
+    """POST /api/segment/<id>/unapprove returns 403 for non-editor."""
+    resp = client.post("/api/segment/1/unapprove")
+    assert resp.status_code == 403
 
 
-def test_polish_route_returns_502_on_api_error(editor_client):
-    """POST /api/segment/<id>/polish returns 502 when the Anthropic API fails."""
-    from contextlib import contextmanager
+def test_unapprove_route_flips_translated_to_needs_human(editor_client):
+    """POST /api/segment/<id>/unapprove returns 200 when segment is translated and not polished."""
+    with patch("server.app.unapprove_segment", return_value="ok"):
+        resp = editor_client.post("/api/segment/1/unapprove")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
 
-    from polish.polisher import PolishOutcome
 
-    stub = MagicMock()
-    cur = MagicMock()
-    cur.__enter__ = MagicMock(return_value=cur)
-    cur.__exit__ = MagicMock(return_value=False)
-    cur.fetchone.return_value = ("translated",)
-    stub.cursor.return_value = cur
+def test_unapprove_route_blocked_when_already_polished(editor_client):
+    """POST /api/segment/<id>/unapprove returns 409 when batch polish has already run."""
+    with patch("server.app.unapprove_segment", return_value="already_polished"):
+        resp = editor_client.post("/api/segment/1/unapprove")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "already_polished"
 
-    @contextmanager
-    def fake_gc():
-        yield stub
 
-    outcome = PolishOutcome(segment_id=5)
-    with (
-        patch("server.app.get_conn", fake_gc),
-        patch("server.app.polish_segment", return_value=("error", [], outcome)),
-    ):
-        resp = editor_client.post("/api/segment/5/polish")
+def test_unapprove_route_wrong_status(editor_client):
+    """POST /api/segment/<id>/unapprove returns 409 when segment is not translated."""
+    with patch("server.app.unapprove_segment", return_value="wrong_status"):
+        resp = editor_client.post("/api/segment/1/unapprove")
+    assert resp.status_code == 409
 
-    assert resp.status_code == 502
+
+# (polish route removed — batch pipeline handles polish via uv run python -m pipeline)
+
+

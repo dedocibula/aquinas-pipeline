@@ -240,6 +240,49 @@ All three phases of `.claude/server_concurrent_review_plan.md` are done and veri
 
 **All M5 polish phases complete.** Next: trigger full corpus run via `uv run python -m pipeline` → "Polish corpus (Batch API)" once ANTHROPIC_API_KEY is populated in `.env`.
 
+## This Session (2026-07-01) — Approve/Un-Approve Flow + Post-Review Fixes
+
+### Approve/Un-Approve flow (replaces live-API "Accept + Polish")
+
+Removed `POST /api/segment/<id>/polish` (live Anthropic API call). Replaced with:
+- **Approve** button (machine pane, `needs_human` only): flips `needs_human → translated`, queuing the segment for the next `python -m pipeline → polish-corpus` Batch API run.
+- **Un-Approve** toggles back to `needs_human` (blocked if `(sk,polish)` row already exists).
+- Zero raw SQL in `app.py` — all logic in `db.py`.
+
+| File | Change |
+|---|---|
+| `src/server/db.py` | Added `is_editor()`, `approve_segment()`, `unapprove_segment()` |
+| `src/server/app.py` | Removed polish endpoint; added approve/unapprove endpoints |
+| `src/server/templates/article.html` | Single Approve button replaces Accept+Polish/Re-polish |
+| `src/server/static/review.js` | Approve/Un-Approve toggle handler; polish handlers removed |
+| `tests/server/test_server.py` | Removed 8 polish tests; added 8 approve/unapprove tests |
+
+### Post-review fixes (code-reviewer agent findings)
+
+| Fix | Detail |
+|---|---|
+| Atomic UPDATE (TOCTOU) | `approve_segment` and `unapprove_segment` now use `UPDATE ... WHERE <guard> RETURNING segment_id` — single atomic operation; no SELECT-then-UPDATE race |
+| Removed internal commit | Both functions removed `conn.commit()`; `get_conn()` owns the commit boundary (consistent with `review_segment`) |
+| `unapprove` polish check atomic | `NOT EXISTS` subquery embedded in the UPDATE itself — check and flip are one operation |
+| `src_type` column bug | Fixed `unapprove_segment` to join `source` on `code='polish'` instead of non-existent `src_type` column |
+| Fixture gap | Added missing `"slovak_polish": None` to FAKE_SEGMENTS rows 2–4 |
+
+66 server tests green.
+
+## This Session (2026-07-01) — Batch Code Review Fixes (commit ee2c3c7)
+
+Five issues from the `batch-reviewer` agent addressed:
+
+| Fix | What changed |
+|---|---|
+| Single HTTP materialise | `_process_results` now accepts `results_list: list` (pre-fetched); callers materialise once with `list(client.messages.batches.results(...))`. Eliminates the two-pass double-HTTP pattern. |
+| In-flight segment guard | `fetch_batch_candidates` + `submit_batch` accept `segment_ids: list[int] | None`. Pipelined path in `translate_corpus` tracks newly-translated IDs and passes them per submit, preventing re-queuing of segments already in a prior batch. |
+| Crash-and-resume safety | `collect_batch` first pass now skips segments with an existing `(sk,polish)` row (same `NOT EXISTS` filter as `fetch_batch_candidates`). Counts as `polished`, avoids double-write on resume. |
+| Exception safety | Both `_submit_polish_batch()` calls in pipelined mode wrapped in `try/except`; API errors log and continue — never abort the translation run. |
+| Module-level env var | `_POLISH_BATCH_SIZE` at module import removed; `polish_batch_size = int(os.getenv(...))` now read inside `translate_corpus` at call time. |
+
+All 1015 tests green.
+
 ## Known Gaps / Next Actions
 
 *(Verified 2026-06-22 against live DB and source.)*

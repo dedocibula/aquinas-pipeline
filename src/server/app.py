@@ -18,8 +18,8 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, ses
 
 load_dotenv()
 
-from polish.polisher import polish_segment  # noqa: E402
 from server.db import (  # noqa: E402
+    approve_segment,
     get_all_questions,
     get_article_segments,
     get_prev_next_article,
@@ -30,7 +30,9 @@ from server.db import (  # noqa: E402
     get_segment_constraints,
     get_structural_formulas,
     get_translation_progress,
+    is_editor,
     review_segment,
+    unapprove_segment,
 )
 from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
@@ -156,11 +158,9 @@ def auth_callback():
     if not email:
         return jsonify({"ok": False, "error": "no email in token"}), 400
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM editor WHERE email = %s", (email,))
-            is_editor = cur.fetchone() is not None
+        editor = is_editor(conn, email)
     session["email"] = email
-    session["is_editor"] = is_editor
+    session["is_editor"] = editor
     return redirect(url_for("index"))
 
 
@@ -392,70 +392,48 @@ def review_segment_route(segment_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Polish endpoint
+# Approve / Unapprove endpoints
 # ---------------------------------------------------------------------------
 
 
-@app.route("/api/segment/<int:segment_id>/polish", methods=["POST"])
+@app.route("/api/segment/<int:segment_id>/approve", methods=["POST"])
 @requires_editor
-def polish_segment_route(segment_id: int):
-    """Run the polish pass on a translated segment's machine draft.
-
-    Calls polish_segment() on the (sk, model) row, writes (sk, polish), and
-    returns the polished text + guard flags as JSON.
-
-    If the segment was 'needs_human', flips translation_status → 'translated'
-    in the same request (the "Accept + Polish" rescue path).
+def approve_segment_route(segment_id: int):
+    """Flip a needs_human segment to translated, queuing it for batch polish.
 
     Returns:
-        200  {ok:true, polished_text:str, guard_flags:{...}, flipped:bool}
-        404  segment not found, or no (sk,model) draft to polish
-        409  a (sk,human) row already exists — polish blocked
-        502  AnthropicClient raised an API error
+        200  {ok: true}
+        404  segment not found
+        409  segment is not needs_human
     """
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT translation_status FROM segment WHERE segment_id = %s",
-                (segment_id,),
-            )
-            row = cur.fetchone()
-        if row is None:
-            return jsonify({"ok": False, "error": "not found"}), 404
-        original_status = row[0]
+        result = approve_segment(conn, segment_id)
+    if result == "ok":
+        return jsonify({"ok": True})
+    if result == "notfound":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": False, "error": "wrong_status"}), 409
 
-        # _autocommit=False: the (sk,polish) write is held open so we can bundle
-        # it with the optional status flip in a single atomic commit below.
-        p_status, _usages, outcome = polish_segment(segment_id, conn, _autocommit=False)
 
-        if p_status == "skipped":
-            return jsonify({"ok": False, "error": "human text exists"}), 409
-        if p_status == "no_source":
-            return jsonify({"ok": False, "error": "no model draft to polish"}), 404
-        if p_status == "error":
-            return jsonify({"ok": False, "error": "polish API error"}), 502
+@app.route("/api/segment/<int:segment_id>/unapprove", methods=["POST"])
+@requires_editor
+def unapprove_segment_route(segment_id: int):
+    """Flip a translated segment back to needs_human (only before batch polish runs).
 
-        # p_status == "polished"; (sk,polish) is written but not yet committed.
-        polished_text = outcome.polished_text or ""
-
-        flipped = False
-        if original_status == "needs_human":
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE segment SET translation_status = 'translated' WHERE segment_id = %s",
-                    (segment_id,),
-                )
-            flipped = True
-
-        # Single commit: (sk,polish) write + optional status flip are atomic.
-        conn.commit()
-
-    return jsonify({
-        "ok": True,
-        "polished_text": polished_text,
-        "guard_flags": outcome.guard_flags,
-        "flipped": flipped,
-    })
+    Returns:
+        200  {ok: true}
+        404  segment not found
+        409  segment is not translated, or batch polish already wrote a (sk, polish) row
+    """
+    with get_conn() as conn:
+        result = unapprove_segment(conn, segment_id)
+    if result == "ok":
+        return jsonify({"ok": True})
+    if result == "notfound":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if result == "already_polished":
+        return jsonify({"ok": False, "error": "already_polished"}), 409
+    return jsonify({"ok": False, "error": "wrong_status"}), 409
 
 
 # ---------------------------------------------------------------------------

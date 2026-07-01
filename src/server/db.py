@@ -458,3 +458,70 @@ def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, s
 
         traceback.print_exc()
     return result
+
+
+def is_editor(conn: psycopg2.extensions.connection, email: str) -> bool:
+    """Return True if email is registered in the editor table."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM editor WHERE email = %s", (email,))
+        return cur.fetchone() is not None
+
+
+def approve_segment(conn: psycopg2.extensions.connection, segment_id: int) -> str:
+    """Flip a needs_human segment to translated (queues it for batch polish).
+
+    Returns:
+        "ok"           — status flipped; caller's get_conn() will commit.
+        "notfound"     — segment_id does not exist.
+        "wrong_status" — segment is not needs_human.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE segment SET translation_status = 'translated'"
+            " WHERE segment_id = %s AND translation_status = 'needs_human'"
+            " RETURNING segment_id",
+            (segment_id,),
+        )
+        if cur.fetchone() is not None:
+            return "ok"
+        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+        if cur.fetchone() is None:
+            return "notfound"
+        return "wrong_status"
+
+
+def unapprove_segment(conn: psycopg2.extensions.connection, segment_id: int) -> str:
+    """Flip a translated segment back to needs_human (only if batch polish has not run).
+
+    Returns:
+        "ok"              — status flipped; caller's get_conn() will commit.
+        "notfound"        — segment_id does not exist.
+        "wrong_status"    — segment is not translated.
+        "already_polished"— a (sk, polish) row exists; cannot un-approve.
+    """
+    with conn.cursor() as cur:
+        # Atomic: only flip if translated AND no (sk, polish) row exists.
+        cur.execute(
+            "UPDATE segment SET translation_status = 'needs_human'"
+            " WHERE segment_id = %s AND translation_status = 'translated'"
+            "   AND NOT EXISTS ("
+            "     SELECT 1 FROM segment_text st"
+            "     JOIN source s ON s.source_id = st.source_id"
+            "     WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'polish'"
+            "   )"
+            " RETURNING segment_id",
+            (segment_id, segment_id),
+        )
+        if cur.fetchone() is not None:
+            return "ok"
+        # UPDATE matched nothing — disambiguate the reason.
+        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+        if cur.fetchone() is None:
+            return "notfound"
+        cur.execute(
+            "SELECT translation_status FROM segment WHERE segment_id = %s", (segment_id,)
+        )
+        row = cur.fetchone()
+        if row[0] != "translated":
+            return "wrong_status"
+        return "already_polished"

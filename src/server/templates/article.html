@@ -182,16 +182,9 @@
                 <div class="machine-label">Polished:</div>
                 <div class="polish-text-ro" id="polish-text-{{ seg.segment_id }}">{{ seg.slovak_polish or '' }}</div>
               </div>
-              {% if ts in ('translated', 'needs_human') %}
+              {% if needs_human %}
               <div class="machine-actions" id="machine-actions-{{ seg.segment_id }}">
-                {% if needs_human %}
-                <button class="btn-accept-polish" data-segment-id="{{ seg.segment_id }}">Accept + Polish</button>
-                {% endif %}
-                <button class="btn-repolish{% if needs_human %} btn-repolish-secondary{% endif %}"
-                        data-segment-id="{{ seg.segment_id }}">
-                  {% if needs_human %}Re-polish only{% else %}Re-polish{% endif %}
-                </button>
-                <div class="polish-guard-info" id="polish-guard-{{ seg.segment_id }}" style="display:none"></div>
+                <button class="btn-approve" data-segment-id="{{ seg.segment_id }}">Approve</button>
               </div>
               {% endif %}
             </div>
