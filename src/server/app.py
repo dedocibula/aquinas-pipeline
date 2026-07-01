@@ -14,14 +14,26 @@ from functools import wraps
 
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    abort,
+    current_app,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 
 load_dotenv()
 
+from export.xliff import export_pars_bytes  # noqa: E402
 from server.db import (  # noqa: E402
     approve_segment,
     get_all_questions,
     get_article_segments,
+    get_distinct_pars,
     get_prev_next_article,
     get_question_articles,
     get_question_preamble_segment,
@@ -38,6 +50,8 @@ from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+_WORK_ID = 1  # single-work pipeline; all routes use this
 
 _client_id = os.environ.get("GOOGLE_CLIENT_ID")
 _client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
@@ -389,6 +403,28 @@ def review_segment_route(segment_id: int):
     if result == "notfound":
         return jsonify({"ok": False, "error": "not found"}), 404
     return jsonify({"ok": False, "error": "conflict"}), 409
+
+
+# ---------------------------------------------------------------------------
+# XLIFF export
+# ---------------------------------------------------------------------------
+
+
+@app.route("/export/<pars>")
+@requires_editor
+def export_xliff(pars: str):
+    """Download XLIFF 2.0 for one pars (editor only)."""
+    with get_conn() as conn:
+        valid = get_distinct_pars(conn, _WORK_ID)
+    if pars not in valid:
+        abort(404)
+    with get_conn() as conn:
+        data = export_pars_bytes(conn, _WORK_ID, pars)
+    return current_app.response_class(
+        data,
+        mimetype="application/xliff+xml",
+        headers={"Content-Disposition": f'attachment; filename="{pars}.xlf"'},
+    )
 
 
 # ---------------------------------------------------------------------------

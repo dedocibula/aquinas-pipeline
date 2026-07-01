@@ -25,7 +25,12 @@
 
 {% for pars, questions in grouped.items() %}
   <section class="pars-section">
-    <h2>Pars {{ pars }}</h2>
+    <h2>
+      Pars {{ pars }}
+      {% if is_editor %}
+        <a href="/export/{{ pars }}" class="btn-export">&#8595; XLIFF</a>
+      {% endif %}
+    </h2>
     <ul class="question-list">
       {% for q in questions %}
         <li>

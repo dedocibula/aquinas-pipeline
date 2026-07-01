@@ -460,6 +460,24 @@ def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, s
     return result
 
 
+def get_distinct_pars(conn: psycopg2.extensions.connection, work_id: int) -> list[str]:
+    """Return sorted list of pars labels that have translated/needs_human segments.
+
+    Queries v_segment (same surface as the export query) so only pars that
+    would actually produce output are returned.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT subpath(locator_path, 0, 1)::text"
+            " FROM v_segment"
+            " WHERE work_id = %s"
+            "   AND translation_status IN ('translated', 'needs_human')"
+            " ORDER BY 1",
+            (work_id,),
+        )
+        return [r[0] for r in cur.fetchall()]
+
+
 def is_editor(conn: psycopg2.extensions.connection, email: str) -> bool:
     """Return True if email is registered in the editor table."""
     with conn.cursor() as cur:

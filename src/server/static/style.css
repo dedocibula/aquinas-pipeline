@@ -326,6 +326,24 @@ a.badge:hover {
   cursor: default;
 }
 
+/* --- XLIFF export link (index page, per-pars) --- */
+.btn-export {
+  display: inline-block;
+  margin-left: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 3px;
+  border: 1px solid #b0c4de;
+  color: #1a3a5c;
+  background: #dce8f5;
+  text-decoration: none;
+  vertical-align: middle;
+}
+.btn-export:hover {
+  background: #c2d8ee;
+}
+
 /* --- Detail toggle button --- */
 .detail-toggle {
   display: inline-block;
