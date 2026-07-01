@@ -36,6 +36,9 @@ from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
 
 from common.pricing import UsageInfo
+from polish.batch import _BatchStats as PolishBatchStats
+from polish.batch import collect_batch as _collect_polish_batch
+from polish.batch import submit_batch as _submit_polish_batch
 from storage.db import get_conn
 from storage.repositories import RunRepository, SegmentRepository
 from translate.loop import translate_segment
@@ -45,6 +48,11 @@ log = logging.getLogger(__name__)
 _REPORTS_DIR = Path("reports")
 
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
+# When >0, submit a Batch API polish job after every N translated segments.
+# Batches are submitted fire-and-forget while translation continues; all
+# outstanding batches are collected (blocking) at the end of the run.
+# 0 (default) disables pipelined polish entirely.
+_POLISH_BATCH_SIZE = int(os.getenv("POLISH_BATCH_SIZE", "0"))
 
 
 def _filter_locators(
@@ -264,12 +272,55 @@ def translate_corpus(
     futures = [
         translate_article_task.submit(loc, work_id, segment_filter) for loc in pending
     ]
-    results: list[ArticleResult] = [f.result() for f in futures]
+
+    results: list[ArticleResult] = []
+    pending_polish_ids: list[str] = []
+
+    if _POLISH_BATCH_SIZE > 0:
+        # Pipelined mode: collect article results one at a time and submit polish
+        # batches every POLISH_BATCH_SIZE translated segments.  Other article
+        # tasks continue running in the thread pool while we submit each batch,
+        # so Anthropic processes polish while translation is still going.
+        translated_since_last_batch = 0
+        for fut in futures:
+            article = fut.result()
+            results.append(article)
+            translated_since_last_batch += article.translated
+            if translated_since_last_batch >= _POLISH_BATCH_SIZE:
+                batch_ids = _submit_polish_batch()
+                if batch_ids:
+                    pending_polish_ids.append(batch_ids)
+                    log.info("pipelined polish: submitted batch %s", batch_ids)
+                translated_since_last_batch = 0
+        # Final batch for segments translated since the last threshold
+        final_ids = _submit_polish_batch()
+        if final_ids:
+            pending_polish_ids.append(final_ids)
+    else:
+        results = [f.result() for f in futures]
 
     elapsed = time.monotonic() - t_start
     _close_run(run_id, results)
     _write_production_report(results, elapsed)
     _write_needs_human_report(results, work_id)
+
+    if pending_polish_ids:
+        total_polish = PolishBatchStats()
+        for bid_str in pending_polish_ids:
+            s = _collect_polish_batch(bid_str)
+            total_polish.total += s.total
+            total_polish.polished += s.polished
+            total_polish.guard_failed += s.guard_failed
+            total_polish.errored += s.errored
+            total_polish.no_source += s.no_source
+            total_polish.cost_usd += s.cost_usd
+        log.info(
+            "pipelined polish complete: polished=%d guard_failed=%d errored=%d cost=$%.4f",
+            total_polish.polished,
+            total_polish.guard_failed,
+            total_polish.errored,
+            total_polish.cost_usd,
+        )
 
 
 def _guard_and_reset(

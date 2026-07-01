@@ -28,7 +28,7 @@ CRITICAL: If your instinct is to use a natural synonym, YOU MUST OVERRIDE THAT I
 Your output is piped through a deterministic morphological validator. If the exact locked lemma is missing, your draft will be automatically machine-rejected. The locked term wins unconditionally.
 
 Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak form instead:
-  ctnota → čnosť   |   ctnosť → čnosť   |   vnímání → vnímanie   |   poznání → poznanie
+  ctnota → cnosť   |   ctnosť → cnosť   |   čnosť → cnosť   |   vnímání → vnímanie   |   poznání → poznanie
 
 <examples>
   <example>

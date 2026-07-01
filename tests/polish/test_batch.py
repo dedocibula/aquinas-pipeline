@@ -17,8 +17,10 @@ from polish.batch import (
     _build_request,
     _process_results,
     _SegmentPayload,
+    collect_batch,
     fetch_batch_candidates,
     run_batch,
+    submit_batch,
 )
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -463,3 +465,137 @@ def test_run_batch_happy_path_writes_polish():
     # commit was called on the result-processing connection
     process_conn = conns[2]
     process_conn.commit.assert_called_once()
+
+
+# ── submit_batch ──────────────────────────────────────────────────────────────
+
+
+def test_submit_batch_returns_none_when_no_candidates():
+    conn = MagicMock()
+    conn.__enter__ = lambda s: s
+    conn.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value.__enter__ = lambda s: s
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    conn.cursor.return_value.fetchall.return_value = []
+
+    with patch("polish.batch.get_conn") as mock_gc:
+        mock_gc.return_value.__enter__ = lambda s: conn
+        mock_gc.return_value.__exit__ = MagicMock(return_value=False)
+        with patch("polish.batch._load_system", return_value="sys"):
+            result = submit_batch(_client=_fake_client())
+
+    assert result is None
+
+
+def test_submit_batch_returns_none_when_no_payloads():
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = lambda s: s
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchall.return_value = [(1,)]
+    cur.fetchone.return_value = None  # no (sk,model) text → payload is None
+    conn.cursor.return_value = cur
+    conn.__enter__ = lambda s: conn
+    conn.__exit__ = MagicMock(return_value=False)
+
+    with patch("polish.batch.get_conn", return_value=conn):
+        with patch("polish.batch._load_system", return_value="sys"):
+            with patch("polish.batch.GlossaryRepository"):
+                result = submit_batch(_client=_fake_client())
+
+    assert result is None
+
+
+def test_submit_batch_returns_batch_id_string():
+    """One payload → one chunk submitted → returns single batch_id."""
+    model_text = "Boh je dobrý."
+
+    call_count = {"n": 0}
+
+    def _make_conn(seg_ids=None, model_row=None):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.__enter__ = lambda s: s
+        cur.__exit__ = MagicMock(return_value=False)
+        if seg_ids is not None:
+            cur.fetchall.return_value = [(i,) for i in seg_ids]
+        if model_row is not None:
+            cur.fetchone.return_value = model_row
+        conn.cursor.return_value = cur
+        conn.__enter__ = lambda s: conn
+        conn.__exit__ = MagicMock(return_value=False)
+        return conn
+
+    conns = [_make_conn(seg_ids=[1]), _make_conn(model_row=(model_text,))]
+
+    def _side_effect():
+        c = conns[call_count["n"]]
+        call_count["n"] += 1
+        return c
+
+    fake_client = _fake_client()
+
+    with patch("polish.batch.get_conn") as mock_gc:
+        mock_gc.side_effect = _side_effect
+        with patch("polish.batch._load_system", return_value="sys"):
+            with patch("polish.batch.GlossaryRepository") as mock_gr:
+                mock_gr.return_value.locked_terms.return_value = []
+                with patch("polish.batch.SegmentRepository") as mock_sr:
+                    mock_sr.return_value.get_reviewer_notes_text.return_value = None
+                    result = submit_batch(_client=fake_client)
+
+    assert result == "msgbatch_test001"
+    fake_client.messages.batches.create.assert_called_once()
+
+
+# ── collect_batch ─────────────────────────────────────────────────────────────
+
+
+def test_collect_batch_polls_and_processes():
+    """collect_batch polls a batch then processes its results."""
+    model_text = "Boh je dobrý."
+    polished_text = "Boh je dobrý a mocný."
+    payload = _SegmentPayload(segment_id=1, model_text=model_text, constraints=[])
+    guard_ok = {
+        "ok": True, "sentence_delta": 0, "term_retention_ok": True,
+        "missing_terms": [], "particle_retention_ok": True,
+        "missing_particles": [], "length_ratio": 1.05,
+    }
+
+    succeeded = _make_succeeded_result("1", polished_text)
+    fake_client = _fake_client([succeeded])
+    # First results() call (ID collection) and second (processing) return same data
+    fake_client.messages.batches.results.side_effect = [
+        iter([succeeded]),
+        iter([succeeded]),
+    ]
+
+    conn = MagicMock()
+    conn.__enter__ = lambda s: conn
+    conn.__exit__ = MagicMock(return_value=False)
+
+    with patch("polish.batch.get_conn", return_value=conn):
+        with patch("polish.batch._build_payload", return_value=payload):
+            with patch("polish.batch.source_id", return_value=8):
+                with patch("polish.batch.SegmentRepository"):
+                    with patch("polish.batch.run_guards", return_value=guard_ok):
+                        stats = collect_batch("msgbatch_test001", _client=fake_client)
+
+    assert stats.polished == 1
+    assert stats.errored == 0
+
+
+def test_collect_batch_multiple_ids():
+    """Comma-joined batch_ids string → each polled and processed independently."""
+    fake_client = _fake_client([])
+    fake_client.messages.batches.results.return_value = iter([])
+    conn = MagicMock()
+    conn.__enter__ = lambda s: conn
+    conn.__exit__ = MagicMock(return_value=False)
+
+    with patch("polish.batch.get_conn", return_value=conn):
+        with patch("polish.batch.source_id", return_value=8):
+            stats = collect_batch("batch_aaa,batch_bbb", _client=fake_client)
+
+    assert fake_client.messages.batches.retrieve.call_count == 2
+    assert stats.total == 0

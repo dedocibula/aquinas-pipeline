@@ -314,6 +314,95 @@ def _write_report(stats: _BatchStats, elapsed_s: float, num_batches: int) -> Non
     log.info("report written to %s", path)
 
 
+# ── async-friendly split API ──────────────────────────────────────────────────
+
+
+def submit_batch(
+    *,
+    element_types: list[str] | None = None,
+    limit: int | None = None,
+    _client: anthropic.Anthropic | None = None,
+) -> str | None:
+    """Fetch pending-polish segments, build payloads, submit Batch API chunks.
+
+    Returns a comma-joined batch_id string (one id per BATCH_SIZE chunk), or
+    None when there are no eligible candidates.  Does NOT poll or process
+    results — call collect_batch() when ready to wait for completion.
+    """
+    client = _client if _client is not None else anthropic.Anthropic()
+    system_text = _load_system()
+
+    with get_conn() as conn:
+        segment_ids = fetch_batch_candidates(conn, element_types=element_types, limit=limit)
+
+    if not segment_ids:
+        log.info("submit_batch: no candidates; nothing to submit")
+        return None
+
+    log.info("submit_batch: %d candidate segments", len(segment_ids))
+
+    payloads: dict[int, _SegmentPayload] = {}
+    with get_conn() as conn:
+        for seg_id in segment_ids:
+            p = _build_payload(conn, seg_id)
+            if p is not None:
+                payloads[seg_id] = p
+
+    if not payloads:
+        log.warning("submit_batch: no payloads could be built; nothing to submit")
+        return None
+
+    payload_list = list(payloads.values())
+    chunks = [payload_list[i : i + BATCH_SIZE] for i in range(0, len(payload_list), BATCH_SIZE)]
+    batch_ids: list[str] = []
+    for chunk_idx, chunk in enumerate(chunks, 1):
+        log.info("submit_batch chunk %d/%d: %d requests", chunk_idx, len(chunks), len(chunk))
+        requests = [_build_request(p, system_text) for p in chunk]
+        bid = _submit_batch(client, requests)
+        batch_ids.append(bid)
+
+    result = ",".join(batch_ids)
+    log.info("submit_batch: submitted %d batch(es): %s", len(batch_ids), result)
+    return result
+
+
+def collect_batch(
+    batch_ids_str: str,
+    *,
+    _client: anthropic.Anthropic | None = None,
+) -> _BatchStats:
+    """Poll and process previously-submitted batches.
+
+    batch_ids_str: comma-joined batch IDs as returned by submit_batch().
+    Blocks until every batch is 'ended', then processes all results.
+    Returns aggregated _BatchStats; does NOT write the production report.
+    """
+    client = _client if _client is not None else anthropic.Anthropic()
+    batch_ids = [b.strip() for b in batch_ids_str.split(",") if b.strip()]
+    stats = _BatchStats()
+
+    for batch_id in batch_ids:
+        _poll_batch(client, batch_id)
+
+        with get_conn() as conn:
+            src_polish_id = source_id(conn, "polish")
+            # First pass: collect segment_ids to rebuild payload map.
+            # batches.results() makes a fresh HTTP request each call, so two
+            # passes are safe and cheaper than persisting payloads across time.
+            seg_ids = [int(r.custom_id) for r in client.messages.batches.results(batch_id)]
+            payloads: dict[int, _SegmentPayload] = {}
+            for seg_id in seg_ids:
+                p = _build_payload(conn, seg_id)
+                if p is not None:
+                    payloads[seg_id] = p
+                else:
+                    stats.no_source += 1
+            # Second pass: process results
+            _process_results(client, batch_id, payloads, conn, src_polish_id, stats)
+
+    return stats
+
+
 # ── main entry point ──────────────────────────────────────────────────────────
 
 
