@@ -283,6 +283,18 @@ Five issues from the `batch-reviewer` agent addressed:
 
 All 1015 tests green.
 
+## This Session (2026-07-01) — XLIFF 2.0 Export (commit d4fc233)
+
+- **Migration 011** applied: `v_segment` recreated with `slovak_polish`, `translation_status`, `reviewer_notes`.
+- **`src/export/xliff.py`**: `_build_tree` / `_build_unit` / `export_pars` / `export_pars_bytes` / `run`. All elements namespace-qualified (`{XLIFF_NS}tag`). Target COALESCE: `slovak_final → slovak_polish → slovak_draft`.
+- **`src/server/db.py`**: `get_distinct_pars` queries `v_segment` (same surface as export; filters to translated/needs_human only).
+- **`src/server/app.py`**: `GET /export/<pars>` route (editor-only); `_WORK_ID = 1` constant.
+- **`src/server/templates/index.html`**: per-pars `↓ XLIFF` button (editor-only).
+- **`src/server/static/style.css`**: `.btn-export` style.
+- **`tests/export/test_xliff.py`**: 11 tests, no DB.
+
+Post-review fixes: namespace qualification throughout; `_WORK_ID` constant; pars validation uses v_segment; added `test_export_pars_bytes_returns_valid_xml`.
+
 ## Known Gaps / Next Actions
 
 *(Verified 2026-06-22 against live DB and source.)*
