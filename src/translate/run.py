@@ -160,7 +160,10 @@ def _open_run(
 
 def _close_run(run_id: int, results: list[ArticleResult]) -> None:
     """Bulk-insert run_segment rows and finalize the translation_run totals."""
-    records = [rec for r in results for rec in r.segment_records]
+    all_records = [rec for r in results for rec in r.segment_records]
+    # run_segment only accepts 'translated' / 'needs_human'; skip API-error segments
+    # (they remain pending in segment table for retry)
+    records = [rec for rec in all_records if rec["final_status"] in ("translated", "needs_human")]
     translated = sum(r.translated for r in results)
     needs_human = sum(r.needs_human for r in results)
     cost = _total_cost([u for r in results for u in r.usages])
