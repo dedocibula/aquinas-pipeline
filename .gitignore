@@ -19,6 +19,7 @@ build/
 
 # ─── uv ──────────────────────────────────────────────
 # uv.lock is intentionally committed (reproducible installs for an application)
+!uv.lock
 
 # ─── Jupyter ─────────────────────────────────────────
 .ipynb_checkpoints/
