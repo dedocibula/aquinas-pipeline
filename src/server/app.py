@@ -25,6 +25,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
@@ -50,6 +51,8 @@ from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
 
 app = Flask(__name__)
 app.secret_key = os.environ["FLASK_SECRET_KEY"]
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 _WORK_ID = 1  # single-work pipeline; all routes use this
 

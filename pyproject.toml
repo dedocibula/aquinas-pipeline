@@ -19,6 +19,7 @@ dependencies = [
     "flask>=3.0",
     "prefect>=3.0",
     "authlib>=1.7.2",
+    "gunicorn>=21.0",
 ]
 
 [project.optional-dependencies]
