@@ -9,8 +9,30 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://aquinas:aquinas@localhost:5432/aquinas
+      FLASK_SECRET_KEY: ci-test-secret
+      GOOGLE_CLIENT_ID: dummy-client-id
+      GOOGLE_CLIENT_SECRET: dummy-client-secret
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
+
+      - name: Cache CLTK Latin models
+        uses: actions/cache@v4
+        with:
+          path: ~/cltk_data
+          key: cltk-lat-models-v1
+
+      - name: Download CLTK Latin models (if not cached)
+        run: |
+          uv run python -c "
+          import pathlib, sys
+          p = pathlib.Path.home() / 'cltk_data' / 'lat' / 'model' / 'lat_models_cltk'
+          if not p.exists():
+              from cltk.data.fetch import FetchCorpus
+              FetchCorpus('lat').import_corpus('lat_models_cltk')
+          else:
+              print('CLTK Latin models already cached', file=sys.stderr)
+          "
+
       - run: uv run pytest
