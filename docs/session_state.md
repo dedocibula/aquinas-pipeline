@@ -295,6 +295,43 @@ All 1015 tests green.
 
 Post-review fixes: namespace qualification throughout; `_WORK_ID` constant; pars validation uses v_segment; added `test_export_pars_bytes_returns_valid_xml`.
 
+## This Session (2026-07-02) — DeepSeek Sync Polish Refactor
+
+Replaced Anthropic Batch API as the *default* polish backend with synchronous DeepSeek calls.
+Each segment commits immediately — a crash loses at most one in-flight segment (vs. fire-and-forget Anthropic batches where a crash loses the entire batch cost).
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/storage/repositories.py` | Added `get_sk_text`, `has_sk_text`, `get_polish_candidates` to `SegmentRepository` |
+| `src/common/prompt_blocks.py` | Added `build_polish_user_content` (shared by sync + batch paths) |
+| `src/polish/polisher.py` | Full rewrite: `PolisherBase(ABC)`, `DeepSeekPolisher`, `AnthropicPolisher`, `make_polisher()`; updated `polish_segment` (uses repo + shared prompt); added `run_polish(*, limit, element_types, segment_ids, max_workers, backend)` + `main()` CLI |
+| `src/polish/batch.py` | `fetch_batch_candidates` → delegates to `SegmentRepository.get_polish_candidates`; `_build_payload` → `SegmentRepository.get_sk_text`; `_build_request` → `build_polish_user_content`; `collect_batch` already-done check → `SegmentRepository.has_sk_text` |
+| `src/polish/steps.py` | Added `PolishCorpusSyncStep` (default DeepSeek backend) |
+| `src/pipeline/interactive.py` | Added `polish-corpus-sync` menu item (before `polish-corpus`) |
+| `src/translate/run.py` | `POLISH_BACKEND` env var; `all_translated_ids` always accumulated; DeepSeek sync polish runs after `_close_run`; Anthropic fire-and-forget preserved for `POLISH_BACKEND=anthropic` |
+| `tests/polish/test_polisher.py` | Updated to use `PolisherBase` mock pattern (`.polish()` not `.chat()`); `SegmentRepository` patch instead of `_get_sk_text` |
+| `tests/polish/test_batch.py` | Fixed 3 tests: configure `get_polish_candidates`, `get_sk_text`, `has_sk_text` on `SegmentRepository` mock |
+
+57 polish tests green.
+
+### Usage
+```bash
+# Smoke test 5 segments (DeepSeek default)
+uv run python -m polish.polisher --limit 5
+
+# Anthropic backend
+uv run python -m polish.polisher --limit 5 --backend anthropic
+
+# Full corpus via pipeline menu
+uv run python -m pipeline  # → "polish-corpus-sync"
+
+# Full corpus via translate.run (pipelined with translation)
+POLISH_BATCH_SIZE=500 POLISH_WORKERS=10 uv run python -m translate.run
+# POLISH_BACKEND defaults to "deepseek"; set to "anthropic" for batch mode
+```
+
 ## Known Gaps / Next Actions
 
 *(Verified 2026-06-22 against live DB and source.)*

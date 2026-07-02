@@ -559,15 +559,19 @@ class SegmentRepository:
 
         Examples: 'I.q1.a1', 'I.q1.question_title', 'I.q2.a3', ... Each prefix is
         one unit of orchestration work. Segments at depth >= 3 are grouped by
-        their 3-component prefix; depth-2 segments have no article anchor.
+        their 3-component prefix; depth-2 segments (e.g. question_title at 'I.q18')
+        are returned as-is so the dispatcher can reach them.
         """
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT ltree2text(subpath(locator_path, 0, 3)) AS prefix
+                SELECT DISTINCT
+                    CASE WHEN nlevel(locator_path) >= 3
+                         THEN ltree2text(subpath(locator_path, 0, 3))
+                         ELSE ltree2text(locator_path)
+                    END AS prefix
                 FROM segment
                 WHERE work_id = %s
-                  AND nlevel(locator_path) >= 3
                 ORDER BY prefix
                 """,
                 (work_id,),
@@ -795,6 +799,94 @@ class SegmentRepository:
                 "WHERE segment_id = ANY(%s)",
                 (psycopg2.extras.Json({"last_feedback": note}), segment_ids),
             )
+
+    def get_sk_text(self, segment_id: int, source_code: str) -> str | None:
+        """Return (sk, source_code) content for one segment, or None if absent."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT st.content
+                FROM segment_text st
+                JOIN source s ON s.source_id = st.source_id
+                WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = %s
+                LIMIT 1
+                """,
+                (segment_id, source_code),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def has_sk_text(self, segment_id: int, source_code: str) -> bool:
+        """True if a (sk, source_code) row exists for this segment."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1
+                FROM segment_text st
+                JOIN source s ON s.source_id = st.source_id
+                WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = %s
+                LIMIT 1
+                """,
+                (segment_id, source_code),
+            )
+            return cur.fetchone() is not None
+
+    def get_polish_candidates(
+        self,
+        *,
+        element_types: list[str] | None = None,
+        limit: int | None = None,
+        segment_ids: list[int] | None = None,
+    ) -> list[int]:
+        """Return segment_ids eligible for polish.
+
+        Eligible = translation_status='translated' AND no (sk,human) AND no (sk,polish).
+        Optionally filtered by element_type, capped by limit, or restricted to a
+        specific set of IDs (used by the pipelined path in translate.run).
+        """
+        type_clause = ""
+        params: list = []
+        if element_types:
+            placeholders = ", ".join(["%s"] * len(element_types))
+            type_clause = f"AND seg.element_type IN ({placeholders})"
+            params.extend(element_types)
+
+        id_clause = ""
+        if segment_ids is not None:
+            id_clause = "AND seg.segment_id = ANY(%s)"
+            params.append(segment_ids)
+
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT %s"
+            params.append(limit)
+
+        sql = f"""
+            SELECT seg.segment_id
+            FROM segment seg
+            WHERE seg.translation_status = 'translated'
+              AND NOT EXISTS (
+                  SELECT 1 FROM segment_text st
+                  JOIN source s ON s.source_id = st.source_id
+                  WHERE st.segment_id = seg.segment_id
+                    AND st.lang = 'sk'
+                    AND s.code = 'human'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM segment_text st
+                  JOIN source s ON s.source_id = st.source_id
+                  WHERE st.segment_id = seg.segment_id
+                    AND st.lang = 'sk'
+                    AND s.code = 'polish'
+              )
+              {type_clause}
+              {id_clause}
+            ORDER BY seg.segment_id
+            {limit_clause}
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(sql, params)
+            return [row[0] for row in cur.fetchall()]
 
     def reset_translation_status(self, segment_ids: list[int]) -> None:
         """Reset translation_status to 'pending' for the given segments.

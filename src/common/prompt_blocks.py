@@ -1,5 +1,6 @@
 """Shared prompt-fragment builders used across translate and polish pipelines."""
 
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -33,3 +34,22 @@ def build_hard_constraints_block(constraints: list[dict]) -> str:
     else:
         parts.append("  \n</hard_constraints>")
     return "\n".join(parts)
+
+
+def build_polish_user_content(
+    model_text: str,
+    constraints: list[dict],
+    reviewer_notes: str | None,
+) -> str:
+    """Build the user message for a polish request (shared by sync and batch paths)."""
+    constraints_block = build_hard_constraints_block(constraints)
+    notes_block = (
+        f"<reviewer_notes>\n{reviewer_notes}\n</reviewer_notes>\n\n"
+        if reviewer_notes else ""
+    )
+    return (
+        f"<source_draft>\n{model_text}\n</source_draft>\n\n"
+        f"{notes_block}"
+        f"{constraints_block}\n\n"
+        "Polish the Slovak draft above. Output only the polished Slovak text."
+    )

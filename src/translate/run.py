@@ -39,6 +39,7 @@ from common.pricing import UsageInfo
 from polish.batch import _BatchStats as PolishBatchStats
 from polish.batch import collect_batch as _collect_polish_batch
 from polish.batch import submit_batch as _submit_polish_batch
+from polish.polisher import run_polish as _run_polish_sync
 from storage.db import get_conn
 from storage.repositories import RunRepository, SegmentRepository
 from translate.loop import translate_segment
@@ -276,47 +277,52 @@ def translate_corpus(
     ]
 
     results: list[ArticleResult] = []
-    pending_polish_ids: list[str] = []
+    all_translated_ids: list[int] = []
+    pending_polish_ids: list[str] = []  # Anthropic path only
     # Read at call time so tests can set the env var after module import.
     polish_batch_size = int(os.getenv("POLISH_BATCH_SIZE", "0"))
+    polish_backend    = os.getenv("POLISH_BACKEND", "deepseek")
 
     if polish_batch_size > 0:
-        # Pipelined mode: collect article results one at a time and submit polish
-        # batches every POLISH_BATCH_SIZE translated segments.  Pass the exact
-        # segment IDs translated since the last submit so we never re-queue
-        # segments that are already in-flight in a previous batch.
-        # Errors in _submit_polish_batch are caught and logged — a submit failure
-        # must not abort the translation run.
+        # Collect article results one at a time, accumulating translated IDs.
+        # For the Anthropic backend: also fire-and-forget batch submits every
+        # POLISH_BATCH_SIZE segments (pipelined mode).
+        # For the DeepSeek backend: IDs are only collected here; the sync polish
+        # pass runs after _close_run so translation is committed first.
         new_translated_ids: list[int] = []
         translated_since_last_batch = 0
         for fut in futures:
             article = fut.result()
             results.append(article)
-            new_translated_ids.extend(
+            new_ids = [
                 r["segment_id"]
                 for r in (article.segment_records or [])
                 if r.get("final_status") == "translated"
-            )
-            translated_since_last_batch += article.translated
-            if translated_since_last_batch >= polish_batch_size:
-                try:
-                    batch_ids = _submit_polish_batch(segment_ids=new_translated_ids)
-                    if batch_ids:
-                        pending_polish_ids.append(batch_ids)
-                        log.info("pipelined polish: submitted batch %s", batch_ids)
-                except Exception as exc:
-                    log.error("pipelined polish: submit failed (continuing): %s", exc)
-                new_translated_ids = []
-                translated_since_last_batch = 0
-        # Final batch for segments translated since the last threshold
-        try:
-            final_ids = _submit_polish_batch(
-                segment_ids=new_translated_ids if new_translated_ids else None
-            )
-            if final_ids:
-                pending_polish_ids.append(final_ids)
-        except Exception as exc:
-            log.error("pipelined polish: final submit failed: %s", exc)
+            ]
+            new_translated_ids.extend(new_ids)
+            all_translated_ids.extend(new_ids)
+            if polish_backend == "anthropic":
+                translated_since_last_batch += article.translated
+                if translated_since_last_batch >= polish_batch_size:
+                    try:
+                        batch_ids = _submit_polish_batch(segment_ids=new_translated_ids)
+                        if batch_ids:
+                            pending_polish_ids.append(batch_ids)
+                            log.info("pipelined polish: submitted batch %s", batch_ids)
+                    except Exception as exc:
+                        log.error("pipelined polish: submit failed (continuing): %s", exc)
+                    new_translated_ids = []
+                    translated_since_last_batch = 0
+        if polish_backend == "anthropic":
+            # Final batch for segments translated since the last threshold
+            try:
+                final_ids = _submit_polish_batch(
+                    segment_ids=new_translated_ids if new_translated_ids else None
+                )
+                if final_ids:
+                    pending_polish_ids.append(final_ids)
+            except Exception as exc:
+                log.error("pipelined polish: final submit failed: %s", exc)
     else:
         results = [f.result() for f in futures]
 
@@ -325,6 +331,22 @@ def translate_corpus(
     _write_production_report(results, elapsed)
     _write_needs_human_report(results, work_id)
 
+    # DeepSeek sync polish: one blocking pass after translation is committed.
+    if polish_batch_size > 0 and polish_backend == "deepseek" and all_translated_ids:
+        try:
+            s = _run_polish_sync(
+                segment_ids=all_translated_ids,
+                max_workers=int(os.getenv("POLISH_WORKERS", "10")),
+                backend="deepseek",
+            )
+            log.info(
+                "sync polish complete: polished=%d guard_failed=%d errored=%d cost=$%.4f",
+                s.polished, s.guard_failed, s.errored, s.cost_usd,
+            )
+        except Exception as exc:
+            log.error("sync polish failed (translation already committed): %s", exc)
+
+    # Anthropic batch collect
     if pending_polish_ids:
         total_polish = PolishBatchStats()
         for bid_str in pending_polish_ids:

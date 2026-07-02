@@ -440,6 +440,10 @@ def test_run_batch_happy_path_writes_polish():
                 mock_gloss.return_value.locked_terms.return_value = []
                 with patch("polish.batch.SegmentRepository") as mock_seg:
                     seg_repo = mock_seg.return_value
+                    seg_repo.get_polish_candidates.return_value = [1]
+                    seg_repo.get_sk_text.return_value = model_text
+                    seg_repo.get_reviewer_notes_text.return_value = None
+                    seg_repo.has_sk_text.return_value = False
                     with patch("polish.batch.source_id", return_value=8):
                         with patch("polish.batch.run_guards", return_value=guard_ok):
                             with patch("polish.batch._write_report"):
@@ -529,6 +533,8 @@ def test_submit_batch_returns_batch_id_string():
             with patch("polish.batch.GlossaryRepository") as mock_gr:
                 mock_gr.return_value.locked_terms.return_value = []
                 with patch("polish.batch.SegmentRepository") as mock_sr:
+                    mock_sr.return_value.get_polish_candidates.return_value = [1]
+                    mock_sr.return_value.get_sk_text.return_value = model_text
                     mock_sr.return_value.get_reviewer_notes_text.return_value = None
                     result = submit_batch(_client=fake_client)
 
@@ -568,7 +574,8 @@ def test_collect_batch_polls_and_processes():
     with patch("polish.batch.get_conn", return_value=conn):
         with patch("polish.batch._build_payload", return_value=payload):
             with patch("polish.batch.source_id", return_value=8):
-                with patch("polish.batch.SegmentRepository"):
+                with patch("polish.batch.SegmentRepository") as mock_seg:
+                    mock_seg.return_value.has_sk_text.return_value = False
                     with patch("polish.batch.run_guards", return_value=guard_ok):
                         stats = collect_batch("msgbatch_test001", _client=fake_client)
 

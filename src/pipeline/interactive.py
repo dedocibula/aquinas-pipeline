@@ -44,6 +44,8 @@ _KNOB_KEYS = (
     "GAP_BATCH_SIZE",
     "GAP_MAX_WORKERS",
     "GAP_FREQ_CEILING_PCT",
+    "POLISH_BACKEND",
+    "POLISH_WORKERS",
 )
 
 
@@ -220,6 +222,11 @@ def build_menu() -> list[MenuItem]:
 
         return PolishCorpusStep()
 
+    def _polish_sync() -> PipelineStep:
+        from polish.steps import PolishCorpusSyncStep
+
+        return PolishCorpusSyncStep()
+
     def _reset_corpus() -> PipelineStep:
         from translate.steps import ResetCorpusStep
 
@@ -241,7 +248,8 @@ def build_menu() -> list[MenuItem]:
         MenuItem("import-approvals", "Import approvals + flag stale", _import),
         MenuItem("translate", "Translate corpus", _translate),
         MenuItem("rerun-stale", "Re-translate stale segments", _rerun),
-        MenuItem("polish-corpus", "Polish corpus (Batch API)", _polish),
+        MenuItem("polish-corpus-sync", "Polish corpus — DeepSeek sync (default)", _polish_sync),
+        MenuItem("polish-corpus", "Polish corpus — Anthropic Batch API", _polish),
         MenuItem("reset-corpus", "Re-translate entire corpus", _reset_corpus),
         MenuItem("report", "Coverage / provenance report", _report),
     ]

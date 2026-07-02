@@ -27,7 +27,7 @@ from anthropic.types.messages.batch_create_params import Request
 from dotenv import load_dotenv
 
 from common.pricing import extract_anthropic_usage
-from common.prompt_blocks import build_hard_constraints_block
+from common.prompt_blocks import build_polish_user_content
 from polish.guards import run_guards
 from storage.db import get_conn, source_id
 from storage.repositories import GlossaryRepository, SegmentRepository
@@ -68,54 +68,12 @@ def fetch_batch_candidates(
 ) -> list[int]:
     """Return segment_ids eligible for batch polishing.
 
-    Eligible = translation_status='translated' AND no (sk,human) row AND no
-    existing (sk,polish) row (skip-already-done rule).  Optionally filtered by
-    element_type, capped by limit, or restricted to a specific set of IDs
-    (used by the pipelined path to avoid re-queuing in-flight segments).
+    Thin wrapper over SegmentRepository.get_polish_candidates — kept as a public
+    function because translate.run imports it by name.
     """
-    type_clause = ""
-    params: list = []
-    if element_types:
-        placeholders = ", ".join(["%s"] * len(element_types))
-        type_clause = f"AND seg.element_type IN ({placeholders})"
-        params.extend(element_types)
-
-    id_clause = ""
-    if segment_ids is not None:
-        id_clause = "AND seg.segment_id = ANY(%s)"
-        params.append(segment_ids)
-
-    limit_clause = ""
-    if limit is not None:
-        limit_clause = "LIMIT %s"
-        params.append(limit)
-
-    sql = f"""
-        SELECT seg.segment_id
-        FROM segment seg
-        WHERE seg.translation_status = 'translated'
-          AND NOT EXISTS (
-              SELECT 1 FROM segment_text st
-              JOIN source s ON s.source_id = st.source_id
-              WHERE st.segment_id = seg.segment_id
-                AND st.lang = 'sk'
-                AND s.code = 'human'
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM segment_text st
-              JOIN source s ON s.source_id = st.source_id
-              WHERE st.segment_id = seg.segment_id
-                AND st.lang = 'sk'
-                AND s.code = 'polish'
-          )
-          {type_clause}
-          {id_clause}
-        ORDER BY seg.segment_id
-        {limit_clause}
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-        return [row[0] for row in cur.fetchall()]
+    return SegmentRepository(conn).get_polish_candidates(
+        element_types=element_types, limit=limit, segment_ids=segment_ids
+    )
 
 
 # ── request building ──────────────────────────────────────────────────────────
@@ -131,19 +89,8 @@ class _SegmentPayload:
 
 def _build_payload(conn, segment_id: int) -> _SegmentPayload | None:
     """Load (sk,model) text and constraints for one segment."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT st.content
-            FROM segment_text st
-            JOIN source s ON s.source_id = st.source_id
-            WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'model'
-            LIMIT 1
-            """,
-            (segment_id,),
-        )
-        row = cur.fetchone()
-    if not row:
+    model_text = SegmentRepository(conn).get_sk_text(segment_id, "model")
+    if not model_text:
         log.warning("segment_id=%d: no (sk,model) text; skipping from batch", segment_id)
         return None
 
@@ -151,23 +98,15 @@ def _build_payload(conn, segment_id: int) -> _SegmentPayload | None:
     reviewer_notes = SegmentRepository(conn).get_reviewer_notes_text(segment_id)
     return _SegmentPayload(
         segment_id=segment_id,
-        model_text=row[0],
+        model_text=model_text,
         constraints=constraints,
         reviewer_notes=reviewer_notes,
     )
 
 
 def _build_request(payload: _SegmentPayload, system_text: str) -> Request:
-    constraints_block = build_hard_constraints_block(payload.constraints)
-    notes_block = (
-        f"<reviewer_notes>\n{payload.reviewer_notes}\n</reviewer_notes>\n\n"
-        if payload.reviewer_notes else ""
-    )
-    user_content = (
-        f"<source_draft>\n{payload.model_text}\n</source_draft>\n\n"
-        f"{notes_block}"
-        f"{constraints_block}\n\n"
-        "Polish the Slovak draft above. Output only the polished Slovak text."
+    user_content = build_polish_user_content(
+        payload.model_text, payload.constraints, payload.reviewer_notes
     )
     return Request(
         custom_id=str(payload.segment_id),
@@ -408,27 +347,25 @@ def collect_batch(
             # Skip segments already polished (crash-and-resume safety: a prior
             # collect_batch may have committed some rows before crashing).
             payloads: dict[int, _SegmentPayload] = {}
+            already_done: set[int] = set()
+            seg_repo = SegmentRepository(conn)
             for r in results_list:
                 seg_id = int(r.custom_id)
-                # Already-polished check (same guard as fetch_batch_candidates)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT 1 FROM segment_text st"
-                        " JOIN source s ON s.source_id = st.source_id"
-                        " WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'polish'"
-                        " LIMIT 1",
-                        (seg_id,),
-                    )
-                    if cur.fetchone():
-                        stats.polished += 1  # count as done, skip re-processing
-                        continue
+                # Already-polished check (crash-and-resume safety: a prior
+                # collect_batch may have committed some rows before crashing).
+                if seg_repo.has_sk_text(seg_id, "polish"):
+                    stats.polished += 1  # count as done, skip re-processing
+                    already_done.add(seg_id)
+                    continue
                 p = _build_payload(conn, seg_id)
                 if p is not None:
                     payloads[seg_id] = p
                 else:
                     stats.no_source += 1
-            # Second pass: process results using the materialised list
-            _process_results(results_list, payloads, conn, src_polish_id, stats)
+            # Second pass: only process results that have a payload
+            # (already_done segments are excluded to prevent double-counting).
+            processable = [r for r in results_list if int(r.custom_id) not in already_done]
+            _process_results(processable, payloads, conn, src_polish_id, stats)
 
     return stats
 
