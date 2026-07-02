@@ -42,7 +42,7 @@ from dotenv import load_dotenv
 from common.pricing import UsageInfo
 from polish.batch import _BatchStats as PolishBatchStats
 from polish.batch import run_batch as run_batch_polish
-from polish.polisher import MODEL as POLISH_MODEL
+from polish.polisher import DEEPSEEK_MODEL as POLISH_MODEL
 from polish.polisher import PolishOutcome, polish_segment
 from storage.db import get_conn
 from translate.loop import translate_segment
