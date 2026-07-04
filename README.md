@@ -116,3 +116,36 @@ Railway environment variables required on the app service:
 
 The Railway callback URL (`https://<railway-domain>.up.railway.app/auth/callback`) must also
 be added to Google Cloud Console → OAuth 2.0 → Authorized redirect URIs.
+
+### Accessing the Railway database locally
+
+The Postgres service has no public TCP proxy. Access is via the Railway CLI tunnel only:
+
+```bash
+railway connect Postgres
+# → tunnels Railway Postgres to localhost:5432 for the duration of the session
+```
+
+Then point local tools at `postgresql://postgres:<password>@localhost:5432/railway`.
+The Flask app connects over Railway's private internal network (`${{Postgres.DATABASE_URL}}`
+resolves to the internal address) — the public internet is never involved.
+
+### Pushing a DB delta to Railway
+
+After a local data migration (e.g. re-translating a segment batch):
+
+```bash
+# 1. Open tunnel
+railway connect Postgres
+
+# 2. In another terminal — dump data-only from local, restore to Railway
+docker exec aquinas-pipeline-db-1 pg_dump -U aquinas aquinas \
+  -Fc --data-only --no-privileges --no-owner \
+  --exclude-table=source --exclude-table=work \
+  -f /tmp/delta.dump
+
+docker exec aquinas-pipeline-db-1 pg_restore \
+  --disable-triggers --superuser=postgres \
+  -d "postgresql://postgres:<password>@host.docker.internal:5432/railway" \
+  /tmp/delta.dump
+```
