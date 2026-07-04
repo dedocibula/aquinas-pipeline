@@ -12,6 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm install -g @railway/cli
-      - run: railway up --ci --service aquinas-pipeline
+      - run: railway up --ci --service aquinas-pipeline --environment production
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

@@ -1,7 +1,7 @@
 # Aquinas → Slovak Translation Pipeline
 
 A reproducible, cost-controlled pipeline that translates Thomas Aquinas's *Summa Theologiae*
-from Scholastic Latin into Slovak. Built Summa-specific to ship fast.
+from Scholastic Latin into Slovak.
 
 The model translates prose. It does not decide terminology. Term choices come from authoritative
 human sources in a fixed precedence order — Krystal glossary beats everything; Bahounek fills
@@ -72,3 +72,47 @@ bash scripts/install-hooks.sh
 
 This symlinks `scripts/pre-commit` into `.git/hooks/`. On every `git commit`, ruff runs against
 staged `.py` files only — the commit is blocked if any lint errors are found.
+
+## Running the review server
+
+```bash
+uv run flask --app server.app run --debug
+```
+
+The server reads `DATABASE_URL`, `FLASK_SECRET_KEY`, `GOOGLE_CLIENT_ID`, and
+`GOOGLE_CLIENT_SECRET` from the environment (`.env` is loaded automatically).
+Editors authenticate via Google OAuth; the callback URL must be registered in
+Google Cloud Console → OAuth 2.0 → Authorized redirect URIs:
+```
+http://localhost:5000/auth/callback
+```
+
+## Testing
+
+```bash
+uv run pytest
+```
+
+All tests use fakes/mocks — no live DB or API keys required.
+
+## Deployment (Railway)
+
+The server is deployed to Railway via GitHub Actions.
+
+- **CI** (`.github/workflows/ci.yml`): runs `pytest` on every push and pull request.
+- **Deploy** (`.github/workflows/deploy.yml`): triggers automatically when CI passes on `main`,
+  deploying to the `aquinas-pipeline` Railway service via `railway up --ci --service aquinas-pipeline`.
+
+The `RAILWAY_TOKEN` secret must be set in the GitHub repository settings.
+
+Railway environment variables required on the app service:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `FLASK_SECRET_KEY` | (strong random secret) |
+| `GOOGLE_CLIENT_ID` | from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | from Google Cloud Console |
+
+The Railway callback URL (`https://<railway-domain>.up.railway.app/auth/callback`) must also
+be added to Google Cloud Console → OAuth 2.0 → Authorized redirect URIs.
