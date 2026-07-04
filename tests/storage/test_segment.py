@@ -184,7 +184,7 @@ def test_get_pending_without_filter_omits_any(fake_conn):
     SegmentRepository(conn).get_pending_segment_ids_for_article("I.q1.a1", 1)
     sql, params = conn.executed[-1]
     assert "segment_id = ANY(%s)" not in sql
-    assert params == ("I.q1.a1", 1)
+    assert params == ("I.q1.a1", 1, "I.q1.a1", "I.q1.a1")
 
 
 def test_has_pending_segments_true(fake_conn):

@@ -623,6 +623,10 @@ class SegmentRepository:
         workers. work_id guards against a different loaded work sharing the prefix.
         segment_filter: when provided, only those segment IDs are returned.
         """
+        # Depth guard: a depth-2 prefix (e.g. 'II_II.q100' for question_title) must
+        # not absorb depth-3 segments (e.g. preamble at 'II_II.q100.preamble') that
+        # have their own prefix in the dispatch list.  Only depth-3+ prefixes use
+        # the full subtree (<@); depth-2 prefixes are restricted to exact depth.
         with self.conn.cursor() as cur:
             if segment_filter is not None:
                 cur.execute(
@@ -633,13 +637,16 @@ class SegmentRepository:
                       AND s.work_id = %s
                       AND s.translation_status = 'pending'
                       AND s.segment_id = ANY(%s)
+                      AND (nlevel(%s::ltree) >= 3
+                           OR nlevel(s.locator_path) = nlevel(%s::ltree))
                       AND EXISTS (
                           SELECT 1 FROM segment_text st
                           WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
                       )
                     ORDER BY s.locator_path
                     """,
-                    (locator_prefix, work_id, list(segment_filter)),
+                    (locator_prefix, work_id, list(segment_filter),
+                     locator_prefix, locator_prefix),
                 )
             else:
                 cur.execute(
@@ -649,13 +656,15 @@ class SegmentRepository:
                     WHERE s.locator_path <@ %s::ltree
                       AND s.work_id = %s
                       AND s.translation_status = 'pending'
+                      AND (nlevel(%s::ltree) >= 3
+                           OR nlevel(s.locator_path) = nlevel(%s::ltree))
                       AND EXISTS (
                           SELECT 1 FROM segment_text st
                           WHERE st.segment_id = s.segment_id AND st.lang IN ('la', 'en')
                       )
                     ORDER BY s.locator_path
                     """,
-                    (locator_prefix, work_id),
+                    (locator_prefix, work_id, locator_prefix, locator_prefix),
                 )
             return [row[0] for row in cur.fetchall()]
 
@@ -679,9 +688,12 @@ class SegmentRepository:
                       AND work_id = %s
                       AND translation_status = 'pending'
                       AND segment_id = ANY(%s)
+                      AND (nlevel(%s::ltree) >= 3
+                           OR nlevel(locator_path) = nlevel(%s::ltree))
                     LIMIT 1
                     """,
-                    (locator_prefix, work_id, list(segment_filter)),
+                    (locator_prefix, work_id, list(segment_filter),
+                     locator_prefix, locator_prefix),
                 )
             else:
                 cur.execute(
@@ -691,9 +703,11 @@ class SegmentRepository:
                     WHERE locator_path <@ %s::ltree
                       AND work_id = %s
                       AND translation_status = 'pending'
+                      AND (nlevel(%s::ltree) >= 3
+                           OR nlevel(locator_path) = nlevel(%s::ltree))
                     LIMIT 1
                     """,
-                    (locator_prefix, work_id),
+                    (locator_prefix, work_id, locator_prefix, locator_prefix),
                 )
             return cur.fetchone() is not None
 
