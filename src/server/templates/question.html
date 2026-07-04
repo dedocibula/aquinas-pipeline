@@ -213,6 +213,34 @@
             <span class="detail-none">no term constraints</span>
             {% endif %}
           </div>
+          {% set notes = seg.reviewer_notes %}
+          {% set iter_count = None %}
+          {% set failure_reason = None %}
+          {% set approved_with_notes = None %}
+          {% if notes is mapping %}
+            {% if 'iteration' in notes %}{% set iter_count = notes['iteration'] %}{% endif %}
+            {% if 'raw' in notes and notes['raw'] %}{% set approved_with_notes = notes['raw'] %}{% endif %}
+            {% if 'last_feedback' in notes and notes['last_feedback'] %}{% set failure_reason = notes['last_feedback'] %}{% endif %}
+          {% endif %}
+          <div class="detail-section">
+            <span class="detail-label">Precheck / review notes</span>
+            {% if iter_count is not none %}
+              <div class="detail-meta">Iterations: {{ iter_count }}</div>
+            {% endif %}
+            {% if needs_human and failure_reason %}
+              <div class="detail-failure">Failure: {{ failure_reason }}</div>
+            {% endif %}
+            {% if approved_with_notes %}
+              <div class="detail-approved-notes">{{ approved_with_notes }}</div>
+            {% endif %}
+            {% if iter_count is none and not failure_reason and not approved_with_notes %}
+              {% if needs_human %}
+                <span class="detail-none">No feedback recorded — check pilot log</span>
+              {% else %}
+                <span class="detail-none">no notes</span>
+              {% endif %}
+            {% endif %}
+          </div>
         </div>
         {% endif %}
       </td>
