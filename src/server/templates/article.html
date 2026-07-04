@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_segment_panel.html" as panel %}
 
 {% block title %}{{ article_title }} — Aquinas Pipeline{% endblock %}
 
@@ -80,44 +81,6 @@
       {% set ts = seg.translation_status %}
       {% set needs_human = (ts == 'needs_human') %}
 
-      {# Machine status badge #}
-      {% if ts == 'translated' %}
-        {% set badge_class = 'badge-ok' %}
-        {% set badge_char  = '&#10003;' %}
-        {% set badge_title = 'translated' %}
-      {% elif needs_human %}
-        {% set badge_class = 'badge-warn' %}
-        {% set badge_char  = '&#9888;' %}
-        {% set badge_title = 'needs review' %}
-      {% else %}
-        {% set badge_class = 'badge-pending' %}
-        {% set badge_char  = '&#8230;' %}
-        {% set badge_title = 'pending' %}
-      {% endif %}
-
-      {# Parse reviewer_notes safely #}
-      {% set notes = seg.reviewer_notes %}
-      {% set iter_count = None %}
-      {% set failure_reason = None %}
-      {% set approved_with_notes = None %}
-      {% if notes is mapping %}
-        {% if 'iteration' in notes %}
-          {% set iter_count = notes['iteration'] %}
-        {% endif %}
-        {% if 'raw' in notes and notes['raw'] %}
-          {% set approved_with_notes = notes['raw'] %}
-        {% endif %}
-        {% if 'last_feedback' in notes and notes['last_feedback'] %}
-          {% set failure_reason = notes['last_feedback'] %}
-        {% endif %}
-      {% endif %}
-
-      {# Segment constraints #}
-      {% set seg_constraints = constraints.get(seg.segment_id, []) %}
-      {% set panel_id = 'detail-' ~ seg.segment_id %}
-
-      {# Effective display text: human > polish > model > none #}
-      {% set slovak_display = seg.slovak_human or seg.slovak_polish or seg.slovak_model %}
 
       <tr class="row-{{ etype }}{% if needs_human %} row-needs-human{% endif %}"
           data-segment-id="{{ seg.segment_id }}">
@@ -130,134 +93,9 @@
           <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
         </td>
         <td class="col-slovak slovak">
-          {# Displayed text — hidden while review panel is open #}
-          <div class="slovak-display" id="sdisp-{{ seg.segment_id }}">
-            <span class="slovak-text" id="text-{{ seg.segment_id }}"
-                  {% if not slovak_display %}style="display:none"{% endif %}>{{ slovak_display or '' }}</span>
-            <em class="awaiting" id="awaiting-{{ seg.segment_id }}"
-                {% if slovak_display %}style="display:none"{% endif %}>— awaiting translation —</em>
-            <div class="human-note" id="note-display-{{ seg.segment_id }}"
-                 {% if not seg.human_note %}style="display:none"{% endif %}>{{ seg.human_note or '' }}</div>
-          </div>
-
-          {# Review panel — editor only; button lives in status cell #}
-          {% if is_editor %}
-          <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
-               data-human-version="{{ seg.human_version }}"
-               {% if needs_human %}data-needs-human="1"{% endif %}>
-            <div class="review-tabs">
-              <button class="tab-btn tab-active" data-tab="human"
-                      data-segment-id="{{ seg.segment_id }}">Human</button>
-              <button class="tab-btn" data-tab="machine"
-                      data-segment-id="{{ seg.segment_id }}">Machine</button>
-            </div>
-            {# Human pane — shown by default; contains all action buttons #}
-            <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
-              <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
-                        >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
-              <div class="review-actions">
-                <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
-                <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
-                <button class="btn-rev-reset"   data-segment-id="{{ seg.segment_id }}">Reset</button>
-                <button class="btn-rev-addnote" data-segment-id="{{ seg.segment_id }}">Add Note</button>
-              </div>
-              <div class="note-area" id="notearea-{{ seg.segment_id }}" style="display:none">
-                <textarea class="note-textarea" id="ntextarea-{{ seg.segment_id }}"
-                          rows="2" placeholder="Translator note (public)">{{ seg.human_note or '' }}</textarea>
-                <div class="note-actions">
-                  <button class="btn-rev-savenote" data-segment-id="{{ seg.segment_id }}">Save Note</button>
-                  <button class="btn-rev-clearnote" data-segment-id="{{ seg.segment_id }}"
-                          {% if not seg.human_note %}disabled{% endif %}>Clear Note</button>
-                </div>
-              </div>
-            </div>
-            {# Machine pane — model draft + polish (if any) + polish action buttons #}
-            <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
-              <div class="machine-draft-section">
-                <div class="machine-label">Model draft:</div>
-                <div class="machine-text-ro" id="machine-text-{{ seg.segment_id }}">{{ seg.slovak_model or '— no machine translation —' }}</div>
-              </div>
-              <div class="polish-draft-section" id="polish-draft-{{ seg.segment_id }}"
-                   {% if not seg.slovak_polish %}style="display:none"{% endif %}>
-                <div class="machine-label">Polished:</div>
-                <div class="polish-text-ro" id="polish-text-{{ seg.segment_id }}">{{ seg.slovak_polish or '' }}</div>
-              </div>
-              {% if needs_human %}
-              <div class="machine-actions" id="machine-actions-{{ seg.segment_id }}">
-                <button class="btn-approve" data-segment-id="{{ seg.segment_id }}">Approve</button>
-              </div>
-              {% endif %}
-            </div>
-          </div>
-          {% endif %}
-
-          {# Detail panel — editor only; locked terms + machine reviewer_notes #}
-          {% if is_editor and ts in ('translated', 'needs_human') %}
-            <button class="detail-toggle"
-                    data-target="{{ panel_id }}"
-                    aria-expanded="{{ 'true' if needs_human else 'false' }}"
-                    aria-controls="{{ panel_id }}">
-              &#9654; details
-            </button>
-            <div class="detail-panel" id="{{ panel_id }}"
-                 {% if not needs_human %}style="display:none"{% endif %}>
-
-              <div class="detail-section">
-                <span class="detail-label">Locked terms</span>
-                {% if seg_constraints %}
-                  <ul class="term-list">
-                    {% for c in seg_constraints %}
-                      <li>
-                        <code>{{ c.latin_lemma }}</code>
-                        {% if c.context_label %}
-                          <span class="term-context">({{ c.context_label }})</span>
-                        {% endif %}
-                        &rarr; <span class="term-slovak">{{ c.slovak }}</span>
-                      </li>
-                    {% endfor %}
-                  </ul>
-                {% else %}
-                  <span class="detail-none">no term constraints</span>
-                {% endif %}
-              </div>
-
-              <div class="detail-section">
-                <span class="detail-label">Precheck / review notes</span>
-                {% if iter_count is not none %}
-                  <div class="detail-meta">Iterations: {{ iter_count }}</div>
-                {% endif %}
-                {% if needs_human and failure_reason %}
-                  <div class="detail-failure">Failure: {{ failure_reason }}</div>
-                {% endif %}
-                {% if approved_with_notes %}
-                  <div class="detail-approved-notes">{{ approved_with_notes }}</div>
-                {% endif %}
-                {% if iter_count is none and not failure_reason and not approved_with_notes %}
-                  {% if needs_human %}
-                    <span class="detail-none">No feedback recorded — check pilot log</span>
-                  {% else %}
-                    <span class="detail-none">no notes</span>
-                  {% endif %}
-                {% endif %}
-              </div>
-
-            </div>
-          {% endif %}
+          {{ panel.segment_panel(seg, constraints.get(seg.segment_id, []), is_editor) }}
         </td>
-        {% if is_editor %}
-        <td class="col-status">
-          <div class="status-badges">
-            <span class="badge {{ badge_class }}"
-                  data-badge="{{ seg.segment_id }}"
-                  title="{{ badge_title }}">{{ badge_char | safe }}</span>
-            <button class="btn-review{% if seg.human_reviewed_by %} btn-review-done{% endif %}"
-                    data-segment-id="{{ seg.segment_id }}"
-                    {% if seg.human_reviewed_by %}title="Reviewed by {{ seg.human_reviewed_by }}"{% endif %}>
-              {% if seg.human_reviewed_by %}&#10003; Reviewed{% else %}&#9998; Review{% endif %}
-            </button>
-          </div>
-        </td>
-        {% endif %}
+        {{ panel.status_cell(seg, is_editor) }}
       </tr>
     {% else %}
       <tr>
