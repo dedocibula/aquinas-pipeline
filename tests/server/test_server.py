@@ -909,41 +909,57 @@ def test_status_list_page_title_reflects_status(editor_client):
 # ---------------------------------------------------------------------------
 
 
-def test_question_view_has_needs_review_header(client):
-    """Question article summary table has a 'Needs Review' column header."""
-    resp = client.get("/~ST.I.Q3")
+def test_question_view_has_needs_review_header_for_editor(editor_client):
+    """Editors see 'Needs Review' column header in the article summary table."""
+    resp = editor_client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "Needs Review" in html
 
 
-def test_question_view_zero_needs_human_shows_plain_zero(client):
-    """Articles with needs_human_count=0 display a plain '0', not a badge."""
+def test_question_view_needs_review_header_hidden_for_non_editor(client):
+    """Non-editors do not see 'Needs Review' or 'Translated' columns."""
     resp = client.get("/~ST.I.Q3")
+    html = resp.data.decode()
+    assert "Needs Review" not in html
+    assert "Translated" not in html
+
+
+def test_question_view_zero_needs_human_shows_plain_zero(editor_client):
+    """Articles with needs_human_count=0 display a plain '0', not a badge."""
+    resp = editor_client.get("/~ST.I.Q3")
     html = resp.data.decode()
     # FAKE_ARTICLES has needs_human_count=0; should not render badge-warn for it
     assert "badge-warn" not in html
 
 
-def test_question_view_nonzero_needs_human_renders_badge(client):
+def test_question_view_nonzero_needs_human_renders_badge(editor_client):
     """Articles with needs_human_count>0 display a badge-warn with the count."""
     with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
-        resp = client.get("/~ST.I.Q3")
+        resp = editor_client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert 'class="badge badge-warn"' in html
     assert ">3<" in html
 
 
-def test_question_view_highlights_needs_human_article_row(client):
-    """Article rows with needs_human_count>0 get the row-needs-human CSS class."""
+def test_question_view_highlights_needs_human_article_row(editor_client):
+    """Article rows with needs_human_count>0 get the row-needs-human CSS class for editors."""
     with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
-        resp = client.get("/~ST.I.Q3")
+        resp = editor_client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "row-needs-human" in html
 
 
-def test_question_view_clean_article_has_no_highlight(client):
+def test_question_view_needs_human_row_hidden_for_non_editor(client):
+    """Non-editors do not see row-needs-human highlight on article rows."""
+    with patch("server.app.get_question_articles", return_value=FAKE_ARTICLES_WITH_NEEDS_HUMAN):
+        resp = client.get("/~ST.I.Q3")
+    html = resp.data.decode()
+    assert "row-needs-human" not in html
+
+
+def test_question_view_clean_article_has_no_highlight(editor_client):
     """Article rows with needs_human_count=0 do not get the row-needs-human class."""
-    resp = client.get("/~ST.I.Q3")
+    resp = editor_client.get("/~ST.I.Q3")
     html = resp.data.decode()
     assert "row-needs-human" not in html
 

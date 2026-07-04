@@ -74,18 +74,18 @@
   <thead>
     <tr>
       <th>Article</th>
-      <th>Translated</th>
-      <th>Needs Review</th>
+      {% if is_editor %}<th>Translated</th>{% endif %}
+      {% if is_editor %}<th>Needs Review</th>{% endif %}
       <th>Total</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for a in articles %}
-    <tr{% if a.needs_human_count > 0 %} class="row-needs-human"{% endif %}>
+    <tr{% if is_editor and a.needs_human_count > 0 %} class="row-needs-human"{% endif %}>
       <td>{{ a.title }}</td>
-      <td>{{ a.translated_count }}</td>
-      <td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count }}</span>{% else %}0{% endif %}</td>
+      {% if is_editor %}<td>{{ a.translated_count }}</td>{% endif %}
+      {% if is_editor %}<td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count }}</span>{% else %}0{% endif %}</td>{% endif %}
       <td>{{ a.total_count }}</td>
       <td><a href="/~{{ a.url_locator }}">View &rarr;</a></td>
     </tr>
