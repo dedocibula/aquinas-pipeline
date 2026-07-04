@@ -23,16 +23,13 @@ jobs:
           path: ~/cltk_data
           key: cltk-lat-models-v1
 
-      - name: Download CLTK Latin models (if not cached)
-        run: |
-          uv run python -c "
-          import pathlib, sys
-          p = pathlib.Path.home() / 'cltk_data' / 'lat' / 'model' / 'lat_models_cltk'
-          if not p.exists():
-              from cltk.data.fetch import FetchCorpus
-              FetchCorpus('lat').import_corpus('lat_models_cltk')
-          else:
-              print('CLTK Latin models already cached', file=sys.stderr)
-          "
+      - name: Cache MorphoDiTa models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: morphodita-models-v1
+
+      - name: Download models (CLTK + MorphoDiTa)
+        run: uv run python -m acquire.download_models
 
       - run: uv run pytest

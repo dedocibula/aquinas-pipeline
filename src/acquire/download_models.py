@@ -1,7 +1,7 @@
-"""Download MorphoDiTa model files required by the lemmatize pipeline.
+"""Download all model files required by the lemmatize pipeline.
 
-Models are placed under <project_root>/models/ as subdirectories, mirroring
-the ZIP archive structure from LINDAT. Existing directories are skipped.
+MorphoDiTa models are placed under <project_root>/models/ as subdirectories,
+mirroring the ZIP archive structure from LINDAT. Existing directories are skipped.
 
 Czech model (version 161115):
   czech-morfflex-pdt-161115/   — CC BY-NC-SA 4.0
@@ -10,6 +10,8 @@ Czech model (version 161115):
 Slovak model (version 170914):
   slovak-morfflex-pdt-170914/  — CC BY-NC-SA 4.0
   Source: https://lindat.mff.cuni.cz/repository/handle/11234/1-3278
+
+CLTK Latin models are placed under ~/cltk_data/ by the CLTK library itself.
 
 Usage:
   uv run python -m acquire.download_models
@@ -28,7 +30,7 @@ _MODELS_DIR = pathlib.Path(__file__).resolve().parents[2] / "models"
 # Bitstream UUIDs resolved via the DSpace 7 REST API:
 #   /server/api/core/items/<item-uuid>/bundles → ORIGINAL bundle
 #   /server/api/core/bundles/<bundle-uuid>/bitstreams → content href
-_MODELS = [
+_MORPHODITA_MODELS = [
     {
         "dirname": "czech-morfflex-pdt-161115",
         "label": "Czech MorfFlex+PDT 161115",
@@ -59,15 +61,31 @@ def _download_and_extract(url: str, dest_dir: pathlib.Path, label: str) -> None:
     print(f"  Done: {dest_dir}", flush=True)
 
 
-def main() -> None:
+def _download_morphodita() -> None:
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    for spec in _MODELS:
+    for spec in _MORPHODITA_MODELS:
         dest = _MODELS_DIR / spec["dirname"]
         if dest.exists():
             print(f"[skip] {spec['label']} already present: {dest}")
             continue
         print(f"[download] {spec['label']}")
         _download_and_extract(spec["url"], dest, spec["label"])
+
+
+def _download_cltk() -> None:
+    cltk_path = pathlib.Path.home() / "cltk_data" / "lat" / "model" / "lat_models_cltk"
+    if cltk_path.exists():
+        print("[skip] CLTK Latin models already present")
+        return
+    print("[download] CLTK Latin models (lat_models_cltk)")
+    from cltk.data.fetch import FetchCorpus
+    FetchCorpus("lat").import_corpus("lat_models_cltk")
+    print(f"  Done: {cltk_path}")
+
+
+def main() -> None:
+    _download_cltk()
+    _download_morphodita()
     print("Done.")
 
 

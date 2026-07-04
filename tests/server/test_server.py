@@ -702,7 +702,17 @@ def test_auth_callback_rejects_unverified_email():
         "userinfo": {"email": "unverified@example.com", "email_verified": False},
     }
 
-    with patch("server.app.oauth") as mock_oauth:
+    stub_conn = MagicMock()
+
+    @contextmanager
+    def fake_get_conn_noop():
+        yield stub_conn
+
+    with (
+        patch("server.app.oauth") as mock_oauth,
+        patch("server.app.get_conn", fake_get_conn_noop),
+        patch("server.app.get_structural_formulas", return_value={"dummy": "formula"}),
+    ):
         mock_oauth.google.authorize_access_token.return_value = fake_token
         with app.test_client() as c:
             resp = c.get("/auth/callback")
