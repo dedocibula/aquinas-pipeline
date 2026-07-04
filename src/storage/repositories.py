@@ -21,7 +21,7 @@ from storage.models import Constraint, Segment, Sense, Term
 # zero terms (no Latin) but are included so the resolver leaves an auditable
 # empty result. (body_text_coverage below uses a titles-excluded set — different
 # purpose, intentionally not shared.)
-_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "article_title", "question_title"}
+_BODY_TYPES = {"arg", "sed_contra", "respondeo", "reply", "preamble", "article_title", "question_title"}
 
 
 class GlossaryRepository:

@@ -3,7 +3,7 @@
 -- ============================================================================
 --
 -- SINGLE SOURCE OF TRUTH for the current database shape. This file equals the
--- live schema after migrations 001–007 are applied (verified against a fresh
+-- live schema after migrations 001–011 are applied (verified against a fresh
 -- pg_dump --schema-only). Fresh setup runs THIS file; the numbered scripts in
 -- migrations/archive/ are historical only — do not replay them on a new DB.
 --
@@ -248,7 +248,9 @@ CREATE INDEX idx_run_segment_failures ON run_segment (run_id)
 -- ============================================================================
 
 -- Pivot segment_text to one row per segment with a column per language.
--- slovak_draft/slovak_final split the (sk,model) and (sk,human) rows.
+-- Three Slovak columns: slovak_draft (model), slovak_polish (polish pass),
+-- slovak_final (human override). Also surfaces translation_status and
+-- reviewer_notes directly from segment.
 CREATE VIEW v_segment AS
     SELECT
         s.segment_id,
@@ -256,15 +258,19 @@ CREATE VIEW v_segment AS
         s.locator_path,
         s.element_type,
         s.reply_to,
-        max(t.content) FILTER (WHERE t.lang = 'la')                      AS latin,
-        max(t.content) FILTER (WHERE t.lang = 'cs')                      AS czech,
-        max(t.content) FILTER (WHERE t.lang = 'en')                      AS english,
-        max(t.content) FILTER (WHERE t.lang = 'sk' AND src.code = 'model') AS slovak_draft,
-        max(t.content) FILTER (WHERE t.lang = 'sk' AND src.code = 'human') AS slovak_final
+        s.translation_status,
+        s.reviewer_notes,
+        max(t.content) FILTER (WHERE t.lang = 'la')                         AS latin,
+        max(t.content) FILTER (WHERE t.lang = 'cs')                         AS czech,
+        max(t.content) FILTER (WHERE t.lang = 'en')                         AS english,
+        max(t.content) FILTER (WHERE t.lang = 'sk' AND src.code = 'model')  AS slovak_draft,
+        max(t.content) FILTER (WHERE t.lang = 'sk' AND src.code = 'polish') AS slovak_polish,
+        max(t.content) FILTER (WHERE t.lang = 'sk' AND src.code = 'human')  AS slovak_final
     FROM segment s
     JOIN segment_text t USING (segment_id)
     JOIN source src ON t.source_id = src.source_id
-    GROUP BY s.segment_id, s.work_id, s.locator_path, s.element_type, s.reply_to;
+    GROUP BY s.segment_id, s.work_id, s.locator_path, s.element_type, s.reply_to,
+             s.translation_status, s.reviewer_notes;
 
 -- Pivot sense_rendering to one row per sense with a column per language.
 CREATE VIEW v_sense AS
@@ -287,6 +293,33 @@ CREATE VIEW v_sense AS
     GROUP BY gs.sense_id, gs.term_id, gt.latin_lemma, gs.context_label, gs.status, gs.version;
 
 
+-- ── editor ──────────────────────────────────────────────────────────────────
+-- Allowlist for the preview server OAuth gate. Editors are stored here so the
+-- list can be updated via psql without a code deploy. is_editor is resolved
+-- once per login and cached in the Flask session; changes take effect on next login.
+--   Produced by: manual INSERT via psql.
+--   Consumed by: server/app.py (is_editor check on protected routes).
+CREATE TABLE IF NOT EXISTS editor (
+    email text PRIMARY KEY
+);
+
+
+-- ── segment_review ───────────────────────────────────────────────────────────
+-- Sparse human-review layer for the preview server. A row exists only once a
+-- human editor touches a segment (Save, Accept, or Add Note). Reset deletes
+-- the row, returning the segment to unreviewed machine state.
+-- human_version is an optimistic-lock token guarding concurrent editor edits.
+--   Produced by: server/app.py review_segment() on Save/Accept/Note actions.
+--   Consumed by: server/app.py (conflict detection via human_version).
+CREATE TABLE segment_review (
+    segment_id        int         PRIMARY KEY REFERENCES segment(segment_id),
+    human_reviewed_by text        NOT NULL,
+    human_reviewed_at timestamptz NOT NULL DEFAULT now(),
+    human_note        text        NULL,
+    human_version     int         NOT NULL DEFAULT 0
+);
+
+
 -- ============================================================================
 -- SEED DATA — required for a functional fresh install (part of the schema, not
 -- corpus content). The source precedence order is load, not preference.
@@ -299,7 +332,8 @@ INSERT INTO source (code, lang, kind, authority_rank, note) VALUES
     ('bahounek',           'cs', 'reference',   20,  'Bahounek modern Czech revision'),
     ('dominican',          'en', 'reference',   30,  'Dominican Province translation'),
     ('freddoso',           'en', 'reference',   35,  'Freddoso translation (partial)'),
-    ('model',              'sk', 'machine',     90,  'Model-generated draft');
+    ('model',              'sk', 'machine',     90,  'Model-generated draft'),
+    ('polish',             'sk', 'machine',     85,  'Claude Sonnet polish pass');
 
 INSERT INTO work (author, title, structure_type, source_lang) VALUES
     ('Thomas Aquinas', 'Summa Theologiae', 'summa_articulus', 'la');
