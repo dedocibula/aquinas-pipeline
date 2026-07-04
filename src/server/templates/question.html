@@ -32,7 +32,7 @@
     {% if title_seg %}
     {% set seg = title_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr class="row-question_title{% if needs_human %} row-needs-human{% endif %}"
+    <tr class="row-question_title{% if needs_human and is_editor %} row-needs-human{% endif %}"
         data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
       <td class="col-latin">
@@ -51,7 +51,7 @@
     {% if preamble_seg %}
     {% set seg = preamble_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr class="row-preamble{% if needs_human %} row-needs-human{% endif %}"
+    <tr class="row-preamble{% if needs_human and is_editor %} row-needs-human{% endif %}"
         data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Preambula</td>
       <td class="col-latin">

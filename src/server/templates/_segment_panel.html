@@ -21,8 +21,10 @@
   <div class="slovak-display" id="sdisp-{{ seg.segment_id }}">
     <span class="slovak-text" id="text-{{ seg.segment_id }}"
           {% if not slovak_display %}style="display:none"{% endif %}>{{ slovak_display or '' }}</span>
+    {% if is_editor %}
     <em class="awaiting" id="awaiting-{{ seg.segment_id }}"
         {% if slovak_display %}style="display:none"{% endif %}>— awaiting translation —</em>
+    {% endif %}
     <div class="human-note" id="note-display-{{ seg.segment_id }}"
          {% if not seg.human_note %}style="display:none"{% endif %}>{{ seg.human_note or '' }}</div>
   </div>

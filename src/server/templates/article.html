@@ -82,7 +82,7 @@
       {% set needs_human = (ts == 'needs_human') %}
 
 
-      <tr class="row-{{ etype }}{% if needs_human %} row-needs-human{% endif %}"
+      <tr class="row-{{ etype }}{% if needs_human and is_editor %} row-needs-human{% endif %}"
           data-segment-id="{{ seg.segment_id }}">
         <td class="col-label">
           {{ label }}
