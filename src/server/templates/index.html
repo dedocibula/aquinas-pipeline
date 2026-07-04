@@ -5,6 +5,7 @@
 {% block content %}
 <h1>Summa Theologiae</h1>
 
+{% if is_editor %}
 <section class="progress-bar-section">
   <h2>Translation progress</h2>
   {% set total = progress.pending + progress.translated + progress.needs_human %}
@@ -22,6 +23,7 @@
     <p>No segments found.</p>
   {% endif %}
 </section>
+{% endif %}
 
 {% for pars, questions in grouped.items() %}
   <section class="pars-section">

@@ -819,16 +819,16 @@ def test_review_button_visible_for_editor(editor_client):
 # ---------------------------------------------------------------------------
 
 
-def test_index_translated_badge_is_a_link(client):
-    """The 'translated' badge on the index page links to /status/translated."""
-    resp = client.get("/")
+def test_index_translated_badge_is_a_link(editor_client):
+    """The 'translated' badge on the index page links to /status/translated (editor only)."""
+    resp = editor_client.get("/")
     html = resp.data.decode()
     assert 'href="/status/translated"' in html
 
 
-def test_index_needs_human_badge_is_a_link(client):
-    """The 'needs review' badge on the index page links to /status/needs_human."""
-    resp = client.get("/")
+def test_index_needs_human_badge_is_a_link(editor_client):
+    """The 'needs review' badge on the index page links to /status/needs_human (editor only)."""
+    resp = editor_client.get("/")
     html = resp.data.decode()
     assert 'href="/status/needs_human"' in html
 
@@ -840,65 +840,67 @@ def test_index_pending_badge_is_not_a_link(client):
     assert 'href="/status/pending"' not in html
 
 
+def test_index_progress_hidden_for_non_editor(client):
+    """Non-editors do not see the translation progress section."""
+    resp = client.get("/")
+    html = resp.data.decode()
+    assert 'Translation progress' not in html
+    assert 'href="/status/translated"' not in html
+
+
 # ---------------------------------------------------------------------------
 # /status/<status> route
 # ---------------------------------------------------------------------------
 
 
-def test_status_list_translated_returns_200(client):
-    """GET /status/translated returns 200 for a valid status."""
-    resp = client.get("/status/translated")
-    assert resp.status_code == 200
+def test_status_list_translated_returns_200(editor_client):
+    """GET /status/translated returns 200 for editors."""
+    assert editor_client.get("/status/translated").status_code == 200
 
 
-def test_status_list_needs_human_returns_200(client):
-    """GET /status/needs_human returns 200 for a valid status."""
-    resp = client.get("/status/needs_human")
-    assert resp.status_code == 200
+def test_status_list_needs_human_returns_200(editor_client):
+    """GET /status/needs_human returns 200 for editors."""
+    assert editor_client.get("/status/needs_human").status_code == 200
 
 
-def test_status_list_pending_returns_200(client):
-    """GET /status/pending returns 200 for a valid status."""
-    resp = client.get("/status/pending")
-    assert resp.status_code == 200
+def test_status_list_pending_returns_200(editor_client):
+    """GET /status/pending returns 200 for editors."""
+    assert editor_client.get("/status/pending").status_code == 200
 
 
-def test_status_list_invalid_status_returns_404(client):
+def test_status_list_returns_403_for_non_editor(client):
+    """GET /status/* returns 403 for non-editors."""
+    assert client.get("/status/translated").status_code == 403
+
+
+def test_status_list_invalid_status_returns_404(editor_client):
     """GET /status/bogus returns 404 for an unrecognised status."""
-    resp = client.get("/status/bogus")
-    assert resp.status_code == 404
+    assert editor_client.get("/status/bogus").status_code == 404
 
 
-def test_status_list_groups_questions_by_pars(client):
+def test_status_list_groups_questions_by_pars(editor_client):
     """Status list renders a pars-section heading for each pars in the result."""
-    resp = client.get("/status/needs_human")
-    html = resp.data.decode()
-    # FAKE_QUESTIONS_BY_STATUS has I and II-I pars
+    html = editor_client.get("/status/needs_human").data.decode()
     assert "Pars I" in html
     assert "Pars II-I" in html
 
 
-def test_status_list_shows_question_links(client):
+def test_status_list_shows_question_links(editor_client):
     """Status list renders href links to each question's URL locator."""
-    resp = client.get("/status/translated")
-    html = resp.data.decode()
-    # I.q3 → ST.I.Q3
+    html = editor_client.get("/status/translated").data.decode()
     assert "/~ST.I.Q3" in html
 
 
-def test_status_list_shows_segment_counts(client):
+def test_status_list_shows_segment_counts(editor_client):
     """Status list annotates each question with its segment count."""
-    resp = client.get("/status/translated")
-    html = resp.data.decode()
-    # FAKE_QUESTIONS_BY_STATUS has counts 4 and 2
+    html = editor_client.get("/status/translated").data.decode()
     assert "4 segment" in html
     assert "2 segment" in html
 
 
-def test_status_list_page_title_reflects_status(client):
+def test_status_list_page_title_reflects_status(editor_client):
     """Status list <title> contains the human-readable status label."""
-    resp = client.get("/status/needs_human")
-    html = resp.data.decode()
+    html = editor_client.get("/status/needs_human").data.decode()
     assert "Needs review" in html
 
 

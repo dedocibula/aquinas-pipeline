@@ -325,6 +325,7 @@ _VALID_STATUSES = {"translated", "needs_human", "pending"}
 
 
 @app.route("/status/<status>")
+@requires_editor
 def status_list(status: str):
     """List questions that have at least one segment with the given translation status."""
     if status not in _VALID_STATUSES:
