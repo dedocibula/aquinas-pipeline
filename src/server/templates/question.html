@@ -33,7 +33,7 @@
     {% set ts = seg.translation_status %}
     {% set needs_human = (ts == 'needs_human') %}
     {% set panel_id = 'detail-' ~ seg.segment_id %}
-    {% set slovak_display = seg.slovak_human or seg.slovak_model %}
+    {% set slovak_display = seg.slovak_human or seg.slovak_polish or seg.slovak_model %}
     <tr class="row-question_title{% if needs_human %} row-needs-human{% endif %}"
         data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
@@ -54,7 +54,8 @@
 
         {% if is_editor %}
         <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
-             data-human-version="{{ seg.human_version }}">
+             data-human-version="{{ seg.human_version }}"
+             {% if needs_human %}data-needs-human="1"{% endif %}>
           <div class="review-tabs">
             <button class="tab-btn tab-active" data-tab="human"
                     data-segment-id="{{ seg.segment_id }}">Human</button>
@@ -63,7 +64,7 @@
           </div>
           <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
             <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
-                      >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
+                      >{{ seg.slovak_human or seg.slovak_polish or seg.slovak_model or '' }}</textarea>
             <div class="review-actions">
               <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
               <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
@@ -81,7 +82,20 @@
             </div>
           </div>
           <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
-            <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+            <div class="machine-draft-section">
+              <div class="machine-label">Model draft:</div>
+              <div class="machine-text-ro" id="machine-text-{{ seg.segment_id }}">{{ seg.slovak_model or '— no machine translation —' }}</div>
+            </div>
+            <div class="polish-draft-section" id="polish-draft-{{ seg.segment_id }}"
+                 {% if not seg.slovak_polish %}style="display:none"{% endif %}>
+              <div class="machine-label">Polished:</div>
+              <div class="polish-text-ro" id="polish-text-{{ seg.segment_id }}">{{ seg.slovak_polish or '' }}</div>
+            </div>
+            {% if needs_human %}
+            <div class="machine-actions" id="machine-actions-{{ seg.segment_id }}">
+              <button class="btn-approve" data-segment-id="{{ seg.segment_id }}">Approve</button>
+            </div>
+            {% endif %}
           </div>
         </div>
         {% endif %}
@@ -138,7 +152,7 @@
     {% set ts = seg.translation_status %}
     {% set needs_human = (ts == 'needs_human') %}
     {% set panel_id = 'detail-' ~ seg.segment_id %}
-    {% set slovak_display = seg.slovak_human or seg.slovak_model %}
+    {% set slovak_display = seg.slovak_human or seg.slovak_polish or seg.slovak_model %}
     <tr class="row-preamble{% if needs_human %} row-needs-human{% endif %}"
         data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Preambula</td>
@@ -159,7 +173,8 @@
 
         {% if is_editor %}
         <div class="review-panel" id="review-{{ seg.segment_id }}" style="display:none"
-             data-human-version="{{ seg.human_version }}">
+             data-human-version="{{ seg.human_version }}"
+             {% if needs_human %}data-needs-human="1"{% endif %}>
           <div class="review-tabs">
             <button class="tab-btn tab-active" data-tab="human"
                     data-segment-id="{{ seg.segment_id }}">Human</button>
@@ -168,7 +183,7 @@
           </div>
           <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
             <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
-                      >{{ seg.slovak_human or seg.slovak_model or '' }}</textarea>
+                      >{{ seg.slovak_human or seg.slovak_polish or seg.slovak_model or '' }}</textarea>
             <div class="review-actions">
               <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
               <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
@@ -186,7 +201,20 @@
             </div>
           </div>
           <div class="tab-pane" id="rpane-machine-{{ seg.segment_id }}" style="display:none">
-            <div class="machine-text-ro">{{ seg.slovak_model or '— no machine translation —' }}</div>
+            <div class="machine-draft-section">
+              <div class="machine-label">Model draft:</div>
+              <div class="machine-text-ro" id="machine-text-{{ seg.segment_id }}">{{ seg.slovak_model or '— no machine translation —' }}</div>
+            </div>
+            <div class="polish-draft-section" id="polish-draft-{{ seg.segment_id }}"
+                 {% if not seg.slovak_polish %}style="display:none"{% endif %}>
+              <div class="machine-label">Polished:</div>
+              <div class="polish-text-ro" id="polish-text-{{ seg.segment_id }}">{{ seg.slovak_polish or '' }}</div>
+            </div>
+            {% if needs_human %}
+            <div class="machine-actions" id="machine-actions-{{ seg.segment_id }}">
+              <button class="btn-approve" data-segment-id="{{ seg.segment_id }}">Approve</button>
+            </div>
+            {% endif %}
           </div>
         </div>
         {% endif %}
