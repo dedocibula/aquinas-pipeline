@@ -694,8 +694,8 @@ a.badge:hover {
   padding: 0.4rem 0.5rem;
   border: 1px solid #8a6040;
   border-radius: 3px;
-  resize: none;
-  overflow: hidden;
+  resize: vertical;
+  overflow-y: auto;
   line-height: 1.6;
   min-height: 3em;
 }

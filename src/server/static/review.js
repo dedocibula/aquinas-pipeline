@@ -27,6 +27,10 @@
     });
     if (mp) mp.style.display = tab === 'machine' ? '' : 'none';
     if (hp) hp.style.display = tab === 'human'   ? '' : 'none';
+    if (tab === 'human' && hp) {
+      var ta = hp.querySelector('.human-textarea');
+      if (ta) _autoResize(ta);
+    }
   }
 
   function _showSlovakDisplay(segId, show) {
