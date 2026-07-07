@@ -60,6 +60,26 @@ CREATE TABLE source (
 );
 
 
+-- ── pars_order ───────────────────────────────────────────────────────────────
+-- Canonical display ordinal for each pars label within a work.
+-- Keeps pars ordering in data so the server has no work-specific label knowledge.
+--   Produced by: seed (below).
+--   Consumed by: server queries that GROUP BY pars and need document-order output.
+CREATE TABLE pars_order (
+    work_id    integer NOT NULL REFERENCES work(work_id),
+    pars_label text    NOT NULL,
+    ordinal    integer NOT NULL,
+    PRIMARY KEY (work_id, pars_label)
+);
+
+-- Summa Theologiae (work_id=1) pars sequence: I → I-II → II-II → III
+INSERT INTO pars_order (work_id, pars_label, ordinal) VALUES
+    (1, 'I',     1),
+    (1, 'I_II',  2),
+    (1, 'II_II', 3),
+    (1, 'III',   4);
+
+
 -- ── segment ──────────────────────────────────────────────────────────────────
 -- The spine: one row per atomic translatable unit.
 --   Produced by: Latin parser (creates the segment graph).

@@ -107,14 +107,22 @@ def get_all_questions(conn: psycopg2.extensions.connection) -> list[dict]:
     """Return distinct question-level locator paths (depth 2, e.g. 'I.q1').
 
     Each dict has a single key ``question_path``.
-    Ordered by locator_path so pars appear in natural document order.
+    Ordered by pars_order.ordinal then numeric question number.
     """
     sql = """
-        SELECT DISTINCT
-            ltree2text(subpath(locator_path, 0, 2)) AS question_path,
-            subpath(locator_path, 0, 2)             AS _sort_key
-        FROM segment
-        ORDER BY _sort_key
+        WITH q AS (
+            SELECT DISTINCT
+                subpath(s.locator_path, 0, 2)                                        AS path,
+                COALESCE(po.ordinal, 9999)                                           AS pars_ord,
+                (regexp_match(subpath(s.locator_path, 1, 1)::text, '\\d+'))[1]::int AS q_num
+            FROM segment s
+            LEFT JOIN pars_order po
+                ON  po.pars_label = subpath(s.locator_path, 0, 1)::text
+                AND po.work_id    = s.work_id
+        )
+        SELECT ltree2text(path) AS question_path
+        FROM q
+        ORDER BY pars_ord, q_num
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql)
@@ -143,7 +151,7 @@ def get_question_articles(
           AND nlevel(s.locator_path) >= 3
           AND s.element_type != 'preamble'
         GROUP BY article_path, subpath(s.locator_path, 0, 3)
-        ORDER BY subpath(s.locator_path, 0, 3)
+        ORDER BY (regexp_match(subpath(s.locator_path, 0, 3)::text, '\\d+$'))[1]::int
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, (question_path,))
@@ -162,7 +170,16 @@ def get_article_segments(
     sql = _segment_select_sql("""
         WHERE s.locator_path <@ %s::ltree
           AND (latin.content IS NOT NULL OR s.element_type = 'article_title')
-        ORDER BY s.locator_path
+        ORDER BY
+            CASE s.element_type
+                WHEN 'article_title' THEN 0
+                WHEN 'arg'           THEN 1
+                WHEN 'sed_contra'    THEN 2
+                WHEN 'respondeo'     THEN 3
+                WHEN 'reply'         THEN 4
+                ELSE                      5
+            END,
+            (regexp_match(s.locator_path::text, '\\d+$'))[1]::int NULLS LAST
     """)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, (article_path,))
@@ -179,18 +196,26 @@ def get_prev_next_article(
     Articles are ordered by their ltree locator_path.
     """
     sql = """
-        SELECT prev, next FROM (
+        WITH articles AS (
+            SELECT DISTINCT
+                subpath(s.locator_path, 0, 3)                                           AS ap,
+                COALESCE(po.ordinal, 9999)                                              AS pars_ord,
+                (regexp_match(subpath(s.locator_path, 1, 1)::text, '\\d+'))[1]::int    AS q_num,
+                (regexp_match(subpath(s.locator_path, 2, 1)::text, '\\d+'))[1]::int    AS a_num
+            FROM segment s
+            LEFT JOIN pars_order po
+                ON  po.pars_label = subpath(s.locator_path, 0, 1)::text
+                AND po.work_id    = s.work_id
+            WHERE nlevel(s.locator_path) >= 3 AND s.element_type != 'preamble'
+        ),
+        nav AS (
             SELECT
-                ltree2text(ap)                                   AS ap,
-                ltree2text(lag(ap)  OVER (ORDER BY ap))          AS prev,
-                ltree2text(lead(ap) OVER (ORDER BY ap))          AS next
-            FROM (
-                SELECT DISTINCT subpath(locator_path, 0, 3) AS ap
-                FROM segment
-                WHERE nlevel(locator_path) >= 3 AND element_type != 'preamble'
-            ) t
-        ) windowed
-        WHERE ap = %s
+                ltree2text(ap)                                                  AS ap,
+                ltree2text(lag(ap)  OVER (ORDER BY pars_ord, q_num, a_num))    AS prev,
+                ltree2text(lead(ap) OVER (ORDER BY pars_ord, q_num, a_num))    AS next
+            FROM articles
+        )
+        SELECT prev, next FROM nav WHERE ap = %s
     """
     with conn.cursor() as cur:
         cur.execute(sql, (article_path,))
@@ -320,16 +345,24 @@ def get_questions_by_status(
     ``status`` should be one of 'translated', 'needs_human', 'pending'.
     """
     sql = """
-        SELECT
-            ltree2text(subpath(s.locator_path, 0, 2)) AS question_path,
-            subpath(s.locator_path, 0, 2)             AS _sort_key,
-            COUNT(*)                                   AS segment_count,
-            COUNT(sr.segment_id)                       AS reviewed_count
-        FROM segment s
-        LEFT JOIN segment_review sr ON sr.segment_id = s.segment_id
-        WHERE s.translation_status = %s
-        GROUP BY question_path, _sort_key
-        ORDER BY _sort_key
+        WITH q AS (
+            SELECT
+                ltree2text(subpath(s.locator_path, 0, 2))                           AS question_path,
+                COUNT(*)                                                             AS segment_count,
+                COUNT(sr.segment_id)                                                AS reviewed_count,
+                COALESCE(MAX(po.ordinal), 9999)                                     AS pars_ord,
+                (regexp_match(subpath(s.locator_path, 1, 1)::text, '\\d+'))[1]::int AS q_num
+            FROM segment s
+            LEFT JOIN segment_review sr ON sr.segment_id = s.segment_id
+            LEFT JOIN pars_order po
+                ON  po.pars_label = subpath(s.locator_path, 0, 1)::text
+                AND po.work_id    = s.work_id
+            WHERE s.translation_status = %s
+            GROUP BY question_path, subpath(s.locator_path, 1, 1)
+        )
+        SELECT question_path, segment_count, reviewed_count
+        FROM q
+        ORDER BY pars_ord, q_num
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, (status,))
