@@ -173,27 +173,6 @@ full corpus spend. Without this, Gate 1 would mean diff'ing raw DB text.
 
 ---
 
-## pg_dump-to-Drive backups via Railway cron, not GitHub Actions + public proxy
-
-**Decision:** a dedicated Railway cron service (`Dockerfile.backup`, `scripts/backup.py`)
-runs a daily full `pg_dump -Fc` over the private network and uploads to Google Drive via
-a dedicated service account. 14 most recent dumps retained; pruning only runs after a
-successful upload, so failures never erode existing backups.
-
-**Why:** Railway's PITR restore requires the Pro plan, and WAL archiving was observed
-showing a "credentials may be invalid" warning in the dashboard — not a reliable restore
-path today. pg_dump is the actual primary safety net, not belt-and-braces. The first
-design used GitHub Actions pulling over Railway's public TCP Proxy, but that permanently
-exposes Postgres to the internet with only the DB password as a gate. A Railway-native
-cron service reaches Postgres over the private network for free and never exposes it —
-egress cost is roughly the same either way (~$0.68/month at current DB size), since the
-dump still has to leave Railway's network to reach Drive; the private-network approach
-only removes the public-exposure risk, not the cost. The Drive credential is a dedicated
-service account (not the existing Sheets-sync one in `.secrets/gsheets_service_account.json`)
-so a compromise of one doesn't grant access to the other.
-
----
-
 ## Prefect moved to M5 (was M4+)
 
 **Decision:** Prefect orchestration is introduced in M5 Step 1 (full corpus run),
