@@ -173,6 +173,31 @@ full corpus spend. Without this, Gate 1 would mean diff'ing raw DB text.
 
 ---
 
+## pg_dump-to-S3 backups via Railway cron, not Google Drive or GitHub Actions + public proxy
+
+**Decision:** a dedicated Railway cron service (`Dockerfile.backup`, `scripts/backup.py`)
+runs a daily full `pg_dump -Fc` over the private network and uploads it to an S3 bucket via
+`boto3`, using a dedicated IAM user whose policy is scoped to only that bucket. 14 most
+recent dumps retained; pruning only runs after a successful upload, so failures never erode
+existing backups.
+
+**Why:** Railway's PITR restore requires the Pro plan, and WAL archiving was observed showing
+a "credentials may be invalid" warning in the dashboard — not a reliable restore path today.
+pg_dump is the actual primary safety net. The first design used GitHub Actions pulling over
+Railway's public TCP Proxy, but that permanently exposes Postgres to the internet with only
+the DB password as a gate — a Railway-native cron service reaches Postgres over the private
+network for free and never exposes it. The second design used Google Drive with a dedicated
+service account, but that failed in production: service accounts have no personal Drive
+storage quota, and personal Gmail accounts (unlike Google Workspace) can't create Shared
+Drives to work around it. The fallback of OAuth user-delegated credentials was rejected —
+long-lived refresh tokens and a browser consent flow are not a good fit for unattended
+automation, however the actual runtime call is just a headless token refresh. AWS S3 with a
+dedicated IAM user (long-lived access key, scoped to one bucket, no quota model complications)
+is the standard fit for this exact use case, and `boto3` (not hand-rolled SigV4 signing) is
+worth the one new dependency, kept isolated to `Dockerfile.backup`'s image only.
+
+---
+
 ## Prefect moved to M5 (was M4+)
 
 **Decision:** Prefect orchestration is introduced in M5 Step 1 (full corpus run),

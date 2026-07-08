@@ -1,0 +1,31 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+
+# Railway Postgres runs major version 18; Debian slim's default
+# postgresql-client package only ships pg_dump 17, which refuses to dump a
+# newer server (see: "pg_dump: error: aborting because of server version
+# mismatch" — pg_dump only supports dumping servers <= its own version).
+# Pull the matching client from the official PGDG apt repo instead. If
+# Railway upgrades Postgres to a new major version, bump the "-18" below
+# and redeploy this service.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget gnupg lsb-release \
+    && wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get purge -y --auto-remove wget gnupg lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# backup.py only needs boto3 (both already scoped to this dedicated image) —
+# install it directly rather than `uv sync` against the full project
+# lockfile, which would otherwise pull in the whole project's dependency
+# tree (cltk, torch, prefect, ...) for no reason.
+RUN pip install --no-cache-dir boto3
+
+COPY scripts/backup.py scripts/backup.py
+
+CMD ["python", "scripts/backup.py"]

@@ -130,6 +130,43 @@ Then point local tools at `postgresql://postgres:<password>@localhost:5432/railw
 The Flask app connects over Railway's private internal network (`${{Postgres.DATABASE_URL}}`
 resolves to the internal address) — the public internet is never involved.
 
+### Automated backups
+
+A dedicated Railway cron service (build: `Dockerfile.backup`, cron schedule `0 3 * * *`)
+runs `scripts/backup.py` daily on the private network — it connects via
+`${{Postgres.DATABASE_URL}}` (no public exposure), takes a full `pg_dump -Fc` (schema +
+data), and uploads it to an S3 bucket under a dedicated IAM user scoped to that bucket
+only. The last 14 dumps are kept; older ones are pruned after each successful upload
+only — a run of failures never deletes existing backups, it just means no new one was
+added that day.
+
+Required service variables on the backup service:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Dedicated IAM user's access key, scoped to only the backup bucket |
+| `AWS_REGION` | The bucket's region |
+| `S3_BACKUP_BUCKET` | Name of the backup bucket |
+
+**Restoring from a backup:**
+
+```bash
+# 1. Download the relevant dump
+aws s3 cp s3://<bucket>/backups/aquinas_backup_<timestamp>.dump .
+
+# 2. Open a tunnel to Railway Postgres
+railway connect Postgres
+
+# 3. Restore — note --clean, since this is a full dump (unlike the data-only
+#    delta procedure below)
+pg_restore --clean --if-exists -d postgresql://postgres:<password>@localhost:5432/railway \
+  aquinas_backup_<timestamp>.dump
+```
+
+Do a restore drill periodically (e.g. quarterly) into a scratch database to confirm
+backups are actually restorable, not just produced.
+
 ### Pushing a DB delta to Railway
 
 After a local data migration (e.g. re-translating a segment batch):
