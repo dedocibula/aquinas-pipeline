@@ -130,6 +130,40 @@ Then point local tools at `postgresql://postgres:<password>@localhost:5432/railw
 The Flask app connects over Railway's private internal network (`${{Postgres.DATABASE_URL}}`
 resolves to the internal address) — the public internet is never involved.
 
+### Automated backups
+
+A dedicated Railway cron service (build: `Dockerfile.backup`, cron schedule `0 3 * * *`)
+runs `scripts/backup.py` daily on the private network — it connects via
+`${{Postgres.DATABASE_URL}}` (no public exposure), takes a full `pg_dump -Fc` (schema +
+data), and uploads it to a Google Drive folder using a dedicated service account. The
+last 14 dumps are kept; older ones are pruned after each successful upload only — a run
+of failures never deletes existing backups, it just means no new one was added that day.
+
+Required service variables on the backup service:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `GDRIVE_SA_JSON` | JSON key of a dedicated backup service account (Drive API, `drive.file` scope) |
+| `DRIVE_BACKUP_FOLDER_ID` | ID of a Drive folder shared with that service account's `client_email` (Editor access) |
+
+**Restoring from a backup:**
+
+```bash
+# 1. Download the relevant aquinas_backup_<timestamp>.dump from the Drive folder
+
+# 2. Open a tunnel to Railway Postgres
+railway connect Postgres
+
+# 3. Restore — note --clean, since this is a full dump (unlike the data-only
+#    delta procedure below)
+pg_restore --clean --if-exists -d postgresql://postgres:<password>@localhost:5432/railway \
+  aquinas_backup_<timestamp>.dump
+```
+
+Do a restore drill periodically (e.g. quarterly) into a scratch database to confirm
+backups are actually restorable, not just produced.
+
 ### Pushing a DB delta to Railway
 
 After a local data migration (e.g. re-translating a segment batch):
