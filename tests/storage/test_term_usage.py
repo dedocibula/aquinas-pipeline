@@ -36,9 +36,24 @@ def test_write_term_usage_deletes_guessed_then_inserts(fake_conn):
     assert inserts[0][1][:3] == (1, 42, 1)
 
 
+def test_write_term_usage_skips_insert_over_tombstone(fake_conn):
+    """D10: the re-INSERT must not create a 'guessed' duplicate over a rejected
+    or confirmed row for the same (segment_id, sense_id) — guarded via NOT EXISTS."""
+    conn = fake_conn()
+    TermUsageRepository(conn).write_term_usage(1, [_res(42)])
+    insert_sql, insert_params = [
+        e for e in conn.executed if "INSERT INTO term_usage" in e[0]
+    ][0]
+    assert "NOT EXISTS" in insert_sql
+    assert "status IN ('confirmed', 'rejected')" in insert_sql
+    # trailing params are the NOT EXISTS guard's segment_id, sense_id
+    assert insert_params[-2:] == (1, 42)
+
+
 def test_write_term_usage_serializes_signals(fake_conn):
     conn = fake_conn()
     TermUsageRepository(conn).write_term_usage(1, [_res(signals={"votes": 3})])
     insert = [e for e in conn.executed if "INSERT INTO term_usage" in e[0]][0]
-    # signals param is JSON-serialized
-    assert insert[1][-1] == '{"votes": 3}'
+    # signals param is JSON-serialized (6th bound value; trailing params are the
+    # NOT EXISTS guard's segment_id/sense_id)
+    assert insert[1][5] == '{"votes": 3}'

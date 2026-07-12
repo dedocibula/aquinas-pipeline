@@ -281,6 +281,8 @@ def get_segment_constraints(
     Returns a dict keyed by segment_id; each value is a list of dicts with keys
     ``latin_lemma``, ``slovak``, ``context_label``.
     Missing segment_ids are not included (caller treats absence as empty list).
+    A 'rejected' term_usage row (D10 tombstone) is excluded even if the sense
+    itself is still approved.
     """
     if not segment_ids:
         return {}
@@ -298,6 +300,7 @@ def get_segment_constraints(
         JOIN sense_rendering sr ON sr.sense_id  = gs.sense_id
         JOIN source           s ON s.source_id  = sr.source_id
         WHERE tu.segment_id IN ({placeholders})
+          AND tu.status <> 'rejected'
           AND gs.status = 'approved'
           AND sr.lang   = 'sk'
         ORDER BY tu.segment_id, gs.sense_id, s.authority_rank

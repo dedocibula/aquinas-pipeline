@@ -107,6 +107,8 @@ class GlossaryRepository:
 
         Only approved senses with a SK rendering are included. The SK rendering
         is the highest-authority one (ORDER BY authority_rank, DISTINCT ON sense).
+        A 'rejected' term_usage row (D10 tombstone: editor marked this a false
+        detection) is excluded even if the sense itself is still approved.
         """
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -125,6 +127,7 @@ class GlossaryRepository:
                 JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
                 JOIN source          s  ON s.source_id  = sr.source_id
                 WHERE tu.segment_id = %s
+                  AND tu.status <> 'rejected'
                   AND sr.content IS NOT NULL
                 ORDER BY gs.sense_id, s.authority_rank
                 """,
@@ -169,6 +172,20 @@ class GlossaryRepository:
                 JOIN glossary_term gt ON gt.term_id = gs.term_id
                 WHERE gs.sense_id = %s
                 """,
+                (sense_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row is not None else None
+
+    def sense_term_id(self, sense_id: int) -> int | None:
+        """Return the glossary_term.term_id owning this sense, or None if absent.
+
+        Used by glossary_apply.apply_sense_here to validate that the editor's
+        chosen alternative sense belongs to the same term (D8).
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT term_id FROM glossary_sense WHERE sense_id = %s",
                 (sense_id,),
             )
             row = cur.fetchone()
@@ -758,7 +775,9 @@ class SegmentRepository:
 
         A segment is stale when any sense it used has since been updated
         (sense_version_used < current glossary_sense.version). work_id scopes the
-        result so a multi-work DB never cross-contaminates re-runs.
+        result so a multi-work DB never cross-contaminates re-runs. A 'rejected'
+        term_usage row (D10 tombstone) is excluded — it no longer constrains the
+        segment, so a later version bump on that sense must not restage it.
         """
         with self.conn.cursor() as cur:
             cur.execute(
@@ -768,6 +787,7 @@ class SegmentRepository:
                 JOIN glossary_sense gs ON tu.sense_id = gs.sense_id
                 JOIN segment s ON s.segment_id = tu.segment_id
                 WHERE s.work_id = %s
+                  AND tu.status <> 'rejected'
                   AND tu.sense_version_used < gs.version
                 ORDER BY tu.segment_id
                 """,
@@ -919,6 +939,26 @@ class SegmentRepository:
                 (segment_ids,),
             )
 
+    def reset_segments(self, segment_ids: list[int], note: str) -> dict[int, str]:
+        """Reset segments to 'pending', guarding human-edited ones to 'needs_human'.
+
+        Mirrors translate.run._guard_and_reset's semantics for the targeted,
+        single/few-segment resets glossary_apply issues (sense_here, remove_here):
+        a segment with a (sk, human) row must never be silently reset to pending.
+        Returns {segment_id: new_status}.
+        """
+        if not segment_ids:
+            return {}
+        human_edited = set(self.get_human_edited_segments(segment_ids))
+        to_reset = [s for s in segment_ids if s not in human_edited]
+        if human_edited:
+            self.flag_needs_human(sorted(human_edited), note)
+        if to_reset:
+            self.reset_translation_status(to_reset)
+        return {
+            s: ("needs_human" if s in human_edited else "pending") for s in segment_ids
+        }
+
 
 class TermUsageRepository:
     """All term_usage access."""
@@ -930,7 +970,11 @@ class TermUsageRepository:
         """Write term_usage rows. Idempotent per (segment_id, sense_id). Returns count.
 
         Only 'guessed' rows are wiped — confirmed rows survive re-runs (Principle 3:
-        re-runs are segment-scoped and never overwrite reviewed work).
+        re-runs are segment-scoped and never overwrite reviewed work). A resolution
+        is skipped (not inserted) if the segment already has a 'confirmed' or
+        'rejected' row for that sense — 'confirmed' means a reviewer already fixed
+        it, 'rejected' is a D10 tombstone recording a false-positive detection that
+        must never be re-guessed.
         """
         if not resolutions:
             return 0
@@ -945,7 +989,12 @@ class TermUsageRepository:
                     INSERT INTO term_usage
                       (segment_id, sense_id, sense_version_used,
                        resolution_method, confidence, signals, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'guessed')
+                    SELECT %s, %s, %s, %s, %s, %s, 'guessed'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM term_usage
+                        WHERE segment_id = %s AND sense_id = %s
+                          AND status IN ('confirmed', 'rejected')
+                    )
                     """,
                     (
                         segment_id,
@@ -954,9 +1003,47 @@ class TermUsageRepository:
                         res.method,
                         res.confidence,
                         json.dumps(res.signals) if res.signals else None,
+                        segment_id,
+                        res.sense.sense_id,
                     ),
                 )
         return len(resolutions)
+
+    def update_sense_for_segment(
+        self, segment_id: int, from_sense_id: int, to_sense_id: int, new_version: int
+    ) -> int:
+        """Re-point a segment's term_usage row(s) at the editor-chosen sense.
+
+        Used by glossary_apply.apply_sense_here: the row is confirmed (a reviewer
+        made this call — Principle 3, never re-guessed) and sense_version_used is
+        set to the target sense's current version so the row is NOT stale (the
+        segment reset that follows handles regeneration under the new lock).
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE term_usage
+                SET sense_id = %s, status = 'confirmed', sense_version_used = %s
+                WHERE segment_id = %s AND sense_id = %s
+                """,
+                (to_sense_id, new_version, segment_id, from_sense_id),
+            )
+            return cur.rowcount
+
+    def mark_rejected(self, segment_id: int, sense_id: int) -> int:
+        """Tombstone a segment's term_usage row(s) for a sense (D10).
+
+        Used by glossary_apply.apply_remove_here for a false-positive detection.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE term_usage SET status = 'rejected'
+                WHERE segment_id = %s AND sense_id = %s
+                """,
+                (segment_id, sense_id),
+            )
+            return cur.rowcount
 
 
 class RunRepository:

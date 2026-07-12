@@ -197,6 +197,14 @@ def test_get_stale_segments(fake_conn):
     assert SegmentRepository(conn).get_stale_segments(1) == [3, 4]
 
 
+def test_get_stale_segments_excludes_rejected_usage(fake_conn):
+    """D10: a rejected (tombstoned) usage row must not make a segment stale."""
+    conn = fake_conn(fetchall_rows=[])
+    SegmentRepository(conn).get_stale_segments(1)
+    sql, _ = conn.executed[-1]
+    assert "tu.status <> 'rejected'" in sql
+
+
 def test_get_translated_body_segment_ids(fake_conn):
     conn = fake_conn(fetchall_rows=[(11,), (12,)])
     assert SegmentRepository(conn).get_translated_body_segment_ids(1) == [11, 12]
@@ -242,6 +250,31 @@ def test_reset_translation_status(fake_conn):
     sql, params = conn.executed[-1]
     assert "translation_status = 'pending'" in sql
     assert params == ([7, 8],)
+
+
+def test_reset_segments_empty_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert SegmentRepository(conn).reset_segments([], "note") == {}
+    assert conn.executed == []
+
+
+def test_reset_segments_all_pending_when_none_human_edited(fake_conn):
+    conn = fake_conn(fetchall_rows=[])  # get_human_edited_segments -> []
+    result = SegmentRepository(conn).reset_segments([7, 8], "glossary changed")
+    assert result == {7: "pending", 8: "pending"}
+    reset_calls = [e for e in conn.executed if "translation_status = 'pending'" in e[0]]
+    assert len(reset_calls) == 1 and reset_calls[0][1] == ([7, 8],)
+    assert not any("needs_human" in e[0] for e in conn.executed)
+
+
+def test_reset_segments_human_edited_flagged_needs_human(fake_conn):
+    conn = fake_conn(fetchall_rows=[(8,)])  # segment 8 is human-edited
+    result = SegmentRepository(conn).reset_segments([7, 8], "glossary changed")
+    assert result == {7: "pending", 8: "needs_human"}
+    reset_calls = [e for e in conn.executed if "translation_status = 'pending'" in e[0]]
+    assert reset_calls[0][1] == ([7],)
+    flag_calls = [e for e in conn.executed if "needs_human" in e[0]]
+    assert len(flag_calls) == 1 and flag_calls[0][1][1] == [8]
 
 
 def test_translation_status_counts(fake_conn):

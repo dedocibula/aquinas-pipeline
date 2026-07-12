@@ -691,7 +691,7 @@ declined confirm resets nothing; human-edited → needs_human.
 ## §8. Progress
 
 - [x] Stage 1 — migration 013 + ProposalRepository
-- [ ] Stage 2 — apply services + rejected/retired safety
+- [x] Stage 2 — apply services + rejected/retired safety
 - [ ] Stage 3 — editor propose UI
 - [ ] Stage 4 — admin queue + apply-on-approve
 - [ ] Stage 5 — CLI cost gate + installments
@@ -701,3 +701,28 @@ declined confirm resets nothing; human-edited → needs_human.
 **Stage 1 note (2026-07-12):** migration 013 applied to local docker DB only; Railway prod
 still pending (deferred by user this session — enable proxy + provide DSN before Stage 2
 needs prod, or apply standalone whenever convenient).
+
+**Stage 2 note (2026-07-12):** `src/review/glossary_apply.py` implements all five apply
+functions. Safety filters added: `locked_terms`, `get_segment_constraints`, and
+`get_stale_segments` all exclude `tu.status = 'rejected'`; `write_term_usage`'s re-INSERT
+is now guarded with `NOT EXISTS (... status IN ('confirmed','rejected'))`. Added
+`GlossaryRepository.sense_term_id`, `TermUsageRepository.update_sense_for_segment` /
+`mark_rejected`, and `SegmentRepository.reset_segments` (the D3/D10-compliant targeted
+reset with the human-edited → needs_human guard, mirroring `translate.run._guard_and_reset`)
+to support the apply functions. `import_approvals.process_approval`'s already-approved
+branch now delegates to `apply_rendering_change` (behavior-preserving — existing tests pass
+unchanged). Full suite green (1067 tests). Other `term_usage` readers audited
+(`sense_mining.py`, `build_sample.py`, `coverage_report.py`, `export_sheet.py`) are
+reporting/mining tools, not spend- or constraint-critical, and were left as-is — not
+extended with the `rejected` filter.
+
+**Stage 2 code-review pass (2026-07-12):** independent review caught that
+`apply_sense_here`/`apply_remove_here` ignored the UPDATE rowcount, so a stale
+proposal (target row already gone — race with resolver or another approval)
+would report false success and reset a segment for nothing. Fixed: both now
+raise `ValueError` when the UPDATE affects zero rows; regression tests added.
+Also fixed: `apply_sense_here` now rejects a `retired` target sense (previously
+would silently re-point a segment to a non-constraining sense with no error and
+no version bump). `export_sheet.py`'s unfiltered `term_usage` read was reassessed
+and left as-is — that surface is being retired, not worth touching for a non-spend
+reporting path. Full suite green (1070 tests).

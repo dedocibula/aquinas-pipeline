@@ -132,6 +132,27 @@ def test_locked_terms_passes_segment_id(fake_conn):
     assert params == (5,)
 
 
+def test_locked_terms_excludes_rejected_usage(fake_conn):
+    """D10: a rejected term_usage row must never resurface as a constraint."""
+    conn = fake_conn(fetchall_rows=[])
+    GlossaryRepository(conn).locked_terms(5)
+    sql, _ = conn.executed[-1]
+    assert "tu.status <> 'rejected'" in sql
+
+
+# ── sense_term_id ────────────────────────────────────────────────────────────────
+
+
+def test_sense_term_id_returns_term(fake_conn):
+    conn = fake_conn(fetchone_results=[(7,)])
+    assert GlossaryRepository(conn).sense_term_id(42) == 7
+
+
+def test_sense_term_id_returns_none_when_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert GlossaryRepository(conn).sense_term_id(999) is None
+
+
 # ── writes ─────────────────────────────────────────────────────────────────────
 
 

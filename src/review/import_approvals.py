@@ -16,6 +16,7 @@ Prerequisites:
 
 from __future__ import annotations
 
+from review.glossary_apply import apply_rendering_change
 from review.sheets import authenticate, get_spreadsheet_id
 from storage.db import get_conn, source_id
 from storage.repositories import GlossaryRepository
@@ -117,12 +118,9 @@ def process_approval(conn, row: dict, human_src_id: int) -> tuple[str, bool]:
 
     if current["status"] == "approved":
         # Sense already approved — apply content corrections if anything changed.
-        current_sk = glossary.get_sk_rendering_content(sense_id_val)
         version_bumped = False
-        if new_slovak and new_slovak != current_sk:
-            glossary.write_human_rendering(sense_id_val, new_slovak, human_src_id)
-            glossary.bump_sense_version(sense_id_val)
-            version_bumped = True
+        if new_slovak:
+            version_bumped = apply_rendering_change(conn, sense_id_val, new_slovak)["bumped"]
         glossary.write_context_label(sense_id_val, new_label)
         return ("OK" if version_bumped else "ALREADY_CONFIRMED"), version_bumped
 
