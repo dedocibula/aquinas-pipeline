@@ -281,6 +281,76 @@ This returns exactly the stale segments — never the whole corpus.
 
 Do not remove or retype `sense_version_used` or `signals`. Their consumers are M3/M4.
 
+**`status` gains `'rejected'` (migration 013, M5 editor glossary proposals).** A permanent
+tombstone for a term falsely detected in one segment (editor `remove_here` proposal, admin-approved).
+Written by: `src/review/glossary_apply.py::apply_remove_here`. Read by: `GlossaryRepository.locked_terms`
+and `get_segment_constraints` (both exclude it from constraints — a rejected usage must never
+constrain translation); `get_stale_segments` (a rejected usage must never make a segment stale);
+`TermUsageRepository.write_term_usage` (the resolver's segment-replace INSERT must skip any
+(segment_id, sense_id) pair that already has a `rejected` row, so re-resolution never resurrects
+a tombstoned false positive — `confirmed` rows get the same protection).
+
+---
+
+## `glossary_sense.status`
+
+**`status` gains `'retired'` (migration 013, M5 editor glossary proposals).** A glossary entry
+that was constraining translation but turned out overfit or wrong everywhere (editor `retire_sense`
+proposal, admin-approved). Written by: `src/review/glossary_apply.py::apply_retire_sense`, which
+also always bumps `version` (constraint removal must restage every segment translated under it).
+Read by: the resolver's lemma map (`GlossaryRepository`, builds from `approved` senses only, so
+`retired` drops out of future resolution) and every constraint reader that already filters to
+`status='approved'` (excludes `retired` automatically — same mechanism that excludes `proposed`/
+`flagged`). Never set to `retired` automatically outside `apply_retire_sense`; never re-approved
+by automation.
+
+---
+
+## `glossary_proposal`
+
+Editor-proposed glossary/term_usage changes, added by migration 013 (M5 editor glossary proposals
+plan, `.claude/m5_editor_glossary_proposals_plan.md`). This table is the inbox + audit trail;
+pending rows have no effect on translation until an admin approves them, which applies the change
+via `src/review/glossary_apply.py`. See the plan's §0 for the full five-kind proposal lifecycle
+(D9) and the locked decisions (D1–D10).
+
+| column | type | notes |
+|---|---|---|
+| `proposal_id` | serial PK | |
+| `kind` | text | CHECK IN ('rendering','sense_here','remove_here','retire_sense','add_term') |
+| `sense_id` | FK→glossary_sense NULL | the sense the editor acted on; NULL only for `add_term` |
+| `proposed_sense_id` | FK→glossary_sense NULL | `sense_here` only: the sense the editor picked; NULL = free-text suggestion in `proposed_sk` (record-only, gold label for the deferred sense-disambiguation workstream) |
+| `latin_lemma` | text NOT NULL | denormalized display copy; identity key for `add_term` |
+| `current_sk` | text NULL | winning sk rendering snapshot at propose time (queue diffs this against the live rendering to flag drift) |
+| `proposed_sk` | text NULL | NULL for `remove_here` / `retire_sense` |
+| `note` | text NULL | editor rationale — kept verbatim as future gold data |
+| `origin_segment_id` | FK→segment NULL | REQUIRED for `sense_here` / `remove_here` (the segment to fix) |
+| `proposed_by` | text NOT NULL | editor email (session) |
+| `created_at` | timestamptz NOT NULL DEFAULT now() | |
+| `status` | text NOT NULL DEFAULT 'pending' | CHECK IN ('pending','approved','rejected','superseded') |
+| `decided_by` | text NULL | admin email |
+| `decided_at` | timestamptz NULL | |
+| `decision_note` | text NULL | |
+
+CHECK constraints enforce shape per kind: `sense_id` required unless `add_term`; `origin_segment_id`
+required for `sense_here`/`remove_here`; `proposed_sk` required for `rendering`/`add_term`.
+
+Populated by: editor propose endpoints (`src/server/app.py`, Stage 3) via
+`ProposalRepository.create_or_update_pending` — D5 upsert semantics: a re-proposal by the same
+editor, same kind, same target (sense or lemma), same origin segment (for per-segment kinds)
+updates the existing pending row rather than creating a duplicate.
+Read by: the admin queue (`GET /glossary/proposals`, Stage 4) via `ProposalRepository.list_pending`;
+the panel's pending badge via `pending_by_sense`.
+Written (decided) by: `ProposalRepository.decide` (admin approve/reject) and
+`supersede_sense_wide_siblings` (approving a sense-wide `rendering`/`retire_sense` proposal
+auto-supersedes other pending sense-wide proposals on the same sense — per-segment kinds on that
+sense are unaffected, they're independent fixes).
+
+Never set `glossary_sense.status='flagged'` from this workflow (D2) — `flagged` silently drops
+the constraint corpus-wide while pending; proposals must never do that. Approve is never a spend
+trigger (D4) — it only mutates glossary/term_usage rows; all paid or corpus-scale operations are
+CLI-only.
+
 ---
 
 ## Views

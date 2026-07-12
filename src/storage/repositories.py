@@ -1087,3 +1087,160 @@ class RunRepository:
                 """,
                 (total_segments, total_translated, total_needs_human, total_cost, run_id),
             )
+
+
+class ProposalRepository:
+    """All glossary_proposal access — the editor→admin review inbox (D1).
+
+    Pending proposals are the only mutation this repository makes; applying an
+    approved proposal to the glossary/term_usage is src/review/glossary_apply.py's
+    job (Stage 2), not this repository's.
+    """
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def create_or_update_pending(
+        self,
+        *,
+        kind: str,
+        sense_id: int | None,
+        proposed_sense_id: int | None,
+        latin_lemma: str,
+        current_sk: str | None,
+        proposed_sk: str | None,
+        note: str | None,
+        origin_segment_id: int | None,
+        proposed_by: str,
+    ) -> int:
+        """Upsert a pending proposal keyed by (kind, target, origin_segment_id, proposed_by).
+
+        D5: duplicate handling lives here, not the schema. Re-proposing the same
+        editor action (same editor, same kind, same target sense — or lemma for
+        add_term — same origin segment for per-segment kinds) updates the existing
+        pending row's content in place rather than piling up duplicates. A different
+        editor, a different target, or a different origin segment gets its own row.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT proposal_id FROM glossary_proposal
+                WHERE status = 'pending'
+                  AND kind = %s
+                  AND proposed_by = %s
+                  AND (kind = 'add_term' OR sense_id = %s)
+                  AND (kind != 'add_term' OR lower(latin_lemma) = lower(%s))
+                  AND origin_segment_id IS NOT DISTINCT FROM %s
+                """,
+                (kind, proposed_by, sense_id, latin_lemma, origin_segment_id),
+            )
+            existing = cur.fetchone()
+
+            if existing is not None:
+                cur.execute(
+                    """
+                    UPDATE glossary_proposal
+                    SET proposed_sense_id = %s, current_sk = %s, proposed_sk = %s,
+                        note = %s, created_at = now()
+                    WHERE proposal_id = %s
+                    """,
+                    (proposed_sense_id, current_sk, proposed_sk, note, existing["proposal_id"]),
+                )
+                return existing["proposal_id"]
+
+            cur.execute(
+                """
+                INSERT INTO glossary_proposal
+                  (kind, sense_id, proposed_sense_id, latin_lemma, current_sk,
+                   proposed_sk, note, origin_segment_id, proposed_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING proposal_id
+                """,
+                (
+                    kind,
+                    sense_id,
+                    proposed_sense_id,
+                    latin_lemma,
+                    current_sk,
+                    proposed_sk,
+                    note,
+                    origin_segment_id,
+                    proposed_by,
+                ),
+            )
+            return cur.fetchone()["proposal_id"]
+
+    def get(self, proposal_id: int) -> dict | None:
+        """Return one proposal row (any status), or None if it doesn't exist."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM glossary_proposal WHERE proposal_id = %s", (proposal_id,)
+            )
+            row = cur.fetchone()
+        return dict(row) if row is not None else None
+
+    def list_pending(self) -> list[dict]:
+        """Return all pending proposals, oldest first — the admin queue's base set."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM glossary_proposal WHERE status = 'pending' "
+                "ORDER BY created_at ASC"
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def pending_by_sense(self, sense_ids: list[int]) -> dict[int, int]:
+        """Count of pending proposals per sense — powers the panel's pending badge."""
+        if not sense_ids:
+            return {}
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT sense_id, count(*) FROM glossary_proposal "
+                "WHERE status = 'pending' AND sense_id = ANY(%s) "
+                "GROUP BY sense_id",
+                (sense_ids,),
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+
+    def decide(
+        self,
+        proposal_id: int,
+        status: str,
+        decided_by: str,
+        decision_note: str | None = None,
+    ) -> bool:
+        """Transition a pending proposal to approved/rejected/superseded.
+
+        Only affects a row still 'pending' — returns False (caller responds 409)
+        if it was already decided, e.g. by a racing admin request.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE glossary_proposal
+                SET status = %s, decided_by = %s, decided_at = now(), decision_note = %s
+                WHERE proposal_id = %s AND status = 'pending'
+                """,
+                (status, decided_by, decision_note, proposal_id),
+            )
+            return cur.rowcount == 1
+
+    def supersede_sense_wide_siblings(
+        self, sense_id: int, keep_proposal_id: int, decided_by: str
+    ) -> int:
+        """Mark other pending sense-wide proposals on this sense as superseded.
+
+        Only 'rendering' and 'retire_sense' compete for the same sense-wide slot.
+        Per-segment kinds (sense_here, remove_here) on the same sense stay pending —
+        they are independent per-segment fixes, not competing sense-wide changes.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE glossary_proposal
+                SET status = 'superseded', decided_by = %s, decided_at = now()
+                WHERE sense_id = %s AND proposal_id != %s AND status = 'pending'
+                  AND kind IN ('rendering', 'retire_sense')
+                """,
+                (decided_by, sense_id, keep_proposal_id),
+            )
+            return cur.rowcount
