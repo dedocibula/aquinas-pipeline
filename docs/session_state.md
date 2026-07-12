@@ -2,6 +2,28 @@
 
 ## Current Milestone
 M5 — **Step 1 IN PROGRESS** — Prefect orchestration built. Full corpus run not yet executed.
+Also mid-flight: `.claude/m5_editor_glossary_proposals_plan.md` (Stage 1 of 7 done).
+
+## This Session (2026-07-12) — Editor Glossary Proposals, Stage 1
+
+Migration 013 (`glossary_proposal` table + `term_usage.status`/`glossary_sense.status` widened
+with `rejected`/`retired`) applied to **local docker DB only** — Railway prod still pending
+(user deferred it this session; enable the TCP proxy and provide the DSN before Stage 2 needs
+prod reads/writes, or apply migration 013 standalone whenever convenient — it's idempotent-safe
+to re-run only if wrapped in a check; as written it will error on a second run, so don't re-run
+against local).
+
+`ProposalRepository` added to `src/storage/repositories.py` (create_or_update_pending w/ D5
+upsert semantics, get, list_pending, pending_by_sense, decide, supersede_sense_wide_siblings).
+`.claude/database.md` documents `glossary_proposal` + the two widened status columns.
+17 tests in `tests/storage/test_proposal.py`; CHECK constraints manually verified against the
+live local DB (sense_here/rendering/add_term shape constraints all reject malformed rows as
+designed). 1044/1044 tests green repo-wide.
+
+**Next step:** Stage 2 of the plan — `src/review/glossary_apply.py` (five apply functions) +
+safety changes to `locked_terms`/`get_segment_constraints`/`write_term_usage`/`get_stale_segments`
+so `rejected`/`retired` actually take effect. Read `.claude/m5_editor_glossary_proposals_plan.md`
+§0 and Stage 2 before starting.
 
 ## M4 Deliverables (status)
 - `migrations/004_translation_status.sql` — **applied**; `translation_status` + `reviewer_notes` columns live
