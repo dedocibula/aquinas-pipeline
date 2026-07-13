@@ -1093,3 +1093,164 @@ def test_unapprove_route_wrong_status(editor_client):
 # (polish route removed — batch pipeline handles polish via uv run python -m pipeline)
 
 
+# ---------------------------------------------------------------------------
+# Editor glossary proposals (Stage 3 — /api/sense/<id>/alternatives,
+# /api/sense/<id>/propose, /api/term-proposal)
+# ---------------------------------------------------------------------------
+
+
+FAKE_TERM_SENSES = {
+    "term_id": 7,
+    "latin_lemma": "ratio",
+    "senses": [
+        {"sense_id": 100, "context_label": None, "status": "approved", "slovak": "rozum"},
+        {"sense_id": 101, "context_label": "faculty", "status": "approved", "slovak": "dôvod"},
+    ],
+}
+
+
+def test_alternatives_route_returns_403_for_non_editor(client):
+    resp = client.get("/api/sense/100/alternatives")
+    assert resp.status_code == 403
+
+
+def test_alternatives_route_returns_senses(editor_client):
+    with patch("server.app.get_term_senses", return_value=FAKE_TERM_SENSES):
+        resp = editor_client.get("/api/sense/100/alternatives")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["latin_lemma"] == "ratio"
+    assert data["senses"] == FAKE_TERM_SENSES["senses"]
+
+
+def test_alternatives_route_404_for_unknown_sense(editor_client):
+    with patch("server.app.get_term_senses", return_value=None):
+        resp = editor_client.get("/api/sense/999/alternatives")
+    assert resp.status_code == 404
+
+
+def test_propose_route_returns_403_for_non_editor(client):
+    resp = client.post("/api/sense/100/propose", json={"kind": "rendering", "proposed_sk": "x"})
+    assert resp.status_code == 403
+
+
+def test_propose_route_invalid_kind_returns_400(editor_client):
+    resp = editor_client.post("/api/sense/100/propose", json={"kind": "bogus"})
+    assert resp.status_code == 400
+
+
+def test_propose_route_sense_here_missing_origin_returns_400(editor_client):
+    """origin_segment_id-required check is pure request-shape validation done
+    in app.py before any db.py call — propose_sense_change is never reached."""
+    with patch("server.app.propose_sense_change") as mock_propose:
+        resp = editor_client.post(
+            "/api/sense/100/propose",
+            json={"kind": "sense_here", "proposed_sense_id": 101},
+        )
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "origin_segment_id required"
+    mock_propose.assert_not_called()
+
+
+def test_propose_route_invalid_proposed_sense_id_returns_400(editor_client):
+    with patch("server.app.propose_sense_change") as mock_propose:
+        resp = editor_client.post(
+            "/api/sense/100/propose",
+            json={"kind": "sense_here", "origin_segment_id": 42, "proposed_sense_id": "abc"},
+        )
+    assert resp.status_code == 400
+    mock_propose.assert_not_called()
+
+
+def test_propose_route_invalid_origin_segment_id_returns_400(editor_client):
+    with patch("server.app.propose_sense_change") as mock_propose:
+        resp = editor_client.post(
+            "/api/sense/100/propose",
+            json={"kind": "rendering", "proposed_sk": "x", "origin_segment_id": "abc"},
+        )
+    assert resp.status_code == 400
+    mock_propose.assert_not_called()
+
+
+def test_propose_route_calls_db_with_parsed_fields(editor_client):
+    with patch("server.app.propose_sense_change", return_value=("ok", 55)) as mock_propose:
+        resp = editor_client.post(
+            "/api/sense/100/propose",
+            json={
+                "kind": "sense_here",
+                "origin_segment_id": 42,
+                "proposed_sense_id": 101,
+                "note": "wrong sense",
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["proposal_id"] == 55
+    args, kwargs = mock_propose.call_args
+    assert args[1:] == (100, "sense_here")
+    assert kwargs["origin_segment_id"] == 42
+    assert kwargs["proposed_sense_id"] == 101
+    assert kwargs["note"] == "wrong sense"
+    assert kwargs["proposed_by"] == "editor@example.com"
+
+
+@pytest.mark.parametrize(
+    "status,expected_code,expected_error",
+    [
+        ("not_found", 404, "not found"),
+        ("proposed_sk_required", 400, "proposed_sk required"),
+        ("missing_target", 400, "proposed_sense_id or proposed_sk required"),
+        # no_change / wrong_term / not_locked_here all share app.py's generic
+        # fallback branch (return jsonify({"error": status}), 400) — one
+        # representative case is enough here; the branches that *produce*
+        # each status are covered at the db.py level.
+        ("no_change", 400, "no_change"),
+    ],
+)
+def test_propose_route_maps_db_status_to_response(
+    editor_client, status, expected_code, expected_error
+):
+    with patch("server.app.propose_sense_change", return_value=(status, None)):
+        resp = editor_client.post(
+            "/api/sense/100/propose", json={"kind": "rendering", "proposed_sk": "x"}
+        )
+    assert resp.status_code == expected_code
+    assert resp.get_json()["error"] == expected_error
+
+
+def test_term_proposal_route_returns_403_for_non_editor(client):
+    resp = client.post(
+        "/api/term-proposal", json={"latin_lemma": "novum", "proposed_sk": "nové"}
+    )
+    assert resp.status_code == 403
+
+
+def test_term_proposal_route_valid_returns_200(editor_client):
+    with patch("server.app.propose_add_term", return_value=("ok", 77)) as mock_propose:
+        resp = editor_client.post(
+            "/api/term-proposal",
+            json={"latin_lemma": "novum", "proposed_sk": "nové", "note": "missing"},
+        )
+    assert resp.status_code == 200
+    assert resp.get_json()["proposal_id"] == 77
+    _, kwargs = mock_propose.call_args
+    assert kwargs["latin_lemma"] == "novum"
+    assert kwargs["proposed_sk"] == "nové"
+    assert kwargs["proposed_by"] == "editor@example.com"
+
+
+def test_term_proposal_route_existing_lemma_returns_400(editor_client):
+    with patch("server.app.propose_add_term", return_value=("term_exists", None)):
+        resp = editor_client.post(
+            "/api/term-proposal",
+            json={"latin_lemma": "ratio", "proposed_sk": "rozum"},
+        )
+    assert resp.status_code == 400
+    assert "term_exists" in resp.get_json()["error"]
+
+
+def test_term_proposal_route_missing_fields_returns_400(editor_client):
+    resp = editor_client.post("/api/term-proposal", json={"latin_lemma": "novum"})
+    assert resp.status_code == 400
+
+

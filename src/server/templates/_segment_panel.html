@@ -1,17 +1,18 @@
 {#
   Shared macros for the per-segment review UI.
 
-  segment_panel(seg, seg_constraints, is_editor)
+  segment_panel(seg, seg_constraints, is_editor, pending_counts={})
     — renders the full <td class="col-slovak"> contents:
       Slovak display text, review panel (Human/Machine tabs), detail panel.
-    — seg_constraints: list of {latin_lemma, context_label, slovak} dicts.
+    — seg_constraints: list of {sense_id, latin_lemma, context_label, slovak} dicts.
+    — pending_counts: {sense_id: pending_proposal_count} — powers the "proposal pending" badge.
 
   status_cell(seg, is_editor)
     — renders the <td class="col-status"> (badge + Review button).
       Outputs nothing when is_editor is false.
 #}
 
-{% macro segment_panel(seg, seg_constraints, is_editor) %}
+{% macro segment_panel(seg, seg_constraints, is_editor, pending_counts={}) %}
   {% set ts           = seg.translation_status %}
   {% set needs_human  = (ts == 'needs_human') %}
   {% set panel_id     = 'detail-' ~ seg.segment_id %}
@@ -94,10 +95,21 @@
       {% if seg_constraints %}
       <ul class="term-list">
         {% for c in seg_constraints %}
-        <li>
+        <li data-sense-id="{{ c.sense_id }}">
           <code>{{ c.latin_lemma }}</code>
           {% if c.context_label %}<span class="term-context">({{ c.context_label }})</span>{% endif %}
           &rarr; <span class="term-slovak">{{ c.slovak }}</span>
+          {% if is_editor %}
+          <button class="btn-term-act" data-act="change" data-sense-id="{{ c.sense_id }}"
+                  data-segment-id="{{ seg.segment_id }}" data-current-sk="{{ c.slovak }}"
+                  data-lemma="{{ c.latin_lemma }}" title="propose change">&#9998;</button>
+          <button class="btn-term-act" data-act="remove" data-sense-id="{{ c.sense_id }}"
+                  data-segment-id="{{ seg.segment_id }}" data-lemma="{{ c.latin_lemma }}"
+                  title="propose removal">&#10007;</button>
+          <span class="term-pending" data-pending-for="{{ c.sense_id }}"
+                title="proposal pending"
+                {% if not pending_counts.get(c.sense_id) %}style="display:none"{% endif %}>&#8987;</span>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>
@@ -105,6 +117,32 @@
       <span class="detail-none">no term constraints</span>
       {% endif %}
     </div>
+
+    {% if is_editor %}
+    <div class="term-propose-form" id="tpform-{{ seg.segment_id }}" style="display:none">
+      <div class="tpf-target"></div>
+      <label>
+        <input type="radio" name="tpf-scope-{{ seg.segment_id }}" value="here" checked> here only
+      </label>
+      <label>
+        <input type="radio" name="tpf-scope-{{ seg.segment_id }}" value="everywhere"> everywhere
+      </label>
+      <div class="tpf-remove-hint" style="display:none">
+        removes the term from the entire corpus — requires a reason
+      </div>
+      <input type="text" class="tpf-rendering" placeholder="proposed Slovak rendering">
+      <select class="tpf-sense-select" style="display:none">
+        <option value="">— choose a sense —</option>
+        <option value="__other__">other…</option>
+      </select>
+      <textarea class="tpf-note" rows="2" placeholder="note (reason)"></textarea>
+      <div class="tpf-actions">
+        <button class="tpf-submit">propose</button>
+        <button class="tpf-cancel">cancel</button>
+      </div>
+      <span class="tpf-status"></span>
+    </div>
+    {% endif %}
 
     {% set notes              = seg.reviewer_notes %}
     {% set iter_count         = None %}
@@ -134,6 +172,24 @@
         {% endif %}
       {% endif %}
     </div>
+
+    {% if is_editor %}
+    <div class="detail-section">
+      <button class="btn-toggle-term-proposal" data-segment-id="{{ seg.segment_id }}">
+        + missing term
+      </button>
+      <div class="term-add-form" id="taform-{{ seg.segment_id }}" style="display:none">
+        <input type="text" class="taf-lemma" placeholder="Latin lemma">
+        <input type="text" class="taf-rendering" placeholder="proposed Slovak rendering">
+        <textarea class="taf-note" rows="2" placeholder="note"></textarea>
+        <div class="tpf-actions">
+          <button class="taf-submit" data-segment-id="{{ seg.segment_id }}">propose</button>
+          <button class="taf-cancel">cancel</button>
+        </div>
+        <span class="taf-status"></span>
+      </div>
+    </div>
+    {% endif %}
 
   </div>
   {% endif %}

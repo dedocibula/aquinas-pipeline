@@ -438,6 +438,98 @@ a.badge:hover {
   font-style: italic;
 }
 
+/* ── Glossary term proposals (editor propose UI) ─────────────────────────── */
+
+.btn-term-act {
+  font-size: 0.75rem;
+  padding: 0 3px;
+  margin-left: 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #888;
+}
+
+.btn-term-act:hover {
+  color: #2c1a0e;
+}
+
+.term-pending {
+  margin-left: 4px;
+  font-size: 0.8em;
+}
+
+.term-propose-form,
+.term-add-form {
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  background: #f5f0e4;
+  border: 1px solid #d4c9b0;
+  border-radius: 3px;
+  font-size: 0.82rem;
+}
+
+.term-propose-form label {
+  margin-right: 0.8rem;
+  color: #555;
+}
+
+.tpf-target {
+  font-weight: bold;
+  color: #5a3e1b;
+  margin-bottom: 0.3rem;
+}
+
+.tpf-remove-hint {
+  color: #b35c00;
+  margin: 0.3rem 0;
+}
+
+.term-propose-form input[type="text"],
+.term-propose-form select,
+.term-propose-form textarea,
+.term-add-form input[type="text"],
+.term-add-form textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: inherit;
+  margin-top: 0.3rem;
+  padding: 4px 6px;
+  border: 1px solid #aac;
+  border-radius: 3px;
+}
+
+.tpf-actions {
+  margin-top: 0.4rem;
+}
+
+.tpf-actions button,
+.btn-toggle-term-proposal {
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #f5f5f5;
+  cursor: pointer;
+  color: #555;
+  margin-right: 0.3rem;
+}
+
+.tpf-actions button:hover,
+.btn-toggle-term-proposal:hover {
+  background: #e8e8e8;
+  border-color: #999;
+}
+
+.tpf-status,
+.taf-status {
+  margin-left: 0.4rem;
+  color: #666;
+  font-style: italic;
+}
+
 /* ── Edit / Save / Cancel ─────────────────────────────────────────────────── */
 
 .btn-edit {

@@ -33,7 +33,7 @@
     {% set seg = title_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
     <tr class="row-question_title{% if needs_human and is_editor %} row-needs-human{% endif %}"
-        data-segment-id="{{ seg.segment_id }}">
+      data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
       <td class="col-latin">
         <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
@@ -41,7 +41,7 @@
         <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
       </td>
       <td class="col-slovak slovak">
-        {{ panel.segment_panel(seg, title_constraints, is_editor) }}
+        {{ panel.segment_panel(seg, title_constraints, is_editor, pending_counts) }}
       </td>
       {{ panel.status_cell(seg, is_editor) }}
     </tr>
@@ -52,7 +52,7 @@
     {% set seg = preamble_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
     <tr class="row-preamble{% if needs_human and is_editor %} row-needs-human{% endif %}"
-        data-segment-id="{{ seg.segment_id }}">
+      data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Preambula</td>
       <td class="col-latin">
         <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
@@ -60,7 +60,7 @@
         <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
       </td>
       <td class="col-slovak slovak">
-        {{ panel.segment_panel(seg, preamble_constraints, is_editor) }}
+        {{ panel.segment_panel(seg, preamble_constraints, is_editor, pending_counts) }}
       </td>
       {{ panel.status_cell(seg, is_editor) }}
     </tr>
@@ -82,18 +82,19 @@
   </thead>
   <tbody>
     {% for a in articles %}
-    <tr{% if is_editor and a.needs_human_count > 0 %} class="row-needs-human"{% endif %}>
+    <tr{% if is_editor and a.needs_human_count> 0 %} class="row-needs-human"{% endif %}>
       <td>{{ a.title }}</td>
       {% if is_editor %}<td>{{ a.translated_count }}</td>{% endif %}
-      {% if is_editor %}<td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count }}</span>{% else %}0{% endif %}</td>{% endif %}
+      {% if is_editor %}<td>{% if a.needs_human_count > 0 %}<span class="badge badge-warn">{{ a.needs_human_count
+          }}</span>{% else %}0{% endif %}</td>{% endif %}
       <td>{{ a.total_count }}</td>
       <td><a href="/~{{ a.url_locator }}">View &rarr;</a></td>
-    </tr>
-    {% else %}
-    <tr>
-      <td colspan="5">No articles found.</td>
-    </tr>
-    {% endfor %}
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5">No articles found.</td>
+      </tr>
+      {% endfor %}
   </tbody>
 </table>
 {% endblock %}
@@ -128,6 +129,7 @@
 {% if is_editor %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
 <script src="{{ url_for('static', filename='review.js') }}"></script>
+<script src="{{ url_for('static', filename='proposals.js') }}"></script>
 {% endif %}
 {% endif %}
 {% endblock %}

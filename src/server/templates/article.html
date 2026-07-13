@@ -93,7 +93,7 @@
           <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
         </td>
         <td class="col-slovak slovak">
-          {{ panel.segment_panel(seg, constraints.get(seg.segment_id, []), is_editor) }}
+          {{ panel.segment_panel(seg, constraints.get(seg.segment_id, []), is_editor, pending_counts) }}
         </td>
         {{ panel.status_cell(seg, is_editor) }}
       </tr>
@@ -147,5 +147,6 @@ document.querySelectorAll('.detail-toggle').forEach(function (btn) {
 {% if is_editor %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
 <script src="{{ url_for('static', filename='review.js') }}"></script>
+<script src="{{ url_for('static', filename='proposals.js') }}"></script>
 {% endif %}
 {% endblock %}

@@ -12,6 +12,16 @@ import psycopg2
 import psycopg2.extras
 
 from storage.db import source_id
+from storage.repositories import GlossaryRepository, ProposalRepository
+
+# Editor glossary-proposal kinds (glossary_proposal.kind CHECK constraint,
+# migration 013). Values are locked schema truth — do not change them; these
+# are just intuitive Python-side names for the five DB strings.
+PROPOSAL_KIND_CHANGE_EVERYWHERE = "rendering"
+PROPOSAL_KIND_WRONG_SENSE_HERE = "sense_here"
+PROPOSAL_KIND_REMOVE_HERE = "remove_here"
+PROPOSAL_KIND_RETIRE_EVERYWHERE = "retire_sense"
+PROPOSAL_KIND_ADD_TERM = "add_term"
 
 # ---------------------------------------------------------------------------
 # Shared segment SELECT helper
@@ -279,7 +289,7 @@ def get_segment_constraints(
     → glossary_term to surface the Latin lemma and optional context_label.
 
     Returns a dict keyed by segment_id; each value is a list of dicts with keys
-    ``latin_lemma``, ``slovak``, ``context_label``.
+    ``sense_id``, ``latin_lemma``, ``slovak``, ``context_label``.
     Missing segment_ids are not included (caller treats absence as empty list).
     A 'rejected' term_usage row (D10 tombstone) is excluded even if the sense
     itself is still approved.
@@ -291,6 +301,7 @@ def get_segment_constraints(
     sql = f"""
         SELECT DISTINCT ON (tu.segment_id, gs.sense_id)
             tu.segment_id,
+            gs.sense_id,
             gt.latin_lemma,
             sr.content        AS slovak,
             gs.context_label
@@ -312,12 +323,220 @@ def get_segment_constraints(
             sid = row["segment_id"]
             result.setdefault(sid, []).append(
                 {
+                    "sense_id": row["sense_id"],
                     "latin_lemma": row["latin_lemma"],
                     "slovak": row["slovak"],
                     "context_label": row["context_label"],
                 }
             )
     return result
+
+
+def get_term_senses(conn: psycopg2.extensions.connection, sense_id: int) -> dict | None:
+    """Return the term owning ``sense_id`` and all of that term's senses.
+
+    Powers the "wrong sense here" dropdown (Stage 3). Includes senses of any
+    status (proposed/approved/retired) — the editor must be able to name a
+    not-yet-approved sense as the correct one; ``apply_sense_here`` approves
+    it on admin approval. Each sense's ``slovak`` is its winning rendering
+    (authority_rank ASC), same join shape as ``get_segment_constraints``, or
+    None if it has no sk rendering yet. Returns None if ``sense_id`` doesn't
+    exist.
+    """
+    sql = """
+        SELECT gt.term_id, gt.latin_lemma
+        FROM glossary_sense gs
+        JOIN glossary_term  gt ON gt.term_id = gs.term_id
+        WHERE gs.sense_id = %s
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, (sense_id,))
+        term = cur.fetchone()
+        if term is None:
+            return None
+
+        cur.execute(
+            """
+            SELECT DISTINCT ON (gs.sense_id)
+                gs.sense_id,
+                gs.context_label,
+                gs.status,
+                sr.content AS slovak
+            FROM glossary_sense gs
+            LEFT JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+            LEFT JOIN source           s ON s.source_id = sr.source_id
+            WHERE gs.term_id = %s
+            ORDER BY gs.sense_id, s.authority_rank
+            """,
+            (term["term_id"],),
+        )
+        senses = [
+            {
+                "sense_id": row["sense_id"],
+                "context_label": row["context_label"],
+                "status": row["status"],
+                "slovak": row["slovak"],
+            }
+            for row in cur.fetchall()
+        ]
+
+    return {"term_id": term["term_id"], "latin_lemma": term["latin_lemma"], "senses": senses}
+
+
+def get_pending_proposal_counts(
+    conn: psycopg2.extensions.connection, sense_ids: list[int]
+) -> dict[int, int]:
+    """Return {sense_id: pending glossary_proposal count} for the given senses.
+
+    Powers the panel's "proposal pending" badge (Stage 3). Thin wrapper around
+    ``ProposalRepository.pending_by_sense`` so the Flask route layer only ever
+    imports from ``server.db``, matching this file's existing convention.
+    """
+    if not sense_ids:
+        return {}
+    return ProposalRepository(conn).pending_by_sense(sense_ids)
+
+
+def segment_has_locked_sense(
+    conn: psycopg2.extensions.connection, segment_id: int, sense_id: int
+) -> bool:
+    """True if ``sense_id`` is one of ``segment_id``'s locked terms (D8).
+
+    Mirrors the constraint shape of ``GlossaryRepository.locked_terms`` /
+    ``get_segment_constraints``: a non-rejected term_usage row for an approved
+    sense with a Slovak rendering. Guards the propose endpoints against a
+    client submitting sense_here/remove_here for a (segment, sense) pair that
+    was never actually rendered as a locked term in that segment's panel.
+    """
+    sql = """
+        SELECT 1
+        FROM term_usage tu
+        JOIN glossary_sense gs  ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
+        JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+        WHERE tu.segment_id = %s AND tu.sense_id = %s AND tu.status <> 'rejected'
+        LIMIT 1
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (segment_id, sense_id))
+        return cur.fetchone() is not None
+
+
+def propose_sense_change(
+    conn: psycopg2.extensions.connection,
+    sense_id: int,
+    kind: str,
+    *,
+    proposed_sk: str | None,
+    proposed_sense_id: int | None,
+    note: str | None,
+    origin_segment_id: int | None,
+    proposed_by: str,
+) -> tuple[str, int | None]:
+    """Validate and record an editor's proposed sense-targeted glossary change.
+
+    ``kind`` is one of the PROPOSAL_KIND_CHANGE_EVERYWHERE / WRONG_SENSE_HERE /
+    REMOVE_HERE / RETIRE_EVERYWHERE constants (add_term uses propose_add_term
+    instead). ``proposed_sk`` should already be stripped by the caller.
+
+    Does NOT commit — caller's ``get_conn()`` handles the commit.
+
+    Returns ``(status, proposal_id)``:
+      "ok"               -> proposal recorded, proposal_id set
+      "not_found"        -> sense_id doesn't exist
+      "no_change"        -> proposed_sk/proposed_sense_id equals current state
+      "wrong_term"       -> proposed_sense_id isn't a sense of the same term
+      "not_locked_here"  -> origin_segment_id doesn't actually lock sense_id (D8)
+      "proposed_sk_required" -> rendering kind needs a non-empty proposed_sk
+      "missing_target"   -> sense_here needs proposed_sense_id or proposed_sk
+    proposal_id is None unless status == "ok".
+    """
+    glossary = GlossaryRepository(conn)
+    current_sense = glossary.get_current_sense(sense_id)
+    if current_sense is None:
+        return ("not_found", None)
+
+    term = get_term_senses(conn, sense_id)
+    current_sk = glossary.get_sk_rendering_content(sense_id)
+
+    resolved_proposed_sk: str | None = None
+    resolved_proposed_sense_id: int | None = None
+
+    if kind == PROPOSAL_KIND_CHANGE_EVERYWHERE:
+        if not proposed_sk:
+            return ("proposed_sk_required", None)
+        if proposed_sk == (current_sk or ""):
+            return ("no_change", None)
+        resolved_proposed_sk = proposed_sk
+
+    elif kind == PROPOSAL_KIND_WRONG_SENSE_HERE:
+        if not segment_has_locked_sense(conn, origin_segment_id, sense_id):
+            return ("not_locked_here", None)
+        if proposed_sense_id is not None:
+            if proposed_sense_id == sense_id:
+                return ("no_change", None)
+            if not any(s["sense_id"] == proposed_sense_id for s in term["senses"]):
+                return ("wrong_term", None)
+            resolved_proposed_sense_id = proposed_sense_id
+        elif proposed_sk:
+            if proposed_sk == (current_sk or ""):
+                return ("no_change", None)
+            resolved_proposed_sk = proposed_sk
+        else:
+            return ("missing_target", None)
+
+    elif kind == PROPOSAL_KIND_REMOVE_HERE:
+        if not segment_has_locked_sense(conn, origin_segment_id, sense_id):
+            return ("not_locked_here", None)
+
+    else:  # PROPOSAL_KIND_RETIRE_EVERYWHERE
+        pass
+
+    proposal_id = ProposalRepository(conn).create_or_update_pending(
+        kind=kind,
+        sense_id=sense_id,
+        proposed_sense_id=resolved_proposed_sense_id,
+        latin_lemma=term["latin_lemma"],
+        current_sk=current_sk,
+        proposed_sk=resolved_proposed_sk,
+        note=note,
+        origin_segment_id=origin_segment_id,
+        proposed_by=proposed_by,
+    )
+    return ("ok", proposal_id)
+
+
+def propose_add_term(
+    conn: psycopg2.extensions.connection,
+    *,
+    latin_lemma: str,
+    proposed_sk: str,
+    note: str | None,
+    origin_segment_id: int | None,
+    proposed_by: str,
+) -> tuple[str, int | None]:
+    """Record an editor's suggestion for a missing glossary term (kind=add_term).
+
+    Does NOT commit — caller's ``get_conn()`` handles the commit.
+
+    Returns ``(status, proposal_id)``:
+      "ok"          -> proposal recorded, proposal_id set
+      "term_exists" -> latin_lemma is already a glossary term
+    """
+    if GlossaryRepository(conn).find_term_by_lemma(latin_lemma) is not None:
+        return ("term_exists", None)
+
+    proposal_id = ProposalRepository(conn).create_or_update_pending(
+        kind=PROPOSAL_KIND_ADD_TERM,
+        sense_id=None,
+        proposed_sense_id=None,
+        latin_lemma=latin_lemma,
+        current_sk=None,
+        proposed_sk=proposed_sk,
+        note=note,
+        origin_segment_id=origin_segment_id,
+        proposed_by=proposed_by,
+    )
+    return ("ok", proposal_id)
 
 
 def get_question_preamble_segment(

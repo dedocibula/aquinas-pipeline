@@ -31,10 +31,15 @@ load_dotenv()
 
 from export.xliff import export_pars_bytes  # noqa: E402
 from server.db import (  # noqa: E402
+    PROPOSAL_KIND_CHANGE_EVERYWHERE,
+    PROPOSAL_KIND_REMOVE_HERE,
+    PROPOSAL_KIND_RETIRE_EVERYWHERE,
+    PROPOSAL_KIND_WRONG_SENSE_HERE,
     approve_segment,
     get_all_questions,
     get_article_segments,
     get_distinct_pars,
+    get_pending_proposal_counts,
     get_prev_next_article,
     get_question_articles,
     get_question_preamble_segment,
@@ -42,8 +47,11 @@ from server.db import (  # noqa: E402
     get_questions_by_status,
     get_segment_constraints,
     get_structural_formulas,
+    get_term_senses,
     get_translation_progress,
     is_editor,
+    propose_add_term,
+    propose_sense_change,
     review_segment,
     unapprove_segment,
 )
@@ -254,6 +262,10 @@ def _question_view(ltree_path: str, st_locator: str):
         all_constraints = get_segment_constraints(conn, constraint_ids) if constraint_ids else {}
         title_constraints = all_constraints.get(title_seg["segment_id"], []) if title_seg else []
         preamble_constraints = all_constraints.get(preamble_seg["segment_id"], []) if preamble_seg else []
+        pending_sense_ids = sorted(
+            {c["sense_id"] for lst in (title_constraints, preamble_constraints) for c in lst}
+        )
+        pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
 
     if not articles:
         abort(404)
@@ -272,6 +284,7 @@ def _question_view(ltree_path: str, st_locator: str):
         title_constraints=title_constraints,
         preamble_seg=preamble_seg,
         preamble_constraints=preamble_constraints,
+        pending_counts=pending_counts,
     )
 
 
@@ -283,6 +296,8 @@ def _article_view(ltree_path: str, st_locator: str):
         nav = get_prev_next_article(conn, ltree_path)
         segment_ids = [s["segment_id"] for s in segments]
         constraints = get_segment_constraints(conn, segment_ids)
+        pending_sense_ids = sorted({c["sense_id"] for lst in constraints.values() for c in lst})
+        pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
 
     # Build arg/reply numbering maps.
     # arg_number[segment_id] = sequential 1-based index among args in this article.
@@ -318,6 +333,7 @@ def _article_view(ltree_path: str, st_locator: str):
         nav=nav_urls,
         formulas=_formulas,
         constraints=constraints,
+        pending_counts=pending_counts,
     )
 
 
@@ -407,6 +423,131 @@ def review_segment_route(segment_id: int):
     if result == "notfound":
         return jsonify({"ok": False, "error": "not found"}), 404
     return jsonify({"ok": False, "error": "conflict"}), 409
+
+
+# ---------------------------------------------------------------------------
+# Editor glossary proposals (Stage 3 of the editor-glossary-proposals plan)
+# ---------------------------------------------------------------------------
+
+_PROPOSE_KINDS = {
+    PROPOSAL_KIND_CHANGE_EVERYWHERE,
+    PROPOSAL_KIND_WRONG_SENSE_HERE,
+    PROPOSAL_KIND_REMOVE_HERE,
+    PROPOSAL_KIND_RETIRE_EVERYWHERE,
+}
+
+
+@app.route("/api/sense/<int:sense_id>/alternatives")
+@requires_editor
+def sense_alternatives_route(sense_id: int):
+    """Return the term owning ``sense_id`` and all its senses, for the
+    "wrong sense here" dropdown."""
+    with get_conn() as conn:
+        term = get_term_senses(conn, sense_id)
+    if term is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": True, "latin_lemma": term["latin_lemma"], "senses": term["senses"]})
+
+
+@app.route("/api/sense/<int:sense_id>/propose", methods=["POST"])
+@requires_editor
+def propose_sense_change_route(sense_id: int):
+    """Record an editor's proposed glossary change (D1 — inert until an admin approves it).
+
+    Body: ``{kind, proposed_sk?, proposed_sense_id?, note?, origin_segment_id?}``.
+    ``kind`` is one of the PROPOSAL_KIND_CHANGE_EVERYWHERE / WRONG_SENSE_HERE /
+    REMOVE_HERE / RETIRE_EVERYWHERE values (add_term is a separate endpoint —
+    see ``/api/term-proposal``).
+    """
+    data = request.get_json(silent=True) or {}
+    kind = data.get("kind", "")
+    if kind not in _PROPOSE_KINDS:
+        return jsonify({"ok": False, "error": "invalid kind"}), 400
+
+    note = (data.get("note") or "").strip() or None
+    proposed_sk = (data.get("proposed_sk") or "").strip() or None
+
+    raw_origin_segment_id = data.get("origin_segment_id")
+    origin_segment_id: int | None = None
+    if raw_origin_segment_id:
+        try:
+            origin_segment_id = int(raw_origin_segment_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "invalid origin_segment_id"}), 400
+    if kind in (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE) and not origin_segment_id:
+        return jsonify({"ok": False, "error": "origin_segment_id required"}), 400
+
+    raw_proposed_sense_id = data.get("proposed_sense_id")
+    proposed_sense_id: int | None = None
+    if raw_proposed_sense_id:
+        try:
+            proposed_sense_id = int(raw_proposed_sense_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "invalid proposed_sense_id"}), 400
+
+    with get_conn() as conn:
+        status, proposal_id = propose_sense_change(
+            conn,
+            sense_id,
+            kind,
+            proposed_sk=proposed_sk,
+            proposed_sense_id=proposed_sense_id,
+            note=note,
+            origin_segment_id=origin_segment_id,
+            proposed_by=session["email"],
+        )
+
+    if status == "ok":
+        return jsonify({"ok": True, "proposal_id": proposal_id})
+    if status == "not_found":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if status == "proposed_sk_required":
+        return jsonify({"ok": False, "error": "proposed_sk required"}), 400
+    if status == "missing_target":
+        return jsonify(
+            {"ok": False, "error": "proposed_sense_id or proposed_sk required"}
+        ), 400
+    # "no_change" / "wrong_term" / "not_locked_here"
+    return jsonify({"ok": False, "error": status}), 400
+
+
+@app.route("/api/term-proposal", methods=["POST"])
+@requires_editor
+def propose_term_route():
+    """Record an editor's suggestion for a missing glossary term (kind=add_term).
+
+    Body: ``{latin_lemma, proposed_sk, note?, origin_segment_id?}``.
+    """
+    data = request.get_json(silent=True) or {}
+    latin_lemma = (data.get("latin_lemma") or "").strip()
+    proposed_sk = (data.get("proposed_sk") or "").strip()
+    if not latin_lemma or not proposed_sk:
+        return jsonify({"ok": False, "error": "latin_lemma and proposed_sk required"}), 400
+
+    note = (data.get("note") or "").strip() or None
+    raw_origin_segment_id = data.get("origin_segment_id")
+    origin_segment_id: int | None = None
+    if raw_origin_segment_id:
+        try:
+            origin_segment_id = int(raw_origin_segment_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "invalid origin_segment_id"}), 400
+
+    with get_conn() as conn:
+        status, proposal_id = propose_add_term(
+            conn,
+            latin_lemma=latin_lemma,
+            proposed_sk=proposed_sk,
+            note=note,
+            origin_segment_id=origin_segment_id,
+            proposed_by=session["email"],
+        )
+
+    if status == "term_exists":
+        return jsonify(
+            {"ok": False, "error": f"term_exists: '{latin_lemma}' is already in the glossary"}
+        ), 400
+    return jsonify({"ok": True, "proposal_id": proposal_id})
 
 
 # ---------------------------------------------------------------------------

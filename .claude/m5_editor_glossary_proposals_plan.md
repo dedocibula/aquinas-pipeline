@@ -29,7 +29,7 @@ adding a **glossary proposal workflow** covering the full term lifecycle:
    Slovak rendering (here-only or everywhere), remove a wrongly-detected term (here-only or
    everywhere), or suggest a missing term. Proposals land in a new `glossary_proposal` table.
    **$0, no glossary mutation, minimal clicks.**
-2. **Admin** (an editor allow-listed via env `ADMIN_EMAILS`) opens a queue page showing every
+2. **Admin** (an editor whose `editor.admin` column is true — D6) opens a queue page showing every
    pending proposal with its **blast radius** (segments that would be restaged) and **estimated
    cost**, and approves or rejects. Approval applies the glossary/term_usage change — segments
    become *stale* or *pending*, but **nothing is spent**.
@@ -65,11 +65,12 @@ DB mutation beyond the proposal row.
 | D3 | Version bumps happen **only when they change translation-relevant state** (`bump_sense_version` is not idempotent; a spurious bump restages hundreds of segments): rendering approve bumps only if the rendering actually differs; retire_sense always bumps (constraint removal must restage); sense_here / remove_here never bump (they reset their one segment directly). |
 | D4 | Approve ≠ spend. No web endpoint ever triggers translation. All paid or corpus-scale operations are CLI-only (Stages 5–6). |
 | D5 | Duplicate handling in the repo, not the schema: before insert, look for an existing pending row with the same (kind, sense_id or latin_lemma, origin_segment_id, proposed_by) and update it in place. Approving a sense-wide proposal auto-supersedes other pending sense-wide proposals on the same sense. Boring code wins over clever partial-unique upserts. |
-| D6 | Admin = editor whose email is in env `ADMIN_EMAILS` (comma-separated). Unset ⇒ nobody is admin (fail closed). No DB column. |
+| D6 | **(revised 2026-07-13)** Admin = editor row with `editor.admin = true`. A migration adds `admin boolean NOT NULL DEFAULT false` to the `editor` table (008); no env var. Toggled via psql, same operational model as the `editor` allowlist itself (D6 originally used `ADMIN_EMAILS` — superseded; do not reintroduce the env var). |
 | D7 | `add_term` approval creates the glossary entry but **never** touches segments — newly inserted `term_usage` rows carry the current version (not stale), so corpus application is the explicit Stage 6 CLI step (re-resolve → diff → cost preview → reset). |
 | D8 | Editors can only target senses that appear as locked terms in the panel (approved senses with sk rendering), plus free-form add_term. |
 | D9 | The five kinds table above is the complete v1 scope. Sense-*default* inversion (e.g. making `rozum` the default `ratio` sense corpus-wide) stays deferred to the classifier workstream — it is NOT expressible here except as many sense_here proposals. |
 | D10 | `term_usage.status='rejected'` rows are permanent tombstones: constraint readers skip them AND the resolver must never re-insert a `guessed` row for a (segment, sense) that has one (Stage 2 makes both true). `confirmed` rows already survive re-resolution (segment-replace deletes only `guessed`). |
+| D11 | **(added 2026-07-13)** All UI-facing text/control elements (button titles, labels, placeholders, status messages, hints) added by this workflow are in **English**, matching the rest of the site's control chrome. Slovak is reserved for translation *content* (renderings, segment text), never for UI copy. Applies to all remaining stages (4's admin queue included). |
 
 ### Database access
 
@@ -231,7 +232,7 @@ RealDictCursor, no self-commit). Methods:
 - `get(proposal_id) -> dict | None`.
 - `list_pending() -> list[dict]` — oldest first.
 - `pending_by_sense(sense_ids: list[int]) -> dict[int, int]` — count of pending proposals per
-  sense (Stage 3 uses it for the "návrh čaká" badge).
+  sense (Stage 3 uses it for the "proposal pending" badge — D11: English UI copy).
 - `decide(proposal_id, status, decided_by, decision_note=None) -> bool` — UPDATE ... WHERE
   `status='pending'`; returns rowcount == 1 (False ⇒ caller responds 409).
 - `supersede_sense_wide_siblings(sense_id, keep_proposal_id, decided_by) -> int` — mark other
@@ -386,7 +387,7 @@ are inert until Stage 4 applies them), but grep for it and note the status to th
   "wrong sense here" dropdown.
 - Wire `ProposalRepository.pending_by_sense` into the article/question views: for the page's
   constraint sense_ids, pass `pending_counts` into the templates so the panel can show a
-  "návrh čaká" badge next to terms that already have a pending proposal.
+  "proposal pending" badge (English — D11) next to terms that already have a pending proposal.
 
 ### 3.2 Endpoints — `src/server/app.py` (all `@requires_editor`; follow the existing JSON/status
 idioms; `proposed_by = session["email"]`)
@@ -411,7 +412,7 @@ POST /api/term-proposal
   same term — validate via `get_term_senses`, else 400 `"wrong_term"`; must differ from
   `sense_id`, else `"no_change"`) or free-text `proposed_sk` (recorded-only path) — at least one.
 - `remove_here`: `origin_segment_id` required; ignore proposed_sk.
-- `retire_sense`: no extra fields; note strongly encouraged (UI hints "prečo?").
+- `retire_sense`: no extra fields; note strongly encouraged (UI hints "why?" — English, D11).
 
 `term-proposal` (add_term): `latin_lemma` + `proposed_sk` non-empty; if
 `GlossaryRepository.find_term_by_lemma` hits → 400 `"term_exists"` (message includes the lemma so
@@ -428,32 +429,34 @@ only): keep the current display, add compact action buttons and the pending badg
 ```html
 <button class="btn-term-act" data-act="change" data-sense-id="{{ c.sense_id }}"
         data-segment-id="{{ seg.segment_id }}" data-current-sk="{{ c.slovak }}"
-        data-lemma="{{ c.latin_lemma }}" title="navrhnúť zmenu">✎</button>
+        data-lemma="{{ c.latin_lemma }}" title="propose change">✎</button>
 <button class="btn-term-act" data-act="remove" data-sense-id="{{ c.sense_id }}"
         data-segment-id="{{ seg.segment_id }}" data-lemma="{{ c.latin_lemma }}"
-        title="navrhnúť odstránenie">✗</button>
-{% if pending_counts.get(c.sense_id) %}<span class="term-pending" title="návrh čaká">⏳</span>{% endif %}
+        title="propose removal">✗</button>
+{% if pending_counts.get(c.sense_id) %}<span class="term-pending" title="proposal pending">⏳</span>{% endif %}
 ```
 
 One shared hidden form per panel (`id="tpform-{{ seg.segment_id }}"`), repositioned under the
-clicked term by JS, containing: scope radio (`len tu` = only here / `všade` = everywhere), a
-rendering input (prefilled with `data-current-sk` for ✎), a sense `<select>` (shown only for
-✎ + "len tu"; populated from `/alternatives`; includes an "iné…" option that reveals the
-free-text input), a note textarea, submit/cancel, status span. For ✗ + "všade" show a red hint
-("odstráni termín z celého korpusu — vyžaduje dôvod") and require the note client-side.
+clicked term by JS, containing: scope radio ("here only" / "everywhere"), a rendering input
+(prefilled with `data-current-sk` for ✎), a sense `<select>` (shown only for ✎ + "here only";
+populated from `/alternatives`; includes an "other…" option that reveals the free-text input), a
+note textarea, submit/cancel, status span. For ✗ + "everywhere" show a red hint ("removes the
+term from the entire corpus — requires a reason") and require the note client-side.
 
-Below the list: "+ chýbajúci termín" toggle → lemma + rendering + note → POST `/api/term-proposal`.
+Below the list: "+ missing term" toggle → lemma + rendering + note → POST `/api/term-proposal`.
+All copy English throughout (D11).
 
 Keep all markup/id conventions consistent with the existing panel (`...-{{ seg.segment_id }}`).
 Pass `pending_counts` through `article.html` / `question.html` render calls (default `{}`).
 
 ### 3.4 JS + CSS
 
-Extend `src/server/static/review.js` in its existing idiom (vanilla IIFE, delegated
-`querySelectorAll` bindings, `fetch` JSON like `_doAction`). Kind derivation: ✎+everywhere →
-`rendering`; ✎+here → `sense_here`; ✗+here → `remove_here`; ✗+everywhere → `retire_sense`.
-On success show "✓ navrhnuté — čaká na schválenie" and flip the ⏳ badge on; render server error
-strings verbatim in the status span. Minimal `style.css` additions consistent with panel styles.
+New `src/server/static/proposals.js` (kept separate from `review.js` rather than extending it —
+distinct concern, same vanilla-IIFE / delegated-`querySelectorAll` / `fetch`-JSON idiom). Kind
+derivation: ✎+everywhere → `rendering`; ✎+here → `sense_here`; ✗+here → `remove_here`;
+✗+everywhere → `retire_sense`. On success show "Proposed — pending approval." (English, D11) and
+flip the ⏳ badge on; render server error strings verbatim in the status span. `style.css`
+additions consistent with existing panel styles.
 
 ### 3.5 Tests — extend `tests/server/test_server.py` (same monkeypatch style)
 
@@ -479,15 +482,23 @@ and approves (applies via Stage 2 services, $0) or rejects.
 **Preconditions:** Stages 1–3 done — grep `ProposalRepository`, `glossary_apply`,
 `btn-term-act` all hit.
 
-### 4.1 Admin gate — `src/server/app.py`
+### 4.1 Admin gate — DB column + `src/server/app.py` (D6, revised 2026-07-13)
 
-- `_admin_emails() -> set[str]`: read env `ADMIN_EMAILS` per call (comma-separated, strip,
-  lowercase) — per-call read keeps it monkeypatchable in tests; cost is negligible.
+- **Migration** (append to `migrations/` as the next-numbered file, or fold into 013 if still
+  unapplied to prod — check `.claude/database.md` / ask the user): `ALTER TABLE editor ADD COLUMN
+  admin boolean NOT NULL DEFAULT false;`. **STOP for DDL review (house rule)** before applying to
+  either DB.
+- `src/server/db.py`: extend the existing `is_editor(conn, email)` query (or add a sibling
+  `is_admin(conn, email) -> bool`: `SELECT admin FROM editor WHERE email = %s`, `fetchone()` is
+  `None` or `(False,)` ⇒ `False`) — do not read an env var.
+- Resolve admin status once at login (mirroring how `is_editor` is cached), store
+  `session["is_admin"]`, same lifecycle as `session["is_editor"]` (changes take effect on next
+  login).
 - `requires_admin` decorator modeled on `requires_editor`: `session["is_editor"]` AND
-  `session.get("email","").lower() in _admin_emails()`, else 403 JSON. Unset env ⇒ empty set ⇒
-  nobody (D6, fail closed).
-- Add `is_admin` to the `_inject_user` context processor; nav link to `/glossary/proposals` in
-  `base.html` for admins.
+  `session.get("is_admin")`, else 403 JSON. No admin rows ⇒ nobody is admin (fail closed, same
+  spirit as the old env-var default — just DB-backed now).
+- Add `is_admin` to the `_inject_user` context processor (source it from the session, already
+  computed at login); nav link to `/glossary/proposals` in `base.html` for admins.
 
 ### 4.2 Queue data — `src/server/db.py`
 
@@ -552,7 +563,7 @@ rendering for sense_here), plus per row:
 
 ### 4.4 Tests — extend `tests/server/`
 
-`requires_admin` matrix (anonymous / editor / admin; unset ADMIN_EMAILS ⇒ 403 for everyone).
+`requires_admin` matrix (anonymous / editor / admin; `editor.admin = false` or missing row ⇒ 403 for everyone).
 Approve dispatch per kind (correct service called with correct args; record-only sense_here calls
 none; add_term term_exists → 409, proposal still pending). Race: `decide` False → 409 and the
 service write is not committed (assert via the single-transaction structure with a mock conn).
@@ -677,8 +688,9 @@ declined confirm resets nothing; human-edited → needs_human.
 3. **Prod smoke ($0 steps only, user present):** deploy; user proposes on a real term; user
    approves; check stale/pending counts. **Do NOT run any paid retranslation — the owner runs it
    themselves when they choose.**
-4. Ask the user to set `ADMIN_EMAILS` (Railway) and confirm `AQUINAS_OWNER_TOKEN` /
-   `AQUINAS_MAX_RUN_USD` handling locally — the code fails closed without them.
+4. Ask the user to flip `editor.admin = true` (Railway, via psql) for the intended admin
+   account(s) and confirm `AQUINAS_OWNER_TOKEN` / `AQUINAS_MAX_RUN_USD` handling locally — the
+   code fails closed without them.
 5. Docs: update `docs/session_state.md` (milestone, D1–D10 summary, files changed, next step =
    "owner batches approvals, then runs gated rerun_stale / apply-new-terms when budget allows");
    note in `.claude/m5_reviewer_corrections_plan.md` §6.6 that this plan implemented it; confirm
