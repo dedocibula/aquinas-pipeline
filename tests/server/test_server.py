@@ -1254,3 +1254,375 @@ def test_term_proposal_route_missing_fields_returns_400(editor_client):
     assert resp.status_code == 400
 
 
+# ---------------------------------------------------------------------------
+# Stage 4 — admin gate + proposal queue
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def admin_client():
+    """Flask test client with an active admin (editor + admin=True) session."""
+    with (
+        patch("server.app.get_conn", make_fake_get_conn()),
+        patch("server.app.get_structural_formulas", return_value={}),
+    ):
+        import server.app as _app_module
+        from server.app import app
+        _app_module._formulas = {}
+
+        app.config["TESTING"] = True
+        app.secret_key = "test-secret"
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["email"] = "admin@example.com"
+                sess["is_editor"] = True
+                sess["is_admin"] = True
+            yield c
+
+
+def test_glossary_proposals_page_returns_403_for_anonymous(client):
+    resp = client.get("/glossary/proposals")
+    assert resp.status_code == 403
+
+
+def test_glossary_proposals_page_returns_403_for_editor_non_admin(editor_client):
+    resp = editor_client.get("/glossary/proposals")
+    assert resp.status_code == 403
+
+
+def test_glossary_proposals_page_returns_200_for_admin(admin_client):
+    with (
+        patch("server.app.get_pending_proposals_view", return_value=[]),
+        patch("server.app.get_cost_per_segment", return_value=0.001),
+    ):
+        resp = admin_client.get("/glossary/proposals")
+    assert resp.status_code == 200
+
+
+def test_glossary_proposals_page_groups_by_kind(admin_client):
+    base = {
+        "latin_lemma": "gratia",
+        "context_label": None,
+        "current_sk": "milosť",
+        "proposed_sk": "milosť Božia",
+        "drift": False,
+        "live_current_sk": "milosť",
+        "note": None,
+        "proposed_by": "editor@example.com",
+        "created_at": "2026-07-01",
+        "proposed_sense_id": None,
+        "proposed_context_label": None,
+        "proposed_slovak": None,
+        "origin_locator": None,
+        "blast_radius": {"translated": 1, "needs_human": 0, "reviewed": 1, "marginal": 1},
+    }
+    proposals = [
+        {**base, "proposal_id": 1, "kind": "rendering"},
+        {**base, "proposal_id": 2, "kind": "retire_sense"},
+        {**base, "proposal_id": 3, "kind": "sense_here", "blast_radius": None},
+        {**base, "proposal_id": 4, "kind": "remove_here", "blast_radius": None},
+        {**base, "proposal_id": 5, "kind": "add_term", "blast_radius": None},
+    ]
+    with (
+        patch("server.app.get_pending_proposals_view", return_value=proposals),
+        patch("server.app.get_cost_per_segment", return_value=0.001),
+    ):
+        resp = admin_client.get("/glossary/proposals")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # Weak but DB-free smoke check: each proposal row id is rendered somewhere.
+    for p in proposals:
+        assert f'prow-{p["proposal_id"]}' in body
+
+
+def test_approve_route_returns_403_for_non_admin(editor_client):
+    resp = editor_client.post("/api/proposal/1/approve")
+    assert resp.status_code == 403
+
+
+def test_reject_route_returns_403_for_non_admin(editor_client):
+    resp = editor_client.post("/api/proposal/1/reject")
+    assert resp.status_code == 403
+
+
+def test_approve_route_ok_returns_result(admin_client):
+    with patch(
+        "server.app.approve_proposal", return_value=("ok", {"acknowledged": True})
+    ) as mock_approve:
+        resp = admin_client.post("/api/proposal/1/approve", json={"note": "looks good"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["acknowledged"] is True
+    args, _ = mock_approve.call_args
+    assert args[1] == 1
+    assert args[2] == "admin@example.com"
+    assert args[3] == "looks good"
+
+
+def test_approve_route_not_found_returns_404(admin_client):
+    with patch("server.app.approve_proposal", return_value=("not_found", None)):
+        resp = admin_client.post("/api/proposal/999/approve")
+    assert resp.status_code == 404
+
+
+def test_approve_route_not_pending_returns_409(admin_client):
+    with patch("server.app.approve_proposal", return_value=("not_pending", None)):
+        resp = admin_client.post("/api/proposal/1/approve")
+    assert resp.status_code == 409
+
+
+def test_approve_route_race_returns_409(admin_client):
+    from server.db import ProposalRaceError
+
+    with patch("server.app.approve_proposal", side_effect=ProposalRaceError()):
+        resp = admin_client.post("/api/proposal/1/approve")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "already decided"
+
+
+def test_approve_route_value_error_returns_409(admin_client):
+    with patch("server.app.approve_proposal", side_effect=ValueError("term_exists")):
+        resp = admin_client.post("/api/proposal/1/approve")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "term_exists"
+
+
+def test_reject_route_ok(admin_client):
+    with patch("server.app.reject_proposal", return_value="ok") as mock_reject:
+        resp = admin_client.post("/api/proposal/1/reject", json={"note": "duplicate"})
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+    args, _ = mock_reject.call_args
+    assert args[1] == 1
+    assert args[2] == "admin@example.com"
+    assert args[3] == "duplicate"
+
+
+def test_reject_route_not_found_returns_404(admin_client):
+    with patch("server.app.reject_proposal", return_value="not_found"):
+        resp = admin_client.post("/api/proposal/999/reject")
+    assert resp.status_code == 404
+
+
+def test_reject_route_not_pending_returns_409(admin_client):
+    with patch("server.app.reject_proposal", return_value="not_pending"):
+        resp = admin_client.post("/api/proposal/1/reject")
+    assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# db.is_admin — fail-closed matrix
+# ---------------------------------------------------------------------------
+
+
+def test_is_admin_true_when_row_admin_true():
+    from server.db import is_admin
+
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = (True,)
+    conn.cursor.return_value = cur
+    assert is_admin(conn, "admin@example.com") is True
+
+
+def test_is_admin_false_when_row_admin_false():
+    from server.db import is_admin
+
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = (False,)
+    conn.cursor.return_value = cur
+    assert is_admin(conn, "editor@example.com") is False
+
+
+def test_is_admin_false_when_no_row():
+    from server.db import is_admin
+
+    conn = MagicMock()
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchone.return_value = None
+    conn.cursor.return_value = cur
+    assert is_admin(conn, "stranger@example.com") is False
+
+
+# ---------------------------------------------------------------------------
+# db._sense_blast_radius — marginal restage count
+# ---------------------------------------------------------------------------
+
+
+def test_sense_blast_radius_marginal_is_not_already_stale_count():
+    """marginal must be the count of segments that are NOT already stale
+    (i.e. the segments this approval will newly restage) — not
+    total-minus-that-count, which counts the wrong segments and produces a
+    materially wrong cost estimate on the admin queue page."""
+    from server.db import _sense_blast_radius
+
+    by_status_rows = [
+        {"translation_status": "translated", "n": 7},
+        {"translation_status": "needs_human", "n": 2},
+        {"translation_status": "pending", "n": 1},
+    ]
+    # total = 10 locked segments; 4 are not already stale (this is the
+    # marginal restage count); reviewed = 3.
+    fetchall_results = iter([by_status_rows])
+    fetchone_results = iter([{"count": 3}, {"count": 4}])
+
+    cur = MagicMock()
+    cur.__enter__ = MagicMock(return_value=cur)
+    cur.__exit__ = MagicMock(return_value=False)
+    cur.fetchall.side_effect = lambda: next(fetchall_results)
+    cur.fetchone.side_effect = lambda: next(fetchone_results)
+
+    conn = MagicMock()
+    conn.cursor.return_value = cur
+
+    result = _sense_blast_radius(conn, sense_id=42)
+
+    assert result["total"] == 10
+    assert result["reviewed"] == 3
+    assert result["marginal"] == 4
+
+
+# ---------------------------------------------------------------------------
+# db.approve_proposal — dispatch per kind, race, and rollback propagation
+# ---------------------------------------------------------------------------
+
+
+def _make_repo_patch(proposal_row):
+    """Patch ProposalRepository so approve_proposal/reject_proposal see one pending row."""
+    mock_repo = MagicMock()
+    mock_repo.get.return_value = proposal_row
+    mock_repo.decide.return_value = True
+    mock_repo.supersede_sense_wide_siblings.return_value = None
+    return patch("server.db.ProposalRepository", return_value=mock_repo), mock_repo
+
+
+def test_approve_proposal_not_found_returns_status():
+    from server.db import approve_proposal
+
+    patcher, mock_repo = _make_repo_patch(None)
+    with patcher:
+        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert status == "not_found"
+    assert result is None
+
+
+def test_approve_proposal_not_pending_returns_status():
+    from server.db import approve_proposal
+
+    patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "approved"})
+    with patcher:
+        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert status == "not_pending"
+    assert result is None
+
+
+def test_approve_proposal_dispatches_rendering_to_correct_service():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "pending",
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sk": "milost",
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.apply_rendering_change", return_value={"applied": True}) as mock_apply,
+    ):
+        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", "note")
+    assert status == "ok"
+    assert result == {"applied": True}
+    mock_apply.assert_called_once()
+    mock_repo.decide.assert_called_once()
+    mock_repo.supersede_sense_wide_siblings.assert_called_once()
+
+
+def test_approve_proposal_sense_here_record_only_calls_no_service():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 2,
+        "status": "pending",
+        "kind": "sense_here",
+        "sense_id": 42,
+        "proposed_sense_id": None,
+        "origin_segment_id": 99,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.apply_sense_here") as mock_apply,
+    ):
+        status, result = approve_proposal(MagicMock(), 2, "admin@example.com", None)
+    assert status == "ok"
+    assert result == {"acknowledged": True}
+    mock_apply.assert_not_called()
+    # Record-only sense_here is per-segment, not sense-wide — no sibling supersede.
+    mock_repo.supersede_sense_wide_siblings.assert_not_called()
+
+
+def test_approve_proposal_add_term_exists_raises_value_error():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 3,
+        "status": "pending",
+        "kind": "add_term",
+        "sense_id": None,
+        "latin_lemma": "gratia",
+        "proposed_sk": "milost",
+        "note": None,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.apply_add_term", side_effect=ValueError("term_exists")),
+    ):
+        with pytest.raises(ValueError, match="term_exists"):
+            approve_proposal(MagicMock(), 3, "admin@example.com", None)
+    # The proposal must still be pending — decide() is only called after a
+    # successful apply, and the ValueError must propagate uncaught so the
+    # caller's get_conn() rolls back any partial writes.
+    mock_repo.decide.assert_not_called()
+
+
+def test_approve_proposal_race_raises_proposal_race():
+    from server.db import ProposalRaceError, approve_proposal
+
+    proposal_row = {
+        "proposal_id": 4,
+        "status": "pending",
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sk": "milost",
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    mock_repo.decide.return_value = False  # lost the race
+    with (
+        patcher,
+        patch("server.db.apply_rendering_change", return_value={"applied": True}),
+    ):
+        with pytest.raises(ProposalRaceError):
+            approve_proposal(MagicMock(), 4, "admin@example.com", None)
+    mock_repo.supersede_sense_wide_siblings.assert_not_called()
+
+
+def test_reject_proposal_not_pending_returns_status():
+    from server.db import reject_proposal
+
+    patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "rejected"})
+    with patcher:
+        status = reject_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert status == "not_pending"
+
+

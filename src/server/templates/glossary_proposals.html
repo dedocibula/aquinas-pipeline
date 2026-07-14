@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Proposal queue — Aquinas Pipeline{% endblock %}
+
+{% block breadcrumb %}
+  &rsaquo; <span>Proposal queue</span>
+{% endblock %}
+
+{% block content %}
+<h1>Glossary proposal queue</h1>
+
+<section class="proposal-section">
+  <h2>Sense-wide changes</h2>
+  <p class="proposal-section-hint">
+    Applying these restages every segment locked by the sense (corpus-wide) — nothing is spent
+    yet; the owner runs the paid rerun via CLI when ready.
+  </p>
+  {% if sense_wide %}
+  <table class="proposal-table">
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Current &rarr; proposed</th>
+        <th>Note</th>
+        <th>Proposed by</th>
+        <th>Blast radius</th>
+        <th>Est. cost</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in sense_wide %}
+      <tr id="prow-{{ p.proposal_id }}" data-proposal-id="{{ p.proposal_id }}">
+        <td>
+          <code>{{ p.latin_lemma }}</code>
+          {% if p.context_label %}<span class="term-context">({{ p.context_label }})</span>{% endif %}
+        </td>
+        <td>
+          {% if p.kind == 'retire_sense' %}
+            <span class="proposal-retire">RETIRE &mdash; constraint removed corpus-wide</span>
+          {% else %}
+            <span class="proposal-current">{{ p.current_sk or '—' }}</span>
+            &rarr;
+            <span class="proposal-proposed">{{ p.proposed_sk }}</span>
+          {% endif %}
+          {% if p.drift %}
+          <span class="proposal-drift" title="the glossary changed since this was proposed">
+            &#9888; drift: live is now &ldquo;{{ p.live_current_sk or '—' }}&rdquo;
+          </span>
+          {% endif %}
+        </td>
+        <td class="proposal-note">{{ p.note or '—' }}</td>
+        <td>{{ p.proposed_by }}<br><small>{{ p.created_at }}</small></td>
+        <td>
+          {% set br = p.blast_radius %}
+          translated: {{ br.translated }} &middot;
+          needs_human: {{ br.needs_human }} &middot;
+          reviewed: {{ br.reviewed }}<br>
+          <strong>marginal restage: {{ br.marginal }}</strong>
+        </td>
+        <td>~${{ "%.2f"|format(p.blast_radius.marginal * cost_per_segment) }}</td>
+        <td>
+          <input type="text" class="decision-note" placeholder="decision note (optional)">
+          <div class="decision-actions">
+            <button class="btn-approve-proposal" data-proposal-id="{{ p.proposal_id }}">Approve</button>
+            <button class="btn-reject-proposal" data-proposal-id="{{ p.proposal_id }}">Reject</button>
+          </div>
+          <span class="decision-status"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="proposal-none">No pending sense-wide proposals.</p>
+  {% endif %}
+</section>
+
+<section class="proposal-section">
+  <h2>Per-segment fixes</h2>
+  <p class="proposal-section-hint">
+    Applying these resets exactly one segment — cost is ~cents, not corpus-wide.
+  </p>
+  {% if per_segment %}
+  <table class="proposal-table">
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Fix</th>
+        <th>Segment</th>
+        <th>Note</th>
+        <th>Proposed by</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in per_segment %}
+      <tr id="prow-{{ p.proposal_id }}" data-proposal-id="{{ p.proposal_id }}">
+        <td>
+          <code>{{ p.latin_lemma }}</code>
+          {% if p.context_label %}<span class="term-context">({{ p.context_label }})</span>{% endif %}
+        </td>
+        <td>
+          {% if p.kind == 'remove_here' %}
+            <span class="proposal-retire">remove &mdash; falsely detected here</span>
+          {% elif p.proposed_sense_id %}
+            wrong sense &rarr; <strong>{{ p.proposed_slovak or '—' }}</strong>
+            {% if p.proposed_context_label %}<span class="term-context">({{ p.proposed_context_label }})</span>{% endif %}
+          {% else %}
+            free-text: &ldquo;{{ p.proposed_sk }}&rdquo; &mdash; record-only (no existing sense fits)
+          {% endif %}
+        </td>
+        <td>
+          {% if p.origin_locator %}
+          {% set article_path = p.origin_locator.split('.')[:3] | join('.') %}
+          <a href="/~{{ ltree_to_url(article_path) }}">{{ p.origin_locator }}</a>
+          {% else %}—{% endif %}
+          <br><small>1 segment (~cents)</small>
+        </td>
+        <td class="proposal-note">{{ p.note or '—' }}</td>
+        <td>{{ p.proposed_by }}<br><small>{{ p.created_at }}</small></td>
+        <td>
+          <input type="text" class="decision-note" placeholder="decision note (optional)">
+          <div class="decision-actions">
+            <button class="btn-approve-proposal" data-proposal-id="{{ p.proposal_id }}">Approve</button>
+            <button class="btn-reject-proposal" data-proposal-id="{{ p.proposal_id }}">Reject</button>
+          </div>
+          <span class="decision-status"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="proposal-none">No pending per-segment proposals.</p>
+  {% endif %}
+</section>
+
+<section class="proposal-section">
+  <h2>New terms</h2>
+  <p class="proposal-section-hint">
+    Approving creates the glossary entry only; corpus application (detecting where the term
+    actually occurs) runs via the CLI re-resolve step, not here.
+  </p>
+  {% if add_terms %}
+  <table class="proposal-table">
+    <thead>
+      <tr>
+        <th>Lemma</th>
+        <th>Proposed Slovak</th>
+        <th>Note</th>
+        <th>Proposed by</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in add_terms %}
+      <tr id="prow-{{ p.proposal_id }}" data-proposal-id="{{ p.proposal_id }}">
+        <td><code>{{ p.latin_lemma }}</code></td>
+        <td>{{ p.proposed_sk }}</td>
+        <td class="proposal-note">{{ p.note or '—' }}</td>
+        <td>{{ p.proposed_by }}<br><small>{{ p.created_at }}</small></td>
+        <td>
+          <input type="text" class="decision-note" placeholder="decision note (optional)">
+          <div class="decision-actions">
+            <button class="btn-approve-proposal" data-proposal-id="{{ p.proposal_id }}">Approve</button>
+            <button class="btn-reject-proposal" data-proposal-id="{{ p.proposal_id }}">Reject</button>
+          </div>
+          <span class="decision-status"></span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="proposal-none">No pending new-term proposals.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='proposals.js') }}"></script>
+{% endblock %}

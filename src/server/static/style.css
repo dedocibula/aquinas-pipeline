@@ -963,3 +963,145 @@ a.badge:hover {
   border-left: 2px solid #c8b090;
   padding-left: 0.5rem;
 }
+
+/* ── Admin proposal queue (glossary_proposals.html) ──────────────────────── */
+
+.proposal-section {
+  margin-bottom: 2.2rem;
+}
+
+.proposal-section h2 {
+  font-size: 1.15rem;
+  border-bottom: 2px solid #d4c9b0;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.3rem;
+}
+
+.proposal-section-hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0;
+  margin-bottom: 0.7rem;
+}
+
+.proposal-none {
+  color: #aaa;
+  font-style: italic;
+}
+
+.proposal-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.proposal-table th,
+.proposal-table td {
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #e0d8cc;
+}
+
+.proposal-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+}
+
+.proposal-current {
+  color: #888;
+}
+
+.proposal-proposed {
+  color: #2d6a35;
+  font-weight: bold;
+}
+
+.proposal-retire {
+  color: #b35c00;
+  font-weight: bold;
+}
+
+.proposal-drift {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  color: #b35c00;
+}
+
+.proposal-note {
+  color: #555;
+  font-style: italic;
+  max-width: 220px;
+}
+
+.proposal-decided {
+  opacity: 0.4;
+}
+
+.decision-note {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+  padding: 3px 6px;
+  border: 1px solid #aac;
+  border-radius: 3px;
+}
+
+.decision-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.btn-approve-proposal {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #2e7d32;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  cursor: pointer;
+}
+
+.btn-approve-proposal:hover:not(:disabled) {
+  background: #c8e6c9;
+}
+
+.btn-approve-proposal:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-reject-proposal {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #c62828;
+  border-radius: 3px;
+  background: #ffebee;
+  color: #c62828;
+  cursor: pointer;
+}
+
+.btn-reject-proposal:hover:not(:disabled) {
+  background: #ffcdd2;
+}
+
+.btn-reject-proposal:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.decision-status {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: #666;
+  font-style: italic;
+}

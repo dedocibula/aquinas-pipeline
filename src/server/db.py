@@ -11,6 +11,13 @@ from __future__ import annotations
 import psycopg2
 import psycopg2.extras
 
+from review.glossary_apply import (
+    apply_add_term,
+    apply_remove_here,
+    apply_rendering_change,
+    apply_retire_sense,
+    apply_sense_here,
+)
 from storage.db import source_id
 from storage.repositories import GlossaryRepository, ProposalRepository
 
@@ -397,6 +404,261 @@ def get_pending_proposal_counts(
     return ProposalRepository(conn).pending_by_sense(sense_ids)
 
 
+_SENSE_WIDE_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
+_PER_SEGMENT_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
+
+
+def _sense_blast_radius(conn: psycopg2.extensions.connection, sense_id: int) -> dict:
+    """Segments locked by ``sense_id``, split by translation_status, plus the
+    marginal restage count — segments that are not already stale.
+
+    ``reviewed`` piggybacks on the same guard-protected ``segment_review`` join
+    as the rest of the server (free — no extra scan of a big table).
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT s.translation_status, count(DISTINCT tu.segment_id) AS n
+            FROM term_usage tu
+            JOIN segment s ON s.segment_id = tu.segment_id
+            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+            GROUP BY s.translation_status
+            """,
+            (sense_id,),
+        )
+        by_status = {row["translation_status"]: row["n"] for row in cur.fetchall()}
+
+        cur.execute(
+            """
+            SELECT count(DISTINCT tu.segment_id)
+            FROM term_usage tu
+            JOIN segment_review sr ON sr.segment_id = tu.segment_id
+            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+            """,
+            (sense_id,),
+        )
+        reviewed = cur.fetchone()["count"]
+
+        cur.execute(
+            """
+            SELECT count(DISTINCT tu.segment_id)
+            FROM term_usage tu
+            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+              AND NOT EXISTS (
+                  SELECT 1 FROM term_usage tu2
+                  JOIN glossary_sense gs2 ON gs2.sense_id = tu2.sense_id
+                  WHERE tu2.segment_id = tu.segment_id
+                    AND tu2.sense_version_used < gs2.version
+              )
+            """,
+            (sense_id,),
+        )
+        not_already_stale = cur.fetchone()["count"]
+
+    total = sum(by_status.values())
+    return {
+        "translated": by_status.get("translated", 0),
+        "needs_human": by_status.get("needs_human", 0),
+        "pending": by_status.get("pending", 0),
+        "reviewed": reviewed,
+        "total": total,
+        "marginal": not_already_stale,
+    }
+
+
+def _origin_locator(conn: psycopg2.extensions.connection, segment_id: int) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT locator_path::text FROM segment WHERE segment_id = %s", (segment_id,)
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def get_cost_per_segment(conn: psycopg2.extensions.connection) -> float:
+    """Return an estimated $/segment for the blast-radius cost preview.
+
+    Prefers the actual last translation run's realised cost; falls back to the
+    token-based estimate in ``ingest.coverage_report`` (imported, not copied,
+    per the plan) when no run has completed yet or its cost is zero.
+    """
+    from ingest.coverage_report import _AVG_SEGMENT_TOKENS, _COST_PER_1K_INPUT
+    from storage.repositories import RunRepository
+
+    last_run = RunRepository(conn).last_run()
+    if last_run and last_run.get("total_segments") and last_run.get("total_cost_usd"):
+        cost = float(last_run["total_cost_usd"])
+        segments = int(last_run["total_segments"])
+        if cost > 0 and segments > 0:
+            return cost / segments
+
+    return (_AVG_SEGMENT_TOKENS / 1000) * _COST_PER_1K_INPUT
+
+
+def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dict]:
+    """Return every pending proposal enriched for the admin queue (Stage 4).
+
+    Each dict is the raw ``glossary_proposal`` row plus:
+      - ``context_label`` — the acted-on sense's context_label (None for add_term).
+      - ``proposed_context_label`` / ``proposed_slovak`` — for sense_here with a
+        chosen ``proposed_sense_id`` (None for the free-text record-only path).
+      - ``live_current_sk`` / ``drift`` — the sense's *current* winning rendering
+        vs. the snapshot taken at propose time; drift=True means the glossary
+        moved since the editor proposed (admin should re-check before approving).
+      - ``blast_radius`` — dict from ``_sense_blast_radius``, only for sense-wide
+        kinds (``rendering``, ``retire_sense``).
+      - ``origin_locator`` — the origin segment's locator path, only for
+        per-segment kinds (``sense_here``, ``remove_here``).
+    """
+    glossary = GlossaryRepository(conn)
+    rows = ProposalRepository(conn).list_pending()
+
+    for row in rows:
+        kind = row["kind"]
+        sense_id = row["sense_id"]
+
+        row["context_label"] = None
+        row["proposed_context_label"] = None
+        row["proposed_slovak"] = None
+        row["live_current_sk"] = None
+        row["drift"] = False
+        row["blast_radius"] = None
+        row["origin_locator"] = None
+
+        if sense_id is not None:
+            current = glossary.get_current_sense(sense_id)
+            if current is not None:
+                live_sk = glossary.get_sk_rendering_content(sense_id)
+                row["live_current_sk"] = live_sk
+                row["drift"] = live_sk != row["current_sk"]
+
+            term = get_term_senses(conn, sense_id)
+            if term is not None:
+                sense_row = next(
+                    (s for s in term["senses"] if s["sense_id"] == sense_id), None
+                )
+                if sense_row is not None:
+                    row["context_label"] = sense_row["context_label"]
+
+                if row["proposed_sense_id"] is not None:
+                    proposed_row = next(
+                        (
+                            s
+                            for s in term["senses"]
+                            if s["sense_id"] == row["proposed_sense_id"]
+                        ),
+                        None,
+                    )
+                    if proposed_row is not None:
+                        row["proposed_context_label"] = proposed_row["context_label"]
+                        row["proposed_slovak"] = proposed_row["slovak"]
+
+        if kind in _SENSE_WIDE_KINDS and sense_id is not None:
+            row["blast_radius"] = _sense_blast_radius(conn, sense_id)
+        elif kind in _PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
+            row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
+
+    return rows
+
+
+class ProposalRaceError(Exception):
+    """Raised when a proposal was decided by someone else between read and decide.
+
+    Signals the caller's ``with get_conn()`` block to roll back any writes the
+    dispatched glossary_apply service already made, then respond 409.
+    """
+
+
+def approve_proposal(
+    conn: psycopg2.extensions.connection,
+    proposal_id: int,
+    admin_email: str,
+    decision_note: str | None,
+) -> tuple[str, dict | None]:
+    """Apply an admin-approved glossary_proposal and mark it approved (Stage 4).
+
+    Dispatches to the ``review.glossary_apply`` service matching the
+    proposal's kind, then marks the row approved, then auto-supersedes
+    competing pending sense-wide proposals on the same sense (D5). Everything
+    runs in the caller's transaction — ``get_conn`` commits on clean exit, so
+    a failure at any point (including the race below) rolls back the whole
+    thing, including any glossary/term_usage write the service already made.
+
+    Returns ``(status, result)``:
+      "ok"          -> result is the service's result dict. A ``sense_here``
+                       proposal with no ``proposed_sense_id`` (the free-text,
+                       record-only gold-label path, D9) calls no service and
+                       returns ``{"acknowledged": True}``.
+      "not_found"   -> proposal_id doesn't exist; result is None.
+      "not_pending" -> already decided (by an earlier, already-committed
+                       request); result is None. No writes have happened yet
+                       at this point, so nothing to roll back.
+
+    Raises ``ValueError`` (a glossary_apply service's message — including
+    "term_exists" for add_term, or a stale-proposal guard) or
+    ``ProposalRaceError`` (the ``decide()`` UPDATE below affected zero rows — a
+    concurrent admin request won the race). Both must propagate out of the
+    caller's ``with get_conn()`` block so the transaction rolls back; the
+    caller catches them outside that block to build the 409 response.
+    """
+    repo = ProposalRepository(conn)
+    proposal = repo.get(proposal_id)
+    if proposal is None:
+        return ("not_found", None)
+    if proposal["status"] != "pending":
+        return ("not_pending", None)
+
+    kind = proposal["kind"]
+    sense_id = proposal["sense_id"]
+
+    if kind == PROPOSAL_KIND_CHANGE_EVERYWHERE:
+        result = apply_rendering_change(conn, sense_id, proposal["proposed_sk"])
+    elif kind == PROPOSAL_KIND_WRONG_SENSE_HERE:
+        if proposal["proposed_sense_id"] is not None:
+            result = apply_sense_here(
+                conn,
+                proposal["origin_segment_id"],
+                sense_id,
+                proposal["proposed_sense_id"],
+            )
+        else:
+            result = {"acknowledged": True}
+    elif kind == PROPOSAL_KIND_REMOVE_HERE:
+        result = apply_remove_here(conn, proposal["origin_segment_id"], sense_id)
+    elif kind == PROPOSAL_KIND_RETIRE_EVERYWHERE:
+        result = apply_retire_sense(conn, sense_id)
+    else:  # add_term
+        result = apply_add_term(
+            conn, proposal["latin_lemma"], proposal["proposed_sk"], proposal["note"]
+        )
+
+    if not repo.decide(proposal_id, "approved", admin_email, decision_note):
+        raise ProposalRaceError(f"proposal {proposal_id} was already decided")
+
+    if kind in _SENSE_WIDE_KINDS:
+        repo.supersede_sense_wide_siblings(sense_id, proposal_id, admin_email)
+
+    return ("ok", result)
+
+
+def reject_proposal(
+    conn: psycopg2.extensions.connection,
+    proposal_id: int,
+    admin_email: str,
+    decision_note: str | None,
+) -> str:
+    """Reject a pending proposal. Returns "ok" / "not_found" / "not_pending"."""
+    repo = ProposalRepository(conn)
+    proposal = repo.get(proposal_id)
+    if proposal is None:
+        return "not_found"
+    if proposal["status"] != "pending":
+        return "not_pending"
+    if not repo.decide(proposal_id, "rejected", admin_email, decision_note):
+        return "not_pending"
+    return "ok"
+
+
 def segment_has_locked_sense(
     conn: psycopg2.extensions.connection, segment_id: int, sense_id: int
 ) -> bool:
@@ -738,6 +1000,18 @@ def is_editor(conn: psycopg2.extensions.connection, email: str) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM editor WHERE email = %s", (email,))
         return cur.fetchone() is not None
+
+
+def is_admin(conn: psycopg2.extensions.connection, email: str) -> bool:
+    """Return True if email is an editor row with admin = true (D6, migration 014).
+
+    No admin rows (or no row at all for this email) means False — fail closed,
+    same spirit as the old env-var default. DB-backed, resolved once per login.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT admin FROM editor WHERE email = %s", (email,))
+        row = cur.fetchone()
+        return row is not None and bool(row[0])
 
 
 def approve_segment(conn: psycopg2.extensions.connection, segment_id: int) -> str:

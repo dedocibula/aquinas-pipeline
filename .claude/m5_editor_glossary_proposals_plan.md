@@ -704,8 +704,8 @@ declined confirm resets nothing; human-edited → needs_human.
 
 - [x] Stage 1 — migration 013 + ProposalRepository
 - [x] Stage 2 — apply services + rejected/retired safety
-- [ ] Stage 3 — editor propose UI
-- [ ] Stage 4 — admin queue + apply-on-approve
+- [x] Stage 3 — editor propose UI
+- [x] Stage 4 — admin queue + apply-on-approve
 - [ ] Stage 5 — CLI cost gate + installments
 - [ ] Stage 6 — new-term corpus application step
 - [ ] Stage 7 — e2e + docs

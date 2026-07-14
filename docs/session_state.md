@@ -2,7 +2,42 @@
 
 ## Current Milestone
 M5 — **Step 1 IN PROGRESS** — Prefect orchestration built. Full corpus run not yet executed.
-Also mid-flight: `.claude/m5_editor_glossary_proposals_plan.md` (Stage 1 of 7 done).
+Also mid-flight: `.claude/m5_editor_glossary_proposals_plan.md` (Stage 4 of 7 done).
+
+## This Session (2026-07-14) — Editor Glossary Proposals, Stage 4
+
+Stage 4 (admin gate + admin proposal queue + apply-on-approve) implemented, code-reviewed,
+manually verified against the real local DB, and ready to commit. 1135 tests green repo-wide.
+
+- `migrations/014_editor_admin.sql` — `editor.admin boolean NOT NULL DEFAULT false` (D6).
+  Applied to **local docker DB only**; Railway prod still pending (user deferred it this
+  session — enable the TCP proxy and paste the DSN before Stage 4 code needs to run there).
+- `src/server/db.py` — `is_admin()` (fail-closed: no row or `admin=false` → False),
+  `get_pending_proposals_view()` / `get_cost_per_segment()` / `_sense_blast_radius()` for the
+  queue page, `ProposalRace` exception, `approve_proposal()` / `reject_proposal()` dispatching
+  to the five `glossary_apply.apply_*` functions by kind.
+- `src/server/app.py` — `requires_admin` decorator (both `is_editor` and `is_admin` required),
+  `session["is_admin"]` set at login (only when `is_editor` is also true), `GET
+  /glossary/proposals` page, `POST /api/proposal/<id>/approve` and `/reject`. Approve/reject
+  wrap the whole `with get_conn()` block in try/except so `ProposalRace` (lost the approve
+  race) and `ValueError` (e.g. `add_term` → `term_exists`) both roll back any partial writes
+  before turning into a 409.
+- `src/server/templates/glossary_proposals.html` (new), `base.html` (admin-only nav link),
+  `static/proposals.js` / `static/style.css` — three-section admin queue UI (sense-wide /
+  per-segment / new terms) with approve/reject + optional decision note per row.
+- **Bug found and fixed during code review**: `_sense_blast_radius()`'s "marginal restage"
+  count was inverted (`total - not_already_stale` instead of `not_already_stale`), which would
+  have shown admins the wrong segment count and dollar estimate on `rendering`/`retire_sense`
+  approvals. Fixed; added a regression test (`test_sense_blast_radius_marginal_is_not_already_stale_count`)
+  that pins the correct formula.
+- Manually verified end-to-end against the real local DB (propose as editor → queue shows
+  correct blast radius/cost as admin → approve → confirmed `sense_rendering` update +
+  `glossary_sense.version` bump for `rendering`, and tombstone + segment reset to `pending`
+  for `remove_here` → re-approve correctly 409s "not pending"). All test mutations reverted.
+
+**Next step:** Stage 5 — CLI cost gate for `rerun_stale` (the paid retranslation step the
+owner runs manually; approve above never triggers it — D4). Read
+`.claude/m5_editor_glossary_proposals_plan.md` §0 and the Stage 5 section before starting.
 
 ## This Session (2026-07-12) — Editor Glossary Proposals, Stage 1
 

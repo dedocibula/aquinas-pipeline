@@ -31,15 +31,20 @@ load_dotenv()
 
 from export.xliff import export_pars_bytes  # noqa: E402
 from server.db import (  # noqa: E402
+    PROPOSAL_KIND_ADD_TERM,
     PROPOSAL_KIND_CHANGE_EVERYWHERE,
     PROPOSAL_KIND_REMOVE_HERE,
     PROPOSAL_KIND_RETIRE_EVERYWHERE,
     PROPOSAL_KIND_WRONG_SENSE_HERE,
+    ProposalRaceError,
+    approve_proposal,
     approve_segment,
     get_all_questions,
     get_article_segments,
+    get_cost_per_segment,
     get_distinct_pars,
     get_pending_proposal_counts,
+    get_pending_proposals_view,
     get_prev_next_article,
     get_question_articles,
     get_question_preamble_segment,
@@ -49,9 +54,11 @@ from server.db import (  # noqa: E402
     get_structural_formulas,
     get_term_senses,
     get_translation_progress,
+    is_admin,
     is_editor,
     propose_add_term,
     propose_sense_change,
+    reject_proposal,
     review_segment,
     unapprove_segment,
 )
@@ -83,6 +90,15 @@ def requires_editor(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("is_editor"):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def requires_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("is_editor") or not session.get("is_admin"):
             return jsonify({"ok": False, "error": "forbidden"}), 403
         return f(*args, **kwargs)
     return decorated
@@ -184,8 +200,10 @@ def auth_callback():
         return jsonify({"ok": False, "error": "no email in token"}), 400
     with get_conn() as conn:
         editor = is_editor(conn, email)
+        admin = is_admin(conn, email) if editor else False
     session["email"] = email
     session["is_editor"] = editor
+    session["is_admin"] = admin
     return redirect(url_for("index"))
 
 
@@ -200,6 +218,7 @@ def _inject_user():
     return {
         "current_user_email": session.get("email"),
         "is_editor": session.get("is_editor", False),
+        "is_admin": session.get("is_admin", False),
     }
 
 
@@ -548,6 +567,74 @@ def propose_term_route():
             {"ok": False, "error": f"term_exists: '{latin_lemma}' is already in the glossary"}
         ), 400
     return jsonify({"ok": True, "proposal_id": proposal_id})
+
+
+# ---------------------------------------------------------------------------
+# Admin proposal queue (Stage 4 of the editor-glossary-proposals plan)
+# ---------------------------------------------------------------------------
+
+_SENSE_WIDE_PROPOSAL_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
+_PER_SEGMENT_PROPOSAL_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
+
+
+@app.route("/glossary/proposals")
+@requires_admin
+def glossary_proposals_page():
+    """Admin queue: every pending proposal, grouped by impact, with blast
+    radius / cost preview (sense-wide) or origin locator (per-segment)."""
+    with get_conn() as conn:
+        proposals = get_pending_proposals_view(conn)
+        cost_per_segment = get_cost_per_segment(conn)
+    return render_template(
+        "glossary_proposals.html",
+        sense_wide=[p for p in proposals if p["kind"] in _SENSE_WIDE_PROPOSAL_KINDS],
+        per_segment=[p for p in proposals if p["kind"] in _PER_SEGMENT_PROPOSAL_KINDS],
+        add_terms=[p for p in proposals if p["kind"] == PROPOSAL_KIND_ADD_TERM],
+        cost_per_segment=cost_per_segment,
+        ltree_to_url=_ltree_to_url_locator,
+    )
+
+
+@app.route("/api/proposal/<int:proposal_id>/approve", methods=["POST"])
+@requires_admin
+def approve_proposal_route(proposal_id: int):
+    """Apply an approved proposal ($0 — no translation is ever triggered here, D4).
+
+    Body: ``{note?}`` — optional admin decision note.
+    """
+    data = request.get_json(silent=True) or {}
+    decision_note = (data.get("note") or "").strip() or None
+
+    try:
+        with get_conn() as conn:
+            status, result = approve_proposal(
+                conn, proposal_id, session["email"], decision_note
+            )
+    except ProposalRaceError:
+        return jsonify({"ok": False, "error": "already decided"}), 409
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
+
+    if status == "not_found":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if status == "not_pending":
+        return jsonify({"ok": False, "error": "not pending"}), 409
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/proposal/<int:proposal_id>/reject", methods=["POST"])
+@requires_admin
+def reject_proposal_route(proposal_id: int):
+    """Reject a pending proposal. Body: ``{note?}`` — optional admin decision note."""
+    data = request.get_json(silent=True) or {}
+    decision_note = (data.get("note") or "").strip() or None
+    with get_conn() as conn:
+        status = reject_proposal(conn, proposal_id, session["email"], decision_note)
+    if status == "not_found":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if status == "not_pending":
+        return jsonify({"ok": False, "error": "not pending"}), 409
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

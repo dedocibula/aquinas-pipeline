@@ -14,6 +14,9 @@
       <a href="/">Aquinas Pipeline</a>
       {% block breadcrumb %}{% endblock %}
       <span class="nav-user">
+        {% if is_admin %}
+        <a href="/glossary/proposals">Proposals</a> &mdash;
+        {% endif %}
         {% if current_user_email %}
         {{ current_user_email }} &mdash; <a href="/logout">Logout</a>
         {% else %}

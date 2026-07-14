@@ -253,4 +253,42 @@
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Admin proposal queue (Stage 4) — approve / reject
+  // ---------------------------------------------------------------------------
+
+  function _decideProposal(btn, action) {
+    var row = btn.closest('tr');
+    var proposalId = btn.dataset.proposalId;
+    var note = row.querySelector('.decision-note').value.trim();
+    var status = row.querySelector('.decision-status');
+    var buttons = row.querySelectorAll('.btn-approve-proposal, .btn-reject-proposal');
+
+    buttons.forEach(function (b) { b.disabled = true; });
+    status.textContent = action === 'approve' ? 'Applying…' : 'Rejecting…';
+
+    _postJson('/api/proposal/' + proposalId + '/' + action, { note: note })
+      .then(function (result) {
+        if (result.status === 200 && result.data.ok) {
+          status.textContent = action === 'approve' ? 'Applied.' : 'Rejected.';
+          row.classList.add('proposal-decided');
+          setTimeout(function () { row.remove(); }, 1200);
+        } else {
+          buttons.forEach(function (b) { b.disabled = false; });
+          status.textContent = (result.data && result.data.error) || (action + ' failed.');
+        }
+      })
+      .catch(function () {
+        buttons.forEach(function (b) { b.disabled = false; });
+        status.textContent = action + ' failed — server error.';
+      });
+  }
+
+  document.querySelectorAll('.btn-approve-proposal').forEach(function (btn) {
+    btn.addEventListener('click', function () { _decideProposal(btn, 'approve'); });
+  });
+  document.querySelectorAll('.btn-reject-proposal').forEach(function (btn) {
+    btn.addEventListener('click', function () { _decideProposal(btn, 'reject'); });
+  });
+
 }());
