@@ -26,20 +26,124 @@ def test_translate_corpus_step_uses_ctx_work_id(tmp_path):
     fn.assert_called_once_with(work_id=3)
 
 
-def test_rerun_stale_step_delegates(tmp_path):
-    with patch("translate.run.rerun_stale") as fn:
-        result = RerunStaleStep().run(_ctx(tmp_path))
-    fn.assert_called_once_with(work_id=1)
-    assert result.ok and result.name == "rerun-stale"
-
-
-def test_reset_corpus_step_delegates(tmp_path):
-    with patch("translate.run.reset_corpus") as fn:
-        result = ResetCorpusStep().run(_ctx(tmp_path))
-    fn.assert_called_once_with(work_id=1)
-    assert result.ok and result.name == "reset-corpus"
-
-
 def test_translate_steps_declare_stage():
     for step in (TranslateCorpusStep, RerunStaleStep, ResetCorpusStep):
         assert step.stage == "translate"
+
+
+# ── owner-gate verify() ──────────────────────────────────────────────────────
+
+
+def test_rerun_stale_verify_false_without_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    assert RerunStaleStep().verify(_ctx(tmp_path)) is False
+
+
+def test_rerun_stale_verify_false_with_blank_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "   ")
+    assert RerunStaleStep().verify(_ctx(tmp_path)) is False
+
+
+def test_rerun_stale_verify_true_with_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    assert RerunStaleStep().verify(_ctx(tmp_path)) is True
+
+
+def test_reset_corpus_verify_false_without_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    assert ResetCorpusStep().verify(_ctx(tmp_path)) is False
+
+
+def test_reset_corpus_verify_true_with_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    assert ResetCorpusStep().verify(_ctx(tmp_path)) is True
+
+
+# ── RerunStaleStep.run() — cost preview + confirm gate ──────────────────────
+
+
+def test_rerun_stale_step_nothing_stale_skips_confirm(tmp_path):
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(0, 0.0)),
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(read=lambda _: "y").run(_ctx(tmp_path))
+    fn.assert_not_called()
+    assert result.ok and "nothing to restage" in result.summary
+
+
+def test_rerun_stale_step_confirmed_invokes_flow(tmp_path):
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(read=lambda _: "y").run(_ctx(tmp_path))
+    fn.assert_called_once_with(work_id=1, limit=None)
+    assert result.ok and "restaged 5 segments" in result.summary
+
+
+def test_rerun_stale_step_declined_cancels(tmp_path):
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(read=lambda _: "n").run(_ctx(tmp_path))
+    fn.assert_not_called()
+    assert result.ok and "cancelled" in result.summary
+
+
+def test_rerun_stale_step_max_run_usd_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("AQUINAS_MAX_RUN_USD", "1.00")
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(read=lambda _: "y").run(_ctx(tmp_path))
+    fn.assert_not_called()
+    assert result.ok is False
+    assert "AQUINAS_MAX_RUN_USD" in result.summary
+
+
+def test_rerun_stale_step_max_run_usd_under_cap_proceeds(tmp_path, monkeypatch):
+    monkeypatch.setenv("AQUINAS_MAX_RUN_USD", "5.00")
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(read=lambda _: "y").run(_ctx(tmp_path))
+    fn.assert_called_once_with(work_id=1, limit=None)
+    assert result.ok
+
+
+def test_rerun_stale_step_forwards_limit(tmp_path):
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)) as preview,
+        patch("translate.run.rerun_stale") as fn,
+    ):
+        result = RerunStaleStep(limit=5, read=lambda _: "y").run(_ctx(tmp_path))
+    preview.assert_called_once_with(1, limit=5)
+    fn.assert_called_once_with(work_id=1, limit=5)
+    assert result.ok
+
+
+# ── ResetCorpusStep.run() — same gate shape ─────────────────────────────────
+
+
+def test_reset_corpus_step_confirmed_invokes_flow(tmp_path):
+    with (
+        patch("translate.run.preview_reset_corpus_cost", return_value=(10, 4.5)),
+        patch("translate.run.reset_corpus") as fn,
+    ):
+        result = ResetCorpusStep(read=lambda _: "yes").run(_ctx(tmp_path, work_id=2))
+    fn.assert_called_once_with(work_id=2)
+    assert result.ok and "restaged 10 segments" in result.summary
+
+
+def test_reset_corpus_step_declined_cancels(tmp_path):
+    with (
+        patch("translate.run.preview_reset_corpus_cost", return_value=(10, 4.5)),
+        patch("translate.run.reset_corpus") as fn,
+    ):
+        result = ResetCorpusStep(read=lambda _: "").run(_ctx(tmp_path))
+    fn.assert_not_called()
+    assert result.ok and "cancelled" in result.summary

@@ -9,11 +9,15 @@ from translate.run import (
     ArticleResult,
     _avg_iterations,
     _cache_hit_rate,
+    _cli_main,
+    _cost_per_segment,
     _fetch_needs_human_rows,
     _filter_locators,
     _total_cost,
     _write_needs_human_report,
     _write_production_report,
+    preview_reset_corpus_cost,
+    preview_stale_cost,
     rerun_stale,
 )
 
@@ -380,3 +384,222 @@ def test_translate_article_task_builds_segment_records():
     assert rec["iterations_used"] == 2
     assert abs(rec["cost_usd"] - 0.002) < 1e-9
     assert rec["failure_classes"][0]["term"] == "rozum"
+
+
+# ── _cost_per_segment ────────────────────────────────────────────────────────
+
+
+def test_cost_per_segment_uses_last_run():
+    last_run = {"total_cost_usd": 5.0, "total_segments": 100}
+    assert _cost_per_segment(last_run) == 0.05
+
+
+def test_cost_per_segment_falls_back_without_last_run():
+    from ingest.coverage_report import _AVG_SEGMENT_TOKENS, _RETRANSLATION_COST_PER_TOKEN
+
+    expected = _AVG_SEGMENT_TOKENS * _RETRANSLATION_COST_PER_TOKEN
+    assert _cost_per_segment(None) == expected
+
+
+def test_cost_per_segment_falls_back_on_zero_total_segments():
+    from ingest.coverage_report import _AVG_SEGMENT_TOKENS, _RETRANSLATION_COST_PER_TOKEN
+
+    expected = _AVG_SEGMENT_TOKENS * _RETRANSLATION_COST_PER_TOKEN
+    assert _cost_per_segment({"total_cost_usd": 5.0, "total_segments": 0}) == expected
+
+
+# ── preview_stale_cost ───────────────────────────────────────────────────────
+
+
+def test_preview_stale_cost_excludes_human_edited():
+    with (
+        patch("translate.run.get_conn"),
+        patch(_PATCH_STALE, return_value=[3, 1, 2]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[2]),
+        patch(
+            "translate.run.RunRepository.last_run",
+            return_value={"total_cost_usd": 2.0, "total_segments": 100},
+        ),
+    ):
+        n, cost = preview_stale_cost(work_id=1)
+    assert n == 2  # segments 1, 3 — 2 is human-edited
+    assert abs(cost - 2 * 0.02) < 1e-9
+
+
+def test_preview_stale_cost_limit_applied_before_human_edit_exclusion():
+    """limit slices the raw sorted stale set first — mirrors rerun_stale's own order."""
+    with (
+        patch("translate.run.get_conn"),
+        patch(_PATCH_STALE, return_value=[3, 1, 2]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[1]),
+        patch(
+            "translate.run.RunRepository.last_run",
+            return_value={"total_cost_usd": 1.0, "total_segments": 10},
+        ),
+    ):
+        n, cost = preview_stale_cost(work_id=1, limit=2)
+    # sorted stale = [1, 2, 3]; limit=2 -> [1, 2]; 1 is human-edited -> payable=[2]
+    assert n == 1
+    assert abs(cost - 0.1) < 1e-9
+
+
+def test_preview_stale_cost_no_stale_segments():
+    with (
+        patch("translate.run.get_conn"),
+        patch(_PATCH_STALE, return_value=[]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[]),
+        patch("translate.run.RunRepository.last_run", return_value=None),
+    ):
+        n, cost = preview_stale_cost(work_id=1)
+    assert n == 0
+    assert cost == 0.0
+
+
+# ── rerun_stale limit slicing ────────────────────────────────────────────────
+
+
+def test_rerun_stale_limit_restages_only_first_n():
+    with (
+        patch("translate.run.get_conn"),
+        patch(_PATCH_STALE, return_value=[5, 1, 3]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[]),
+        patch(_PATCH_FLAG) as mock_flag,
+        patch(_PATCH_RESET) as mock_reset,
+        patch("translate.run.translate_corpus") as mock_translate,
+    ):
+        rerun_stale.fn(work_id=1, limit=2)
+
+    mock_flag.assert_not_called()
+    reset_ids = mock_reset.call_args.args[0]
+    assert reset_ids == [1, 3]  # sorted [1, 3, 5][:2]
+    mock_translate.assert_called_once_with(1, flow_name="rerun_stale")
+
+
+def test_rerun_stale_no_limit_restages_all():
+    with (
+        patch("translate.run.get_conn"),
+        patch(_PATCH_STALE, return_value=[5, 1, 3]),
+        patch(_PATCH_HUMAN_EDITED, return_value=[]),
+        patch(_PATCH_FLAG),
+        patch(_PATCH_RESET) as mock_reset,
+        patch("translate.run.translate_corpus"),
+    ):
+        rerun_stale.fn(work_id=1)
+
+    reset_ids = mock_reset.call_args.args[0]
+    assert sorted(reset_ids) == [1, 3, 5]
+
+
+# ── preview_reset_corpus_cost ────────────────────────────────────────────────
+
+
+def test_preview_reset_corpus_cost_excludes_human_edited():
+    with (
+        patch("translate.run.get_conn"),
+        patch(
+            "translate.run.SegmentRepository.get_translated_body_segment_ids",
+            return_value=[1, 2, 3],
+        ),
+        patch(_PATCH_HUMAN_EDITED, return_value=[3]),
+        patch(
+            "translate.run.RunRepository.last_run",
+            return_value={"total_cost_usd": 1.0, "total_segments": 10},
+        ),
+    ):
+        n, cost = preview_reset_corpus_cost(work_id=1)
+    assert n == 2
+    assert abs(cost - 0.2) < 1e-9
+
+
+# ── _cli_main — the CLI must share the same owner-gate as the pipeline steps ──
+
+
+def test_cli_main_rerun_stale_refuses_without_owner_token(monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    with (
+        patch("translate.run.preview_stale_cost") as mock_preview,
+        patch("translate.run.rerun_stale") as mock_flow,
+    ):
+        try:
+            _cli_main(["--flow", "rerun_stale"])
+            raised = False
+        except SystemExit as exc:
+            raised = True
+            assert exc.code != 0
+    assert raised
+    mock_preview.assert_not_called()
+    mock_flow.assert_not_called()
+
+
+def test_cli_main_reset_corpus_refuses_without_owner_token(monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    with (
+        patch("translate.run.preview_reset_corpus_cost") as mock_preview,
+        patch("translate.run.reset_corpus") as mock_flow,
+    ):
+        try:
+            _cli_main(["--flow", "reset_corpus"])
+            raised = False
+        except SystemExit:
+            raised = True
+    assert raised
+    mock_preview.assert_not_called()
+    mock_flow.assert_not_called()
+
+
+def test_cli_main_rerun_stale_declined_never_calls_flow(monkeypatch, capsys):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as mock_flow,
+        patch("builtins.input", return_value="n"),
+    ):
+        _cli_main(["--flow", "rerun_stale"])
+    mock_flow.assert_not_called()
+    assert "cancelled" in capsys.readouterr().out
+
+
+def test_cli_main_rerun_stale_confirmed_invokes_flow_with_limit(monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)) as mock_preview,
+        patch("translate.run.rerun_stale") as mock_flow,
+        patch("builtins.input", return_value="y"),
+    ):
+        _cli_main(["--flow", "rerun_stale", "--work-id", "2", "--limit", "5"])
+    mock_preview.assert_called_once_with(2, limit=5)
+    mock_flow.assert_called_once_with(work_id=2, limit=5)
+
+
+def test_cli_main_rerun_stale_max_run_usd_refused(monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    monkeypatch.setenv("AQUINAS_MAX_RUN_USD", "1.00")
+    with (
+        patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
+        patch("translate.run.rerun_stale") as mock_flow,
+    ):
+        try:
+            _cli_main(["--flow", "rerun_stale"])
+            raised = False
+        except SystemExit:
+            raised = True
+    assert raised
+    mock_flow.assert_not_called()
+
+
+def test_cli_main_reset_corpus_confirmed_invokes_flow(monkeypatch):
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
+    with (
+        patch("translate.run.preview_reset_corpus_cost", return_value=(10, 4.5)),
+        patch("translate.run.reset_corpus") as mock_flow,
+        patch("builtins.input", return_value="y"),
+    ):
+        _cli_main(["--flow", "reset_corpus", "--work-id", "3"])
+    mock_flow.assert_called_once_with(work_id=3)
+
+
+def test_cli_main_translate_corpus_not_gated(monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    with patch("translate.run.translate_corpus") as mock_flow:
+        _cli_main(["--flow", "translate_corpus", "--work-id", "1"])
+    mock_flow.assert_called_once_with(work_id=1, pars=None, max_question=None)

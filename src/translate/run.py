@@ -384,13 +384,52 @@ def _guard_and_reset(
     return to_reset, human_edited
 
 
+def _cost_per_segment(last_run: dict | None) -> float:
+    """$/segment from the most recent translation_run, falling back to token constants.
+
+    The fallback mirrors ingest.coverage_report's own retranslation estimate
+    (avg segment tokens × DeepSeek input rate) rather than duplicating the
+    numbers, so the two estimates never drift apart.
+    """
+    if last_run:
+        total_segments = last_run.get("total_segments") or 0
+        if total_segments > 0:
+            return float(last_run.get("total_cost_usd") or 0.0) / total_segments
+    from ingest.coverage_report import _AVG_SEGMENT_TOKENS, _RETRANSLATION_COST_PER_TOKEN
+
+    return _AVG_SEGMENT_TOKENS * _RETRANSLATION_COST_PER_TOKEN
+
+
+def preview_stale_cost(work_id: int = 1, limit: int | None = None) -> tuple[int, float]:
+    """Read-only estimate of what the next rerun_stale(work_id, limit) would pay for.
+
+    Mirrors rerun_stale's own mechanics exactly, so the preview and the actual
+    run never disagree: sort the stale set for determinism, apply `limit` to
+    that raw set first (the installment slice), THEN exclude human-edited
+    segments (they get flagged, never paid for). Returns (n_segments, est_usd).
+    """
+    with get_conn() as conn:
+        seg_repo = SegmentRepository(conn)
+        stale = sorted(seg_repo.get_stale_segments(work_id))
+        if limit is not None:
+            stale = stale[:limit]
+        human_edited = set(seg_repo.get_human_edited_segments(stale))
+        payable = [s for s in stale if s not in human_edited]
+        cost_per_segment = _cost_per_segment(RunRepository(conn).last_run())
+    return len(payable), len(payable) * cost_per_segment
+
+
 @flow(name="rerun-stale")
-def rerun_stale(work_id: int = 1) -> None:
+def rerun_stale(work_id: int = 1, limit: int | None = None) -> None:
     """Reset stale segments to pending, then re-translate.
 
     A segment is stale when any glossary sense it used has been updated
     (sense_version_used < current glossary_sense.version). This flow is run
     after import_approvals.py bumps sense versions following a review cycle.
+
+    limit: restage only the first N stale segment_ids (sorted, deterministic).
+    The rest stay stale and are picked up by a later call — the mechanism for
+    paying for a large stale set in installments. None = restage all of them.
 
     Human-edit guard: stale segments whose Slovak text was already edited by a
     human are NOT reset — re-translation would overwrite reviewed work. They
@@ -403,6 +442,8 @@ def rerun_stale(work_id: int = 1) -> None:
         if not stale:
             log.info("No stale segments — nothing to do.")
             return
+        if limit is not None:
+            stale = sorted(stale)[:limit]
 
         to_reset, human_edited = _guard_and_reset(
             seg_repo,
@@ -420,6 +461,21 @@ def rerun_stale(work_id: int = 1) -> None:
         log.info("Resetting %d stale segments to pending", len(to_reset))
 
     translate_corpus(work_id, flow_name="rerun_stale")
+
+
+def preview_reset_corpus_cost(work_id: int = 1) -> tuple[int, float]:
+    """Read-only estimate of what reset_corpus(work_id) would pay for.
+
+    Same shape as preview_stale_cost: exclude human-edited segments (guarded,
+    never paid for) from the payable count before pricing it.
+    """
+    with get_conn() as conn:
+        seg_repo = SegmentRepository(conn)
+        body_ids = seg_repo.get_translated_body_segment_ids(work_id)
+        human_edited = set(seg_repo.get_human_edited_segments(body_ids))
+        payable = [s for s in body_ids if s not in human_edited]
+        cost_per_segment = _cost_per_segment(RunRepository(conn).last_run())
+    return len(payable), len(payable) * cost_per_segment
 
 
 @flow(name="reset-corpus")
@@ -570,9 +626,8 @@ def _fetch_needs_human_rows(conn, work_id: int = 1) -> list[dict]:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
+def _cli_main(argv: list[str] | None = None) -> None:
+    """Entrypoint body, factored out so tests can drive it without a subprocess."""
     parser = argparse.ArgumentParser(description="Full-corpus translation flows")
     parser.add_argument(
         "--flow",
@@ -593,15 +648,51 @@ if __name__ == "__main__":
         metavar="N",
         help="Restrict to first N questions per pars",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="rerun_stale only: restage at most the first N stale segments (installments)",
+    )
+    args = parser.parse_args(argv)
 
-    if args.flow == "rerun_stale":
-        rerun_stale(work_id=args.work_id)
-    elif args.flow == "reset_corpus":
-        reset_corpus(work_id=args.work_id)
+    if args.flow in ("rerun_stale", "reset_corpus"):
+        # Paid, corpus-scale flows share the same owner-gate + cost-preview +
+        # confirm mechanics as the pipeline steps (translate.steps), invoked
+        # here directly rather than via Runner/PipelineContext since this is a
+        # bare CLI entrypoint. Reusing the gate (not re-implementing it) keeps
+        # this path and the interactive-menu path from ever disagreeing.
+        from translate.steps import _confirm_and_spend, _owner_token_present
+
+        if not _owner_token_present():
+            parser.error(
+                "AQUINAS_OWNER_TOKEN not set — refusing to run a paid flow from the CLI"
+            )
+        if args.flow == "rerun_stale":
+            n, cost = preview_stale_cost(args.work_id, limit=args.limit)
+            result = _confirm_and_spend(
+                "rerun_stale",
+                n,
+                cost,
+                lambda: rerun_stale(work_id=args.work_id, limit=args.limit),
+                read=input,
+            )
+        else:
+            n, cost = preview_reset_corpus_cost(args.work_id)
+            result = _confirm_and_spend(
+                "reset_corpus", n, cost, lambda: reset_corpus(work_id=args.work_id), read=input
+            )
+        print(result.summary)
+        if not result.ok:
+            raise SystemExit(1)
     else:
         translate_corpus(
             work_id=args.work_id,
             pars=args.pars,
             max_question=args.max_questions,
         )
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    _cli_main()
