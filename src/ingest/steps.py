@@ -154,7 +154,7 @@ class ApplyNewTermsStep(BaseStep):
             sample_locators,
         )
         from storage.db import get_conn
-        from translate.steps import _confirm_and_spend
+        from translate.steps import _confirm_and_spend, _work_id
 
         with get_conn() as conn:
             targets = find_target_proposals(conn)
@@ -162,7 +162,7 @@ class ApplyNewTermsStep(BaseStep):
             return StepResult(name=self.name, ok=True, summary="nothing to apply")
 
         print(f"[apply-new-terms] Re-resolving full corpus for {len(targets)} new term(s)...")
-        results = resolve_and_diff(targets)
+        results = resolve_and_diff(targets, work_id=_work_id(ctx))
         for r in results:
             locators = ", ".join(sample_locators(r.gained_segment_ids))
             print(

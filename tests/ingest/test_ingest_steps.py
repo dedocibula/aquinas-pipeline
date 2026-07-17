@@ -121,6 +121,28 @@ def test_apply_new_terms_resolves_but_no_segment_gained(tmp_path):
     assert "no already-translated segment gained a lock" in result.summary
 
 
+def test_apply_new_terms_passes_ctx_work_id(tmp_path):
+    targets = [{"proposal_id": 1, "latin_lemma": "ens", "term_id": 10, "sense_ids": [100]}]
+    ctx = PipelineContext(reports_dir=tmp_path, work_id=2)
+    with (
+        patch("storage.db.get_conn") as get_conn,
+        patch("ingest.apply_new_terms.find_target_proposals", return_value=targets),
+        patch(
+            "ingest.apply_new_terms.resolve_and_diff",
+            return_value=[
+                TermApplyResult(
+                    proposal_id=1, latin_lemma="ens", term_id=10, sense_ids=[100],
+                    gained_segment_ids=[],
+                )
+            ],
+        ) as resolve_fn,
+        patch("ingest.apply_new_terms.sample_locators", return_value=[]),
+    ):
+        get_conn.return_value.__enter__.return_value = object()
+        ApplyNewTermsStep().run(ctx)
+    resolve_fn.assert_called_once_with(targets, work_id=2)
+
+
 def test_apply_new_terms_confirms_and_resets_gained_segments(tmp_path):
     targets = [{"proposal_id": 1, "latin_lemma": "ens", "term_id": 10, "sense_ids": [100]}]
     with (
