@@ -2,7 +2,33 @@
 
 ## Current Milestone
 M5 — **Step 1 IN PROGRESS** — Prefect orchestration built. Full corpus run not yet executed.
-Also mid-flight: `.claude/m5_editor_glossary_proposals_plan.md` (Stage 4 of 7 done).
+`.claude/m5_editor_glossary_proposals_plan.md` is **code-complete, all 7 stages done**;
+prod deploy/migration is the only remaining piece (owner action, not a build stage).
+
+## This Session (2026-07-17) — Editor Glossary Proposals, Stage 7 (final)
+
+Stage 7 (e2e verification + docs) done. Full suite green (1188 tests). Ran a full local e2e
+loop against the real local docker DB (26k segments) via Flask's test client with a
+manually-set session: all five proposal kinds (`rendering`, `sense_here`, `remove_here`,
+`retire_sense`, `add_term`) proposed as editor → approved as admin → DB effect verified
+against the D9 table in the plan, then all test mutations were reverted. Auth matrix (403 for
+anonymous/non-admin) and the CLI cost-gate mechanics (`RerunStaleStep`/`ApplyNewTermsStep`
+both fail closed without `AQUINAS_OWNER_TOKEN`) verified directly. `editor.admin=true` was
+left set for `dedo.cibula@gmail.com` on the **local** DB for future manual testing.
+
+**Explicitly skipped this session (user deferred):** the prod smoke test. Prod DB has not
+been migrated (013 `glossary_proposal` + 014 `editor.admin`) and this code has not been
+pushed/deployed yet.
+
+**Next step (owner action, not a plan stage):** when ready to ship — (1) DDL-review and apply
+migrations 013 + 014 to Railway prod (`.claude/m5_editor_glossary_proposals_plan.md` §0
+"Database access" for the proxy/DSN procedure), (2) push + deploy, (3) flip
+`editor.admin=true` for the real admin account(s) via psql, (4) confirm `AQUINAS_OWNER_TOKEN`
+/ `AQUINAS_MAX_RUN_USD` are set wherever the CLI runs (code fails closed without them), (5) do
+one $0 propose→approve smoke test on prod with the user present — no paid retranslation until
+the owner explicitly runs the gated CLI step. After that, the Google-Sheets review cycle
+(`src/review/export_sheet.py`/`import_approvals.py`) can be retired as a surface per the
+plan's §0 framing (its approval logic already lives on in `glossary_apply.py`).
 
 ## This Session (2026-07-14) — Editor Glossary Proposals, Stage 4
 

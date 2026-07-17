@@ -708,7 +708,7 @@ declined confirm resets nothing; human-edited → needs_human.
 - [x] Stage 4 — admin queue + apply-on-approve
 - [x] Stage 5 — CLI cost gate + installments
 - [x] Stage 6 — new-term corpus application step
-- [ ] Stage 7 — e2e + docs
+- [x] Stage 7 — e2e + docs
 
 **Stage 1 note (2026-07-12):** migration 013 applied to local docker DB only; Railway prod
 still pending (deferred by user this session — enable proxy + provide DSN before Stage 2
@@ -767,3 +767,37 @@ new `tests/ingest/test_apply_new_terms.py`, and `tests/ingest/
 test_ingest_steps.py`). Not yet run against a real DB (resolver.run is fully
 mocked in tests, per house pattern for unit tests). Proceeding to Stage 7 next
 session (e2e verification requires prod/local DB access).
+
+**Stage 7 note (2026-07-17):** full suite green (1188 tests). Local e2e run against
+the real local docker DB (26k segments, 553k term_usage rows) via Flask's test
+client with a manually-set session (bypassing OAuth): exercised all five proposal
+kinds end-to-end (propose as editor → approve as admin) and confirmed each DB
+effect matches the D9 table exactly — `rendering` wrote the human sk rendering and
+bumped version (3←2) only because it changed; `retire_sense` set status='retired'
+and always bumped; `sense_here` re-pointed the term_usage row with
+sense_version_used set to the target's current version (not stale) and reset the
+segment to pending; `remove_here` tombstoned the row (`status='rejected'`) and
+reset the segment; `add_term` created the glossary term + approved sense + human
+rendering with no segment mutation (D7). Auth matrix confirmed: anonymous and
+non-admin editors get 403 on the queue page and approve endpoint. CLI gate
+mechanics verified directly: `RerunStaleStep.verify()`/`ApplyNewTermsStep.verify()`
+both fail closed (False) without `AQUINAS_OWNER_TOKEN`; with 0 stale segments
+`RerunStaleStep.run()` short-circuits to "nothing to restage" without prompting or
+spending. Did not run `ApplyNewTermsStep`'s full-corpus resolve live (slow over
+26k segments; its diff logic is already covered by Stage 6's mocked-resolver unit
+tests). All e2e test mutations (5 proposal rows, 2 sense version bumps, 2
+term_usage/segment changes, 1 fake glossary term) were reverted after verification;
+`editor.admin=true` was left set for `dedo.cibula@gmail.com` on the local DB per
+user request, for future manual testing.
+
+**Prod smoke test (§7 step 3) explicitly skipped this session** — user has not yet
+migrated the prod DB (013/014) or pushed this code. Remaining before that step:
+apply migrations 013 + `editor.admin` to Railway prod (DDL review required per
+house rule), deploy, flip `editor.admin=true` for the real admin account(s), then
+propose/approve one $0 change on prod with the user present. No paid retranslation
+until the owner explicitly runs the gated CLI step.
+
+Docs cross-references updated this session: `.claude/m5_reviewer_corrections_plan.md`
+item 6 in the deferred backlog marked IMPLEMENTED, pointing back here.
+`.claude/database.md` already fully documented `glossary_proposal` and the widened
+`term_usage`/`glossary_sense` status CHECKs as of Stage 1 — no changes needed.

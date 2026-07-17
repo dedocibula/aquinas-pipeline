@@ -390,6 +390,12 @@ replace that leading substring with `"Odpovedám, že"`. **Never touch `human` r
 5. **Polisher prompt rethink** — rewrite `prompts/polish_system.txt` to style-only + wire an
    edit-distance-to-`(sk,human)` convergence metric into `src/optimize/polish_optimize_loop.sh` /
    `run_compare.py`; wait until more gold accumulates.
-6. **Web glossary-editing UI** — enabled by Phase 2's gate: editors propose glossary changes in the
-   Flask app; only the owner triggers the paid retranslate via the pipeline. The engine
-   (`bump_sense_version` → `get_stale_segments` → `rerun_stale`) already exists.
+6. **Web glossary-editing UI** — **IMPLEMENTED** (2026-07-17) by
+   `.claude/m5_editor_glossary_proposals_plan.md`, Stages 1–7: editors propose glossary changes
+   in the Flask app (`glossary_proposal` table, five kinds — rendering/sense_here/remove_here/
+   retire_sense/add_term), an admin queue reviews with blast-radius/cost preview and applies on
+   approve ($0, no spend), and only the owner triggers the paid retranslate via the CLI gate
+   (`RerunStaleStep`/`ApplyNewTermsStep`, this Phase 2's gate — Stage 5 detected it already
+   existed and added nothing new). The engine (`bump_sense_version` → `get_stale_segments` →
+   `rerun_stale`) is unchanged, just fed by the new proposal/approval surface instead of the
+   retired Sheets review cycle.
