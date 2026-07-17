@@ -289,3 +289,17 @@ def test_translation_status_counts(fake_conn):
 def test_translation_status_counts_empty(fake_conn):
     conn = fake_conn(fetchall_rows=[])
     assert SegmentRepository(conn).translation_status_counts() == {}
+
+
+# ── get_locators ─────────────────────────────────────────────────────────────
+
+
+def test_get_locators_returns_mapping(fake_conn):
+    conn = fake_conn(fetchall_rows=[(1, "I.q1.a1"), (2, "I.q1.a2")])
+    assert SegmentRepository(conn).get_locators([1, 2]) == {1: "I.q1.a1", 2: "I.q1.a2"}
+
+
+def test_get_locators_empty_ids_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert SegmentRepository(conn).get_locators([]) == {}
+    assert conn.executed == []

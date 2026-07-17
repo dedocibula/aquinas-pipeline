@@ -57,3 +57,40 @@ def test_write_term_usage_serializes_signals(fake_conn):
     # signals param is JSON-serialized (6th bound value; trailing params are the
     # NOT EXISTS guard's segment_id/sense_id)
     assert insert[1][5] == '{"votes": 3}'
+
+
+# ── any_usage_for_senses / segments_for_senses (Stage 6) ────────────────────
+
+
+def test_any_usage_for_senses_empty_list_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert TermUsageRepository(conn).any_usage_for_senses([]) is False
+    assert conn.executed == []
+
+
+def test_any_usage_for_senses_true_when_row_exists(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    assert TermUsageRepository(conn).any_usage_for_senses([42]) is True
+    sql, params = conn.executed[-1]
+    assert "FROM term_usage" in sql
+    assert params == ([42],)
+
+
+def test_any_usage_for_senses_false_when_none(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert TermUsageRepository(conn).any_usage_for_senses([42]) is False
+
+
+def test_segments_for_senses_empty_list_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert TermUsageRepository(conn).segments_for_senses([]) == {}
+    assert conn.executed == []
+
+
+def test_segments_for_senses_groups_by_sense(fake_conn):
+    conn = fake_conn(fetchall_rows=[(42, 1), (42, 2), (43, 3)])
+    result = TermUsageRepository(conn).segments_for_senses([42, 43])
+    assert result == {42: [1, 2], 43: [3]}
+    sql, params = conn.executed[-1]
+    assert "status <> 'rejected'" in sql
+    assert params == ([42, 43],)

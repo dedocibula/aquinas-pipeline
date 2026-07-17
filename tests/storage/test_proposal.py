@@ -163,3 +163,20 @@ def test_supersede_sense_wide_siblings_excludes_per_segment_kinds_from_sql(fake_
     sql, _ = conn.executed[-1]
     assert "sense_here" not in sql
     assert "remove_here" not in sql
+
+
+# ── list_approved_add_terms ─────────────────────────────────────────────────
+
+
+def test_list_approved_add_terms_filters_kind_and_status(fake_conn):
+    conn = fake_conn(fetchall_rows=[{"proposal_id": 1, "kind": "add_term", "latin_lemma": "ens"}])
+    result = ProposalRepository(conn).list_approved_add_terms()
+    assert result == [{"proposal_id": 1, "kind": "add_term", "latin_lemma": "ens"}]
+    sql, _ = conn.executed[-1]
+    assert "kind = 'add_term'" in sql
+    assert "status = 'approved'" in sql
+
+
+def test_list_approved_add_terms_empty(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    assert ProposalRepository(conn).list_approved_add_terms() == []

@@ -237,6 +237,11 @@ def build_menu() -> list[MenuItem]:
 
         return ReportStep()
 
+    def _apply_new_terms() -> PipelineStep:
+        from ingest.steps import ApplyNewTermsStep
+
+        return ApplyNewTermsStep()
+
     return [
         MenuItem("verify", "Verify sources", _verify),
         MenuItem("latin", "Ingest Latin corpus", _latin),
@@ -252,6 +257,11 @@ def build_menu() -> list[MenuItem]:
         MenuItem("polish-corpus", "Polish corpus — Anthropic Batch API", _polish),
         MenuItem("reset-corpus", "Re-translate entire corpus", _reset_corpus),
         MenuItem("report", "Coverage / provenance report", _report),
+        MenuItem(
+            "apply-new-terms",
+            "Apply approved new glossary terms (re-resolve + diff + reset)",
+            _apply_new_terms,
+        ),
     ]
 
 

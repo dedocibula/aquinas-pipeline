@@ -270,6 +270,12 @@ class GlossaryRepository:
             row = cur.fetchone()
         return row[0] if row else None
 
+    def sense_ids_for_term(self, term_id: int) -> list[int]:
+        """Return every sense_id belonging to a term (any status)."""
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT sense_id FROM glossary_sense WHERE term_id = %s", (term_id,))
+            return [row[0] for row in cur.fetchall()]
+
     def insert_glossary_term(
         self, latin_lemma: str, category: str | None, la_surface: str | None
     ) -> int:
@@ -748,6 +754,20 @@ class SegmentRepository:
             )
             return [row[0] for row in cur.fetchall()]
 
+    def get_locators(self, segment_ids: list[int]) -> dict[int, str]:
+        """Return segment_id -> locator_path(text) for the given ids.
+
+        Stage 6: labels the sample segments in ApplyNewTermsStep's report.
+        """
+        if not segment_ids:
+            return {}
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT segment_id, locator_path::text FROM segment WHERE segment_id = ANY(%s)",
+                (segment_ids,),
+            )
+            return dict(cur.fetchall())
+
     def get_needs_human_segments(self, work_id: int = 1) -> list[dict]:
         """Return needs_human segments with locator_path and raw reviewer_notes, ordered.
 
@@ -1045,6 +1065,40 @@ class TermUsageRepository:
             )
             return cur.rowcount
 
+    def any_usage_for_senses(self, sense_ids: list[int]) -> bool:
+        """True if any term_usage row (any status) already exists for these senses.
+
+        Stage 6: a newly-approved add_term proposal is only a re-resolve target
+        while its term has never been applied — this is the "never applied yet"
+        check.
+        """
+        if not sense_ids:
+            return False
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM term_usage WHERE sense_id = ANY(%s) LIMIT 1", (sense_ids,)
+            )
+            return cur.fetchone() is not None
+
+    def segments_for_senses(self, sense_ids: list[int]) -> dict[int, list[int]]:
+        """Return sense_id -> segment_ids with an active (non-rejected) usage row.
+
+        Stage 6: called after a full re-resolve to find which segments just
+        gained a lock for a newly-applied term's senses.
+        """
+        if not sense_ids:
+            return {}
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT sense_id, segment_id FROM term_usage "
+                "WHERE sense_id = ANY(%s) AND status <> 'rejected'",
+                (sense_ids,),
+            )
+            result: dict[int, list[int]] = {}
+            for sense_id, segment_id in cur.fetchall():
+                result.setdefault(sense_id, []).append(segment_id)
+            return result
+
 
 class RunRepository:
     """All translation_run / run_segment access.
@@ -1287,6 +1341,20 @@ class ProposalRepository:
                 (sense_ids,),
             )
             return {row[0]: row[1] for row in cur.fetchall()}
+
+    def list_approved_add_terms(self) -> list[dict]:
+        """Approved add_term proposals — candidates for Stage 6 corpus application.
+
+        A proposal stays a candidate until its term has term_usage rows (i.e.
+        it survived a full re-resolve); ApplyNewTermsStep filters that out.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM glossary_proposal "
+                "WHERE kind = 'add_term' AND status = 'approved' "
+                "ORDER BY decided_at ASC"
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def decide(
         self,

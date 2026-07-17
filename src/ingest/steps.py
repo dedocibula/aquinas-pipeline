@@ -126,6 +126,64 @@ class ReportStep(BaseStep):
         )
 
 
+class ApplyNewTermsStep(BaseStep):
+    """Detect approved-but-unapplied add_term proposals, re-resolve the full
+    corpus, and (owner-gated, cost-previewed) reset the already-translated
+    segments that gained a lock so the next run regenerates them under the
+    new constraint. See ingest.apply_new_terms for the mechanics (Stage 6 of
+    .claude/m5_editor_glossary_proposals_plan.md).
+    """
+
+    name = "apply-new-terms"
+    stage = "resolve"
+
+    def __init__(self, *, read=input):
+        self._read = read
+
+    def verify(self, ctx: PipelineContext) -> bool:
+        from translate.steps import _owner_token_present
+
+        return _owner_token_present()
+
+    def run(self, ctx: PipelineContext) -> StepResult:
+        from ingest.apply_new_terms import (
+            apply_gained_segments,
+            find_target_proposals,
+            preview_gained_cost,
+            resolve_and_diff,
+            sample_locators,
+        )
+        from storage.db import get_conn
+        from translate.steps import _confirm_and_spend
+
+        with get_conn() as conn:
+            targets = find_target_proposals(conn)
+        if not targets:
+            return StepResult(name=self.name, ok=True, summary="nothing to apply")
+
+        print(f"[apply-new-terms] Re-resolving full corpus for {len(targets)} new term(s)...")
+        results = resolve_and_diff(targets)
+        for r in results:
+            locators = ", ".join(sample_locators(r.gained_segment_ids))
+            print(
+                f"  {r.latin_lemma}: {len(r.gained_segment_ids)} already-translated "
+                f"segment(s) gained a lock" + (f" (e.g. {locators})" if locators else "")
+            )
+
+        all_gained = sorted({s for r in results for s in r.gained_segment_ids})
+        if not all_gained:
+            return StepResult(
+                name=self.name,
+                ok=True,
+                summary=f"{len(targets)} term(s) resolved; no already-translated segment gained a lock",
+            )
+
+        n, cost = preview_gained_cost(all_gained)
+        return _confirm_and_spend(
+            self.name, n, cost, lambda: apply_gained_segments(all_gained), read=self._read
+        )
+
+
 class MineSensesStep(BaseStep):
     """Mine polysemy candidates, label them via DeepSeek, write proposed senses.
 

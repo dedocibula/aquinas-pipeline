@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+from ingest.apply_new_terms import TermApplyResult
 from ingest.steps import (
+    ApplyNewTermsStep,
     BahounekStep,
     EnglishStep,
     LatinStep,
@@ -73,3 +75,97 @@ def test_ingest_steps_declare_stage():
     assert ReportStep.stage == "ingest"
     assert ResolveStep.stage == "resolve"
     assert MineSensesStep.stage == "resolve"
+    assert ApplyNewTermsStep.stage == "resolve"
+
+
+# ── ApplyNewTermsStep ────────────────────────────────────────────────────────
+
+
+def test_apply_new_terms_verify_requires_owner_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
+    assert ApplyNewTermsStep().verify(_ctx(tmp_path)) is False
+    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "x")
+    assert ApplyNewTermsStep().verify(_ctx(tmp_path)) is True
+
+
+def test_apply_new_terms_nothing_to_apply(tmp_path):
+    with (
+        patch("storage.db.get_conn") as get_conn,
+        patch("ingest.apply_new_terms.find_target_proposals", return_value=[]),
+    ):
+        get_conn.return_value.__enter__.return_value = object()
+        result = ApplyNewTermsStep().run(_ctx(tmp_path))
+    assert result.ok
+    assert result.summary == "nothing to apply"
+
+
+def test_apply_new_terms_resolves_but_no_segment_gained(tmp_path):
+    targets = [{"proposal_id": 1, "latin_lemma": "ens", "term_id": 10, "sense_ids": [100]}]
+    with (
+        patch("storage.db.get_conn") as get_conn,
+        patch("ingest.apply_new_terms.find_target_proposals", return_value=targets),
+        patch(
+            "ingest.apply_new_terms.resolve_and_diff",
+            return_value=[
+                TermApplyResult(
+                    proposal_id=1, latin_lemma="ens", term_id=10, sense_ids=[100],
+                    gained_segment_ids=[],
+                )
+            ],
+        ),
+        patch("ingest.apply_new_terms.sample_locators", return_value=[]),
+    ):
+        get_conn.return_value.__enter__.return_value = object()
+        result = ApplyNewTermsStep().run(_ctx(tmp_path))
+    assert result.ok
+    assert "no already-translated segment gained a lock" in result.summary
+
+
+def test_apply_new_terms_confirms_and_resets_gained_segments(tmp_path):
+    targets = [{"proposal_id": 1, "latin_lemma": "ens", "term_id": 10, "sense_ids": [100]}]
+    with (
+        patch("storage.db.get_conn") as get_conn,
+        patch("ingest.apply_new_terms.find_target_proposals", return_value=targets),
+        patch(
+            "ingest.apply_new_terms.resolve_and_diff",
+            return_value=[
+                TermApplyResult(
+                    proposal_id=1, latin_lemma="ens", term_id=10, sense_ids=[100],
+                    gained_segment_ids=[5],
+                )
+            ],
+        ),
+        patch("ingest.apply_new_terms.sample_locators", return_value=["I.q1.a1"]),
+        patch("ingest.apply_new_terms.preview_gained_cost", return_value=(1, 0.05)),
+        patch("ingest.apply_new_terms.apply_gained_segments") as apply_fn,
+    ):
+        get_conn.return_value.__enter__.return_value = object()
+        result = ApplyNewTermsStep(read=lambda _: "y").run(_ctx(tmp_path))
+    apply_fn.assert_called_once_with([5])
+    assert result.ok
+    assert "restaged 1 segments" in result.summary
+
+
+def test_apply_new_terms_declined_cancels_without_reset(tmp_path):
+    targets = [{"proposal_id": 1, "latin_lemma": "ens", "term_id": 10, "sense_ids": [100]}]
+    with (
+        patch("storage.db.get_conn") as get_conn,
+        patch("ingest.apply_new_terms.find_target_proposals", return_value=targets),
+        patch(
+            "ingest.apply_new_terms.resolve_and_diff",
+            return_value=[
+                TermApplyResult(
+                    proposal_id=1, latin_lemma="ens", term_id=10, sense_ids=[100],
+                    gained_segment_ids=[5],
+                )
+            ],
+        ),
+        patch("ingest.apply_new_terms.sample_locators", return_value=["I.q1.a1"]),
+        patch("ingest.apply_new_terms.preview_gained_cost", return_value=(1, 0.05)),
+        patch("ingest.apply_new_terms.apply_gained_segments") as apply_fn,
+    ):
+        get_conn.return_value.__enter__.return_value = object()
+        result = ApplyNewTermsStep(read=lambda _: "n").run(_ctx(tmp_path))
+    apply_fn.assert_not_called()
+    assert result.ok
+    assert "cancelled" in result.summary

@@ -706,8 +706,8 @@ declined confirm resets nothing; human-edited → needs_human.
 - [x] Stage 2 — apply services + rejected/retired safety
 - [x] Stage 3 — editor propose UI
 - [x] Stage 4 — admin queue + apply-on-approve
-- [ ] Stage 5 — CLI cost gate + installments
-- [ ] Stage 6 — new-term corpus application step
+- [x] Stage 5 — CLI cost gate + installments
+- [x] Stage 6 — new-term corpus application step
 - [ ] Stage 7 — e2e + docs
 
 **Stage 1 note (2026-07-12):** migration 013 applied to local docker DB only; Railway prod
@@ -738,3 +738,32 @@ would silently re-point a segment to a non-constraining sense with no error and
 no version bump). `export_sheet.py`'s unfiltered `term_usage` read was reassessed
 and left as-is — that surface is being retired, not worth touching for a non-spend
 reporting path. Full suite green (1070 tests).
+
+**Stage 5 note (2026-07-16):** already fully implemented — `preview_stale_cost`
+(with `limit`), `AQUINAS_OWNER_TOKEN` gate, `AQUINAS_MAX_RUN_USD` cap, and
+`RerunStaleStep`/`ResetCorpusStep` (+ CLI `--flow rerun_stale --limit N` path)
+were built as the twin Phase 2 of `.claude/m5_reviewer_corrections_plan.md`
+before this stage ran. No code changes needed; `tests/translate/test_translate_steps.py`
+already covers the cap/refusal/cancel paths. `uv run pytest tests/translate
+tests/pipeline` green (216 passed). Proceeding to Stage 6.
+
+**Stage 6 note (2026-07-16):** new module `src/ingest/apply_new_terms.py`
+(`find_target_proposals`, `resolve_and_diff`, `preview_gained_cost`,
+`apply_gained_segments`, `sample_locators`) + `ApplyNewTermsStep` in
+`src/ingest/steps.py`, wired into `pipeline/interactive.py`'s menu at the
+end (no renumbering). Reuses Stage 5's `_owner_token_present`/
+`_confirm_and_spend` gate verbatim from `translate.steps`. Target-finding
+relies on the invariant that `find_target_proposals` only returns terms with
+zero prior `term_usage` rows, so every post-resolve row for a target sense is
+new by construction — no separate before/after snapshot needed (simpler than
+the plan's literal snapshot-diff, same result). New repository methods:
+`ProposalRepository.list_approved_add_terms`, `GlossaryRepository.
+sense_ids_for_term`, `TermUsageRepository.any_usage_for_senses` /
+`segments_for_senses`, `SegmentRepository.get_locators`. Reset delegates to
+Stage 2's `reset_segments` (human-edited guard already built in). Full suite
+green (1187 tests, up from 1070 — added ~30 tests across
+`tests/storage/{test_proposal,test_glossary,test_term_usage,test_segment}.py`,
+new `tests/ingest/test_apply_new_terms.py`, and `tests/ingest/
+test_ingest_steps.py`). Not yet run against a real DB (resolver.run is fully
+mocked in tests, per house pattern for unit tests). Proceeding to Stage 7 next
+session (e2e verification requires prod/local DB access).

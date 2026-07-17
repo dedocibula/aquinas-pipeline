@@ -428,3 +428,19 @@ def test_get_sk_rendering_content_filters_sk_lang(fake_conn):
     sql, params = conn.executed[0]
     assert "lang = 'sk'" in sql
     assert params == (20,)
+
+
+# ── sense_ids_for_term ───────────────────────────────────────────────────────
+
+
+def test_sense_ids_for_term_returns_all_ids(fake_conn):
+    conn = fake_conn(fetchall_rows=[(42,), (43,)])
+    assert GlossaryRepository(conn).sense_ids_for_term(7) == [42, 43]
+    sql, params = conn.executed[-1]
+    assert "FROM glossary_sense" in sql
+    assert params == (7,)
+
+
+def test_sense_ids_for_term_empty(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    assert GlossaryRepository(conn).sense_ids_for_term(7) == []
