@@ -657,17 +657,13 @@ def _cli_main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.flow in ("rerun_stale", "reset_corpus"):
-        # Paid, corpus-scale flows share the same owner-gate + cost-preview +
-        # confirm mechanics as the pipeline steps (translate.steps), invoked
-        # here directly rather than via Runner/PipelineContext since this is a
+        # Paid, corpus-scale flows share the same cost-preview + confirm
+        # mechanics as the pipeline steps (translate.steps), invoked here
+        # directly rather than via Runner/PipelineContext since this is a
         # bare CLI entrypoint. Reusing the gate (not re-implementing it) keeps
         # this path and the interactive-menu path from ever disagreeing.
-        from translate.steps import _confirm_and_spend, _owner_token_present
+        from translate.steps import _confirm_and_spend
 
-        if not _owner_token_present():
-            parser.error(
-                "AQUINAS_OWNER_TOKEN not set — refusing to run a paid flow from the CLI"
-            )
         if args.flow == "rerun_stale":
             n, cost = preview_stale_cost(args.work_id, limit=args.limit)
             result = _confirm_and_spend(

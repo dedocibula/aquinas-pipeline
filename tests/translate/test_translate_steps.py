@@ -31,34 +31,6 @@ def test_translate_steps_declare_stage():
         assert step.stage == "translate"
 
 
-# ── owner-gate verify() ──────────────────────────────────────────────────────
-
-
-def test_rerun_stale_verify_false_without_token(tmp_path, monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
-    assert RerunStaleStep().verify(_ctx(tmp_path)) is False
-
-
-def test_rerun_stale_verify_false_with_blank_token(tmp_path, monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "   ")
-    assert RerunStaleStep().verify(_ctx(tmp_path)) is False
-
-
-def test_rerun_stale_verify_true_with_token(tmp_path, monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
-    assert RerunStaleStep().verify(_ctx(tmp_path)) is True
-
-
-def test_reset_corpus_verify_false_without_token(tmp_path, monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
-    assert ResetCorpusStep().verify(_ctx(tmp_path)) is False
-
-
-def test_reset_corpus_verify_true_with_token(tmp_path, monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
-    assert ResetCorpusStep().verify(_ctx(tmp_path)) is True
-
-
 # ── RerunStaleStep.run() — cost preview + confirm gate ──────────────────────
 
 

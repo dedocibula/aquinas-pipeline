@@ -81,13 +81,6 @@ def test_ingest_steps_declare_stage():
 # ── ApplyNewTermsStep ────────────────────────────────────────────────────────
 
 
-def test_apply_new_terms_verify_requires_owner_token(tmp_path, monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
-    assert ApplyNewTermsStep().verify(_ctx(tmp_path)) is False
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "x")
-    assert ApplyNewTermsStep().verify(_ctx(tmp_path)) is True
-
-
 def test_apply_new_terms_nothing_to_apply(tmp_path):
     with (
         patch("storage.db.get_conn") as get_conn,

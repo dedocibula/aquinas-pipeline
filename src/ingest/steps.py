@@ -128,9 +128,9 @@ class ReportStep(BaseStep):
 
 class ApplyNewTermsStep(BaseStep):
     """Detect approved-but-unapplied add_term proposals, re-resolve the full
-    corpus, and (owner-gated, cost-previewed) reset the already-translated
-    segments that gained a lock so the next run regenerates them under the
-    new constraint. See ingest.apply_new_terms for the mechanics (Stage 6 of
+    corpus, and (cost-previewed) reset the already-translated segments that
+    gained a lock so the next run regenerates them under the new constraint.
+    See ingest.apply_new_terms for the mechanics (Stage 6 of
     .claude/m5_editor_glossary_proposals_plan.md).
     """
 
@@ -139,11 +139,6 @@ class ApplyNewTermsStep(BaseStep):
 
     def __init__(self, *, read=input):
         self._read = read
-
-    def verify(self, ctx: PipelineContext) -> bool:
-        from translate.steps import _owner_token_present
-
-        return _owner_token_present()
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from ingest.apply_new_terms import (

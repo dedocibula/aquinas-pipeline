@@ -10,12 +10,11 @@ a question cap stays on the ``translate.run`` CLI, which is the right surface fo
 that kind of one-off filtering.
 
 ``RerunStaleStep`` and ``ResetCorpusStep`` are the only two steps that trigger
-paid retranslation, so both are owner-gated: ``verify()`` refuses to run at all
-unless ``AQUINAS_OWNER_TOKEN`` is set (blocked before any work, zero spend —
-see pipeline.runner), and ``run()`` previews the cost, refuses outright if
-``AQUINAS_MAX_RUN_USD`` is set and exceeded, and otherwise asks for an explicit
-y/N confirmation before invoking the flow. A non-yes answer is a *successful*
-step (nothing was wrong, the owner just declined to spend) — never a failure.
+paid retranslation, so both are cost-gated: ``run()`` previews the cost, refuses
+outright if ``AQUINAS_MAX_RUN_USD`` is set and exceeded, and otherwise asks for
+an explicit y/N confirmation before invoking the flow. A non-yes answer is a
+*successful* step (nothing was wrong, the owner just declined to spend) — never
+a failure.
 """
 
 from __future__ import annotations
@@ -27,10 +26,6 @@ from pipeline import BaseStep, PipelineContext, StepResult
 
 def _work_id(ctx: PipelineContext) -> int:
     return ctx.work_id if ctx.work_id is not None else 1
-
-
-def _owner_token_present() -> bool:
-    return bool(os.getenv("AQUINAS_OWNER_TOKEN", "").strip())
 
 
 def _max_run_usd() -> float | None:
@@ -91,9 +86,6 @@ class RerunStaleStep(BaseStep):
         self._limit = limit
         self._read = read
 
-    def verify(self, ctx: PipelineContext) -> bool:
-        return _owner_token_present()
-
     def run(self, ctx: PipelineContext) -> StepResult:
         from translate.run import preview_stale_cost, rerun_stale
 
@@ -114,9 +106,6 @@ class ResetCorpusStep(BaseStep):
 
     def __init__(self, *, read=input):
         self._read = read
-
-    def verify(self, ctx: PipelineContext) -> bool:
-        return _owner_token_present()
 
     def run(self, ctx: PipelineContext) -> StepResult:
         from translate.run import preview_reset_corpus_cost, reset_corpus

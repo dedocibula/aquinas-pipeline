@@ -511,44 +511,10 @@ def test_preview_reset_corpus_cost_excludes_human_edited():
     assert abs(cost - 0.2) < 1e-9
 
 
-# ── _cli_main — the CLI must share the same owner-gate as the pipeline steps ──
-
-
-def test_cli_main_rerun_stale_refuses_without_owner_token(monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
-    with (
-        patch("translate.run.preview_stale_cost") as mock_preview,
-        patch("translate.run.rerun_stale") as mock_flow,
-    ):
-        try:
-            _cli_main(["--flow", "rerun_stale"])
-            raised = False
-        except SystemExit as exc:
-            raised = True
-            assert exc.code != 0
-    assert raised
-    mock_preview.assert_not_called()
-    mock_flow.assert_not_called()
-
-
-def test_cli_main_reset_corpus_refuses_without_owner_token(monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
-    with (
-        patch("translate.run.preview_reset_corpus_cost") as mock_preview,
-        patch("translate.run.reset_corpus") as mock_flow,
-    ):
-        try:
-            _cli_main(["--flow", "reset_corpus"])
-            raised = False
-        except SystemExit:
-            raised = True
-    assert raised
-    mock_preview.assert_not_called()
-    mock_flow.assert_not_called()
+# ── _cli_main — cost-preview + confirm gate shared with the pipeline steps ──
 
 
 def test_cli_main_rerun_stale_declined_never_calls_flow(monkeypatch, capsys):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
     with (
         patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
         patch("translate.run.rerun_stale") as mock_flow,
@@ -560,7 +526,6 @@ def test_cli_main_rerun_stale_declined_never_calls_flow(monkeypatch, capsys):
 
 
 def test_cli_main_rerun_stale_confirmed_invokes_flow_with_limit(monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
     with (
         patch("translate.run.preview_stale_cost", return_value=(5, 1.23)) as mock_preview,
         patch("translate.run.rerun_stale") as mock_flow,
@@ -572,7 +537,6 @@ def test_cli_main_rerun_stale_confirmed_invokes_flow_with_limit(monkeypatch):
 
 
 def test_cli_main_rerun_stale_max_run_usd_refused(monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
     monkeypatch.setenv("AQUINAS_MAX_RUN_USD", "1.00")
     with (
         patch("translate.run.preview_stale_cost", return_value=(5, 1.23)),
@@ -588,7 +552,6 @@ def test_cli_main_rerun_stale_max_run_usd_refused(monkeypatch):
 
 
 def test_cli_main_reset_corpus_confirmed_invokes_flow(monkeypatch):
-    monkeypatch.setenv("AQUINAS_OWNER_TOKEN", "secret")
     with (
         patch("translate.run.preview_reset_corpus_cost", return_value=(10, 4.5)),
         patch("translate.run.reset_corpus") as mock_flow,
@@ -599,7 +562,6 @@ def test_cli_main_reset_corpus_confirmed_invokes_flow(monkeypatch):
 
 
 def test_cli_main_translate_corpus_not_gated(monkeypatch):
-    monkeypatch.delenv("AQUINAS_OWNER_TOKEN", raising=False)
     with patch("translate.run.translate_corpus") as mock_flow:
         _cli_main(["--flow", "translate_corpus", "--work-id", "1"])
     mock_flow.assert_called_once_with(work_id=1, pars=None, max_question=None)
