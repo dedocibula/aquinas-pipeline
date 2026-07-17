@@ -404,6 +404,11 @@ def get_pending_proposal_counts(
     return ProposalRepository(conn).pending_by_sense(sense_ids)
 
 
+def get_pending_proposal_count(conn: psycopg2.extensions.connection) -> int:
+    """Total pending glossary_proposal rows, for the index page's admin badge."""
+    return len(ProposalRepository(conn).list_pending())
+
+
 _SENSE_WIDE_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
 _PER_SEGMENT_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
 

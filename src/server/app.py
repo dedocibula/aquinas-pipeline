@@ -43,6 +43,7 @@ from server.db import (  # noqa: E402
     get_article_segments,
     get_cost_per_segment,
     get_distinct_pars,
+    get_pending_proposal_count,
     get_pending_proposal_counts,
     get_pending_proposals_view,
     get_prev_next_article,
@@ -233,6 +234,8 @@ def index():
     with get_conn() as conn:
         questions = get_all_questions(conn)
         progress = get_translation_progress(conn)
+        if session.get("is_admin"):
+            progress["pending_proposals"] = get_pending_proposal_count(conn)
 
     # Group by pars (first component of the path).
     grouped: dict[str, list[dict]] = {}

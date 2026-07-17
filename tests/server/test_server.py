@@ -208,6 +208,22 @@ def test_index_returns_200(client):
     assert response.status_code == 200
 
 
+def test_index_omits_proposals_badge_for_non_admin(client):
+    resp = client.get("/")
+    assert b"glossary proposals" not in resp.data
+
+
+def test_index_shows_proposals_badge_for_admin(client):
+    with client.session_transaction() as sess:
+        sess["email"] = "admin@example.com"
+        sess["is_editor"] = True
+        sess["is_admin"] = True
+    with patch("server.app.get_pending_proposal_count", return_value=3):
+        resp = client.get("/")
+    assert b"3 glossary proposals" in resp.data
+    assert b'href="/glossary/proposals"' in resp.data
+
+
 def test_article_view_returns_200(client):
     """GET /~ST.I.Q3.A1 returns 200 when segments are present."""
     response = client.get("/~ST.I.Q3.A1")

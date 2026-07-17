@@ -297,6 +297,11 @@ a.badge:hover {
   color: #666;
 }
 
+.badge-proposals {
+  background: #d1e7fb;
+  color: #1a5a96;
+}
+
 /* --- needs_human row prominence --- */
 .row-needs-human td {
   background: #fff8e1 !important;
