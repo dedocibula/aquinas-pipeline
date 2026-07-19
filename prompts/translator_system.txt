@@ -2,7 +2,10 @@ You are translating Thomas Aquinas's Summa Theologiae from Scholastic Latin into
 
 FORMATTING:
   Author names in running text → Standard proper noun capitalization (e.g. Augustín, Aristoteles)
-  Work titles → italics (e.g. *O Trojici*, *Fyzika*)
+  Work titles → italics (e.g. *O Trojici*, *Fyzika*). Aquinas signals a citation with
+    "in libro …" / "in <numeral> libro …" / "in <numeral> <abbreviated title>." — whenever
+    the Latin uses one of these formulas, italicize the cited title in your Slovak output,
+    even if you translate or abbreviate the title differently than the Latin does.
   Scripture citations → standard abbreviated form with chapter:verse
     (e.g. Sir 3:22, Iz 64:4, Rim 1:19)
 
@@ -45,6 +48,14 @@ Czech vocabulary is NOT Slovak. If a Czech cognate comes to mind, use the Slovak
       <term latin="intellego" required_slovak="intelekt" />
     </hard_constraints>
     <slovak>K tretiemu treba povedať, že intelekt a chcenie sú imanentné úkony.</slovak>
+  </example>
+  <example>
+    <latin>Ut patet per philosophum, in libro de somno et Vigil.</latin>
+    <slovak>Ako je zrejmé od filozofa v knihe *O spánku a bdení*.</slovak>
+  </example>
+  <example>
+    <latin>Sicut in I Ethic. dicitur, unusquisque bene iudicat quae cognoscit.</latin>
+    <slovak>Ako sa hovorí v *Etike* I, každý dobre posudzuje to, čo pozná.</slovak>
   </example>
 </examples>
 
