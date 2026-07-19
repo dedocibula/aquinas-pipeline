@@ -948,6 +948,13 @@ class SegmentRepository:
         Existing segment_text(sk, model) and term_usage rows are left in place;
         translate_segment upserts over them on re-run. reviewer_notes is cleared
         since the old feedback is no longer valid.
+
+        The (sk, polish) row, if any, is deleted: display precedence is
+        human -> polish -> model, so a stale polish row built on the
+        pre-reset draft would otherwise keep winning over the fresh (sk,
+        model) draft until someone happens to re-run the separate, paid
+        polish step. Polish is never auto-triggered by a reset/re-translate,
+        so there's no re-run to race here.
         """
         if not segment_ids:
             return
@@ -956,6 +963,12 @@ class SegmentRepository:
                 "UPDATE segment "
                 "SET translation_status = 'pending', reviewer_notes = NULL "
                 "WHERE segment_id = ANY(%s)",
+                (segment_ids,),
+            )
+            cur.execute(
+                "DELETE FROM segment_text st USING source s "
+                "WHERE st.source_id = s.source_id AND s.code = 'polish' "
+                "AND st.lang = 'sk' AND st.segment_id = ANY(%s)",
                 (segment_ids,),
             )
 

@@ -247,8 +247,18 @@ def test_flag_needs_human_empty_short_circuits(fake_conn):
 def test_reset_translation_status(fake_conn):
     conn = fake_conn()
     SegmentRepository(conn).reset_translation_status([7, 8])
-    sql, params = conn.executed[-1]
-    assert "translation_status = 'pending'" in sql
+    status_calls = [e for e in conn.executed if "translation_status = 'pending'" in e[0]]
+    assert len(status_calls) == 1 and status_calls[0][1] == ([7, 8],)
+
+
+def test_reset_translation_status_deletes_stale_polish_row(fake_conn):
+    conn = fake_conn()
+    SegmentRepository(conn).reset_translation_status([7, 8])
+    polish_deletes = [e for e in conn.executed if "DELETE FROM segment_text" in e[0]]
+    assert len(polish_deletes) == 1
+    sql, params = polish_deletes[0]
+    assert "s.code = 'polish'" in sql
+    assert "st.lang = 'sk'" in sql
     assert params == ([7, 8],)
 
 
