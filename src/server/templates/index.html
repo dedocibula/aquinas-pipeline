@@ -17,7 +17,7 @@
     <p class="progress-legend">
       <a href="/status/translated" class="badge badge-ok">&#10003; {{ progress.translated }} translated</a>
       <a href="/status/needs_human" class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</a>
-      <span class="badge badge-pending">&#8230; {{ progress.pending }} pending</span>
+      <a href="/status/pending" class="badge badge-pending">&#8230; {{ progress.pending }} pending</a>
       {% if is_admin %}
       <a href="/glossary/proposals" class="badge badge-proposals">{{ progress.pending_proposals }} glossary proposals</a>
       {% endif %}

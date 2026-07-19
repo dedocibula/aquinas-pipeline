@@ -849,11 +849,11 @@ def test_index_needs_human_badge_is_a_link(editor_client):
     assert 'href="/status/needs_human"' in html
 
 
-def test_index_pending_badge_is_not_a_link(client):
-    """The 'pending' badge is a plain span — no link."""
-    resp = client.get("/")
+def test_index_pending_badge_is_a_link(editor_client):
+    """The 'pending' badge on the index page links to /status/pending (editor only)."""
+    resp = editor_client.get("/")
     html = resp.data.decode()
-    assert 'href="/status/pending"' not in html
+    assert 'href="/status/pending"' in html
 
 
 def test_index_progress_hidden_for_non_editor(client):
