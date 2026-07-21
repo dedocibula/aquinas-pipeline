@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from server.db import (
@@ -12,6 +14,7 @@ from server.db import (
     PROPOSAL_KIND_WRONG_SENSE_HERE,
     add_comment,
     delete_comment,
+    get_activity_feed,
     get_comment_counts,
     get_pending_proposal_counts,
     get_segment_constraints,
@@ -490,3 +493,68 @@ def test_get_comment_counts_shapes_result(fake_conn):
     assert result[42].unread == 1
     _, params = conn.executed[-1]
     assert params == ("alice@example.com", "alice@example.com", [42])
+
+
+# ---------------------------------------------------------------------------
+# get_activity_feed
+# ---------------------------------------------------------------------------
+
+_FEED_ROW_REVIEW = {
+    "ts": datetime(2026, 7, 2, 9, 0),
+    "kind": "review",
+    "author": "editor@example.com",
+    "segment_id": 42,
+    "locator": "I.q3.a1.arg1",
+    "summary": "reviewed",
+    "translated": None,
+    "needs_human": None,
+    "cost": None,
+}
+
+_FEED_ROW_COMMENT = {
+    "ts": datetime(2026, 7, 2, 8, 0),
+    "kind": "comment",
+    "author": "bob@example.com",
+    "segment_id": 43,
+    "locator": "I.q3.a1.arg2",
+    "summary": "left a comment",
+    "translated": None,
+    "needs_human": None,
+    "cost": None,
+}
+
+_FEED_ROW_RUN = {
+    "ts": datetime(2026, 7, 2, 7, 0),
+    "kind": "run",
+    "author": None,
+    "segment_id": None,
+    "locator": None,
+    "summary": "pilot_sample",
+    "translated": 10,
+    "needs_human": 2,
+    "cost": Decimal("1.50"),
+}
+
+
+def test_get_activity_feed_merges_and_orders_desc(fake_conn):
+    conn = fake_conn(fetchall_rows=[_FEED_ROW_REVIEW, _FEED_ROW_COMMENT, _FEED_ROW_RUN])
+    entries = get_activity_feed(conn)
+    assert [e.kind for e in entries] == ["review", "comment", "run"]
+    assert entries[0].ts > entries[1].ts > entries[2].ts
+
+
+def test_get_activity_feed_run_entry_carries_metrics(fake_conn):
+    conn = fake_conn(fetchall_rows=[_FEED_ROW_RUN])
+    entry = get_activity_feed(conn)[0]
+    assert entry.author is None
+    assert entry.segment_id is None
+    assert entry.translated == 10
+    assert entry.needs_human == 2
+    assert entry.cost == 1.5
+
+
+def test_get_activity_feed_paginates_with_before(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    get_activity_feed(conn, before="2026-07-02T09:00:00", limit=20)
+    _, params = conn.executed[-1]
+    assert params == {"before": "2026-07-02T09:00:00", "limit": 20}

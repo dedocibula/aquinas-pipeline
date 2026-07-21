@@ -302,6 +302,11 @@ a.badge:hover {
   color: #1a5a96;
 }
 
+.badge-timeline {
+  background: #e5dcf5;
+  color: #5a3a96;
+}
+
 /* --- needs_human row prominence --- */
 .row-needs-human td {
   background: #fff8e1 !important;
@@ -1320,4 +1325,71 @@ tr.row-comment-active {
 
 .btn-comment-reopen:hover {
   background: #e4e4e4;
+}
+
+/* --- Admin timeline --- */
+.timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-day-header {
+  font-weight: bold;
+  font-size: 0.85rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 1.2rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.timeline-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.9rem;
+}
+
+.timeline-time {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  width: 3.2rem;
+  flex-shrink: 0;
+}
+
+.timeline-author {
+  color: #444;
+  font-weight: 600;
+  width: 12rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-link {
+  color: #1a5a96;
+  text-decoration: none;
+}
+
+.timeline-link:hover {
+  text-decoration: underline;
+}
+
+.timeline-run {
+  background: #f5ede0;
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+}
+
+.timeline-run-summary {
+  color: #5a3e1b;
+}
+
+.timeline-footer {
+  margin-top: 1rem;
 }

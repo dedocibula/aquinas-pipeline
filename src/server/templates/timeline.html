@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Activity timeline — Aquinas Pipeline{% endblock %}
+
+{% block breadcrumb %}
+  &rsaquo; <span>Timeline</span>
+{% endblock %}
+
+{% block content %}
+<h1>Activity timeline</h1>
+
+{% if entries %}
+<ul class="timeline-list">
+  {% set ns = namespace(day=None) %}
+  {% for e in entries %}
+    {% set day = e.ts.strftime('%Y-%m-%d') %}
+    {% if day != ns.day %}
+      {% set ns.day = day %}
+      <li class="timeline-day-header">{{ day }}</li>
+    {% endif %}
+    {% if e.kind == 'run' %}
+    <li class="timeline-entry timeline-run">
+      <span class="timeline-time">{{ e.ts.strftime('%H:%M') }}</span>
+      <span class="timeline-run-summary">
+        machine run &mdash; <code>{{ e.summary }}</code>
+        &middot; translated: {{ e.translated if e.translated is not none else '—' }}
+        &middot; needs_human: {{ e.needs_human if e.needs_human is not none else '—' }}
+        {% if e.cost is not none %}&middot; ${{ "%.2f"|format(e.cost) }}{% endif %}
+      </span>
+    </li>
+    {% else %}
+    {% set article_path = e.locator.split('.')[:3] | join('.') %}
+    <li class="timeline-entry timeline-{{ e.kind }}">
+      <span class="timeline-time">{{ e.ts.strftime('%H:%M') }}</span>
+      <span class="timeline-author">{{ e.author or '—' }}</span>
+      <a class="timeline-link" href="/~{{ ltree_to_url(article_path) }}#seg-{{ e.segment_id }}">
+        {{ e.kind }}: {{ e.summary }}
+      </a>
+    </li>
+    {% endif %}
+  {% endfor %}
+</ul>
+{% if next_before %}
+<p class="timeline-footer">
+  <a href="/timeline?before={{ next_before }}">Load older activity</a>
+</p>
+{% endif %}
+{% else %}
+<p>No activity yet.</p>
+{% endif %}
+{% endblock %}

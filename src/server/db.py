@@ -19,7 +19,7 @@ from review.glossary_apply import (
     apply_sense_here,
 )
 from storage.db import source_id
-from storage.models import Comment, CommentCount, CommentThread
+from storage.models import ActivityEntry, Comment, CommentCount, CommentThread
 from storage.repositories import GlossaryRepository, ProposalRepository
 
 # Editor glossary-proposal kinds (glossary_proposal.kind CHECK constraint,
@@ -1080,6 +1080,64 @@ def get_comment_counts(
         )
         for row in rows
     }
+
+
+def get_activity_feed(
+    conn: psycopg2.extensions.connection, *, before: str | None = None, limit: int = 50
+) -> list[ActivityEntry]:
+    """Return the admin `/timeline` activity feed: reviews, comments, and run markers.
+
+    Merges the three sources newest-first. ``before`` (an ISO timestamp) paginates
+    to entries strictly older than it. Uses only existing timestamps — no new
+    per-row timestamp column.
+    """
+    sql = """
+        SELECT ts, kind, author, segment_id, locator, summary,
+               translated, needs_human, cost
+        FROM (
+            SELECT sr.human_reviewed_at AS ts, 'review' AS kind,
+                   sr.human_reviewed_by AS author, sr.segment_id,
+                   s.locator_path::text AS locator,
+                   (CASE WHEN sr.human_note IS NOT NULL THEN 'noted' ELSE 'reviewed' END) AS summary,
+                   NULL::int AS translated, NULL::int AS needs_human, NULL::numeric AS cost
+            FROM segment_review sr
+            JOIN segment s ON s.segment_id = sr.segment_id
+
+            UNION ALL
+
+            SELECT c.created_at, 'comment', c.author, c.segment_id,
+                   s.locator_path::text, left(c.body, 140),
+                   NULL, NULL, NULL
+            FROM segment_comment c
+            JOIN segment s ON s.segment_id = c.segment_id
+
+            UNION ALL
+
+            SELECT COALESCE(r.finished_at, r.started_at), 'run', NULL, NULL, NULL,
+                   r.flow_name, r.total_translated, r.total_needs_human, r.total_cost_usd
+            FROM translation_run r
+        ) feed
+        WHERE (%(before)s::timestamptz IS NULL OR ts < %(before)s::timestamptz)
+        ORDER BY ts DESC
+        LIMIT %(limit)s
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(sql, {"before": before, "limit": limit})
+        rows = cur.fetchall()
+    return [
+        ActivityEntry(
+            ts=row["ts"],
+            kind=row["kind"],
+            author=row["author"],
+            segment_id=row["segment_id"],
+            locator=row["locator"],
+            summary=row["summary"],
+            translated=row["translated"],
+            needs_human=row["needs_human"],
+            cost=float(row["cost"]) if row["cost"] is not None else None,
+        )
+        for row in rows
+    ]
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:

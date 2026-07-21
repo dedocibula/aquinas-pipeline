@@ -1543,6 +1543,66 @@ def test_reject_route_not_pending_returns_409(admin_client):
 
 
 # ---------------------------------------------------------------------------
+# /timeline
+# ---------------------------------------------------------------------------
+
+_FEED_ENTRY_REVIEW = MagicMock(
+    ts=datetime(2026, 7, 2, 9, 0),
+    kind="review",
+    author="editor@example.com",
+    segment_id=42,
+    locator="I.q3.a1.arg1",
+    summary="reviewed",
+    translated=None,
+    needs_human=None,
+    cost=None,
+)
+
+_FEED_ENTRY_RUN = MagicMock(
+    ts=datetime(2026, 7, 2, 7, 0),
+    kind="run",
+    author=None,
+    segment_id=None,
+    locator=None,
+    summary="pilot_sample",
+    translated=10,
+    needs_human=2,
+    cost=1.5,
+)
+
+
+def test_timeline_page_returns_403_for_anonymous(client):
+    resp = client.get("/timeline")
+    assert resp.status_code == 403
+
+
+def test_timeline_page_returns_403_for_editor_non_admin(editor_client):
+    resp = editor_client.get("/timeline")
+    assert resp.status_code == 403
+
+
+def test_timeline_page_returns_200_for_admin(admin_client):
+    with patch("server.app.get_activity_feed", return_value=[_FEED_ENTRY_REVIEW, _FEED_ENTRY_RUN]):
+        resp = admin_client.get("/timeline")
+    assert resp.status_code == 200
+    assert b"pilot_sample" in resp.data
+
+
+def test_timeline_page_passes_before_param(admin_client):
+    with patch("server.app.get_activity_feed", return_value=[]) as mock_feed:
+        admin_client.get("/timeline?before=2026-07-02T09:00:00")
+    _, kwargs = mock_feed.call_args
+    assert kwargs["before"] == "2026-07-02T09:00:00"
+
+
+def test_timeline_page_sets_next_before_when_page_full(admin_client):
+    entries = [_FEED_ENTRY_REVIEW] * 50
+    with patch("server.app.get_activity_feed", return_value=entries):
+        resp = admin_client.get("/timeline")
+    assert b"Load older activity" in resp.data
+
+
+# ---------------------------------------------------------------------------
 # db.is_admin — fail-closed matrix
 # ---------------------------------------------------------------------------
 

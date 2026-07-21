@@ -41,6 +41,7 @@ from server.db import (  # noqa: E402
     approve_proposal,
     approve_segment,
     delete_comment,
+    get_activity_feed,
     get_all_questions,
     get_article_segments,
     get_comment_counts,
@@ -687,6 +688,22 @@ def glossary_proposals_page():
         add_terms=[p for p in proposals if p["kind"] == PROPOSAL_KIND_ADD_TERM],
         cost_per_segment=cost_per_segment,
         ltree_to_url=_ltree_to_url_locator,
+    )
+
+
+@app.route("/timeline")
+@requires_admin
+def timeline_page():
+    """Admin activity feed: reviews, comments, and machine-run markers, newest first."""
+    before = request.args.get("before")
+    with get_conn() as conn:
+        entries = get_activity_feed(conn, before=before, limit=50)
+    next_before = entries[-1].ts.isoformat() if len(entries) == 50 else None
+    return render_template(
+        "timeline.html",
+        entries=entries,
+        ltree_to_url=_ltree_to_url_locator,
+        next_before=next_before,
     )
 
 
