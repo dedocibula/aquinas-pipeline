@@ -10,11 +10,18 @@ from server.db import (
     PROPOSAL_KIND_REMOVE_HERE,
     PROPOSAL_KIND_RETIRE_EVERYWHERE,
     PROPOSAL_KIND_WRONG_SENSE_HERE,
+    add_comment,
+    delete_comment,
+    get_comment_counts,
     get_pending_proposal_counts,
     get_segment_constraints,
     get_term_senses,
+    list_comments,
+    mark_thread_read,
     propose_add_term,
     propose_sense_change,
+    reopen_thread,
+    resolve_thread,
     segment_has_locked_sense,
 )
 
@@ -359,3 +366,127 @@ def test_propose_add_term_valid(fake_conn):
     assert kwargs["kind"] == PROPOSAL_KIND_ADD_TERM
     assert kwargs["latin_lemma"] == "novum"
     assert kwargs["proposed_by"] == "editor@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Comment threads
+# ---------------------------------------------------------------------------
+
+_COMMENT_ROW_1 = {
+    "comment_id": 1,
+    "segment_id": 42,
+    "author": "alice@example.com",
+    "body": "first",
+    "created_at": "2026-07-01T10:00:00+00:00",
+    "resolved": False,
+    "resolved_by": None,
+    "resolved_at": None,
+}
+
+_COMMENT_ROW_2 = {
+    "comment_id": 2,
+    "segment_id": 42,
+    "author": "bob@example.com",
+    "body": "second",
+    "created_at": "2026-07-01T11:00:00+00:00",
+    "resolved": False,
+    "resolved_by": None,
+    "resolved_at": None,
+}
+
+
+def test_list_comments_open_thread(fake_conn):
+    conn = fake_conn(fetchall_rows=[_COMMENT_ROW_1, _COMMENT_ROW_2])
+    thread = list_comments(conn, 42)
+    assert [c.comment_id for c in thread.comments] == [1, 2]
+    assert thread.open_count == 2
+    assert thread.resolved is False
+
+
+def test_list_comments_empty_thread_is_not_resolved(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    thread = list_comments(conn, 42)
+    assert thread.comments == []
+    assert thread.open_count == 0
+    assert thread.resolved is False
+
+
+def test_list_comments_all_resolved_thread(fake_conn):
+    resolved_row = dict(_COMMENT_ROW_1, resolved=True, resolved_by="alice@example.com",
+                         resolved_at="2026-07-01T12:00:00+00:00")
+    conn = fake_conn(fetchall_rows=[resolved_row])
+    thread = list_comments(conn, 42)
+    assert thread.open_count == 0
+    assert thread.resolved is True
+
+
+def test_add_comment_returns_new_comment(fake_conn):
+    conn = fake_conn(fetchone_results=[_COMMENT_ROW_1])
+    comment = add_comment(conn, 42, "alice@example.com", "first")
+    assert comment.comment_id == 1
+    assert comment.author == "alice@example.com"
+    sql, params = conn.executed[-1]
+    assert "INSERT INTO segment_comment" in sql
+    assert params == (42, "alice@example.com", "first")
+
+
+def test_resolve_thread_returns_rowcount(fake_conn):
+    conn = fake_conn()
+    conn._cursor.rowcount = 2
+    result = resolve_thread(conn, 42, "admin@example.com")
+    assert result == 2
+    sql, params = conn.executed[-1]
+    assert "resolved = true" in sql
+    assert params == ("admin@example.com", 42)
+
+
+def test_reopen_thread_returns_rowcount(fake_conn):
+    conn = fake_conn()
+    conn._cursor.rowcount = 1
+    result = reopen_thread(conn, 42)
+    assert result == 1
+    sql, params = conn.executed[-1]
+    assert "resolved = false" in sql
+    assert params == (42,)
+
+
+def test_delete_comment_notfound(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert delete_comment(conn, 999, "alice@example.com") == "notfound"
+
+
+def test_delete_comment_forbidden_for_non_author(fake_conn):
+    conn = fake_conn(fetchone_results=[("alice@example.com",)])
+    assert delete_comment(conn, 1, "bob@example.com") == "forbidden"
+
+
+def test_delete_comment_ok_for_author(fake_conn):
+    conn = fake_conn(fetchone_results=[("alice@example.com",)])
+    assert delete_comment(conn, 1, "alice@example.com") == "ok"
+    sql, params = conn.executed[-1]
+    assert "DELETE FROM segment_comment" in sql
+    assert params == (1,)
+
+
+def test_mark_thread_read_upserts(fake_conn):
+    conn = fake_conn()
+    mark_thread_read(conn, 42, "alice@example.com")
+    sql, params = conn.executed[-1]
+    assert "ON CONFLICT (segment_id, user_email)" in sql
+    assert params == (42, "alice@example.com")
+
+
+def test_get_comment_counts_empty_short_circuits(fake_conn):
+    conn = fake_conn()
+    assert get_comment_counts(conn, [], "alice@example.com") == {}
+    assert conn.executed == []
+
+
+def test_get_comment_counts_shapes_result(fake_conn):
+    conn = fake_conn(fetchall_rows=[{"segment_id": 42, "total": 3, "open_count": 2, "unread": 1}])
+    result = get_comment_counts(conn, [42], "alice@example.com")
+    assert result[42].total == 3
+    assert result[42].open_count == 2
+    assert result[42].unread == 1
+    _, params = conn.executed[-1]
+    assert params == ("alice@example.com", "alice@example.com", [42])

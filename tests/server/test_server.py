@@ -11,6 +11,7 @@ Tests cover:
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -623,6 +624,120 @@ def test_review_route_returns_403_for_non_editor(client):
     )
     assert resp.status_code == 403
     assert resp.get_json() == {"ok": False, "error": "forbidden"}
+
+
+# ---------------------------------------------------------------------------
+# Comment thread routes
+# ---------------------------------------------------------------------------
+
+FAKE_THREAD_OPEN = MagicMock(
+    comments=[
+        MagicMock(
+            comment_id=1, segment_id=42, author="editor@example.com", body="hi",
+            created_at=datetime(2026, 7, 1, 10, 0),
+            resolved=False, resolved_by=None, resolved_at=None,
+        ),
+    ],
+    resolved=False,
+    open_count=1,
+)
+
+
+def test_list_comments_route_marks_thread_read(editor_client):
+    """GET .../comments returns the thread and marks it read for the caller."""
+    with (
+        patch("server.app.list_comments", return_value=FAKE_THREAD_OPEN) as mock_list,
+        patch("server.app.mark_thread_read") as mock_mark,
+    ):
+        resp = editor_client.get("/api/segment/42/comments")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["open_count"] == 1
+    assert data["comments"][0]["author"] == "editor@example.com"
+    mock_list.assert_called_once_with(mock_list.call_args[0][0], 42)
+    mock_mark.assert_called_once_with(mock_mark.call_args[0][0], 42, "editor@example.com")
+
+
+def test_list_comments_route_403_for_non_editor(client):
+    resp = client.get("/api/segment/42/comments")
+    assert resp.status_code == 403
+
+
+def test_add_comment_route_returns_new_comment(editor_client):
+    fake_comment = MagicMock(
+        comment_id=5, segment_id=42, author="editor@example.com", body="reply",
+        created_at=datetime(2026, 7, 1, 10, 0),
+        resolved=False, resolved_by=None, resolved_at=None,
+    )
+    with patch("server.app.add_comment", return_value=fake_comment) as mock_add:
+        resp = editor_client.post(
+            "/api/segment/42/comments", json={"body": "reply"}, content_type="application/json",
+        )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["comment"]["comment_id"] == 5
+    mock_add.assert_called_once_with(
+        mock_add.call_args[0][0], 42, "editor@example.com", "reply"
+    )
+
+
+def test_add_comment_route_rejects_empty_body(editor_client):
+    resp = editor_client.post(
+        "/api/segment/42/comments", json={"body": "  "}, content_type="application/json",
+    )
+    assert resp.status_code == 400
+
+
+def test_add_comment_route_403_for_non_editor(client):
+    resp = client.post(
+        "/api/segment/42/comments", json={"body": "x"}, content_type="application/json",
+    )
+    assert resp.status_code == 403
+
+
+def test_resolve_thread_route_returns_ok(editor_client):
+    with patch("server.app.resolve_thread") as mock_resolve:
+        resp = editor_client.post("/api/segment/42/comments/resolve")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    mock_resolve.assert_called_once_with(
+        mock_resolve.call_args[0][0], 42, "editor@example.com"
+    )
+
+
+def test_reopen_thread_route_returns_ok(editor_client):
+    with patch("server.app.reopen_thread") as mock_reopen:
+        resp = editor_client.post("/api/segment/42/comments/reopen")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    mock_reopen.assert_called_once_with(mock_reopen.call_args[0][0], 42)
+
+
+def test_delete_comment_route_ok(editor_client):
+    with patch("server.app.delete_comment", return_value="ok") as mock_delete:
+        resp = editor_client.delete("/api/comment/1")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    mock_delete.assert_called_once_with(mock_delete.call_args[0][0], 1, "editor@example.com")
+
+
+def test_delete_comment_route_notfound(editor_client):
+    with patch("server.app.delete_comment", return_value="notfound"):
+        resp = editor_client.delete("/api/comment/999")
+    assert resp.status_code == 404
+
+
+def test_delete_comment_route_forbidden(editor_client):
+    with patch("server.app.delete_comment", return_value="forbidden"):
+        resp = editor_client.delete("/api/comment/1")
+    assert resp.status_code == 403
+
+
+def test_delete_comment_route_403_for_non_editor(client):
+    resp = client.delete("/api/comment/1")
+    assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------

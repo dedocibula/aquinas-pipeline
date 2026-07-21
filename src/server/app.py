@@ -37,10 +37,13 @@ from server.db import (  # noqa: E402
     PROPOSAL_KIND_RETIRE_EVERYWHERE,
     PROPOSAL_KIND_WRONG_SENSE_HERE,
     ProposalRaceError,
+    add_comment,
     approve_proposal,
     approve_segment,
+    delete_comment,
     get_all_questions,
     get_article_segments,
+    get_comment_counts,
     get_cost_per_segment,
     get_distinct_pars,
     get_pending_proposal_count,
@@ -57,9 +60,13 @@ from server.db import (  # noqa: E402
     get_translation_progress,
     is_admin,
     is_editor,
+    list_comments,
+    mark_thread_read,
     propose_add_term,
     propose_sense_change,
     reject_proposal,
+    reopen_thread,
+    resolve_thread,
     review_segment,
     unapprove_segment,
 )
@@ -288,6 +295,7 @@ def _question_view(ltree_path: str, st_locator: str):
             {c["sense_id"] for lst in (title_constraints, preamble_constraints) for c in lst}
         )
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
+        comment_counts = get_comment_counts(conn, constraint_ids, session.get("email"))
 
     if not articles:
         abort(404)
@@ -307,6 +315,7 @@ def _question_view(ltree_path: str, st_locator: str):
         preamble_seg=preamble_seg,
         preamble_constraints=preamble_constraints,
         pending_counts=pending_counts,
+        comment_counts=comment_counts,
     )
 
 
@@ -320,6 +329,7 @@ def _article_view(ltree_path: str, st_locator: str):
         constraints = get_segment_constraints(conn, segment_ids)
         pending_sense_ids = sorted({c["sense_id"] for lst in constraints.values() for c in lst})
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
+        comment_counts = get_comment_counts(conn, segment_ids, session.get("email"))
 
     # Build arg/reply numbering maps.
     # arg_number[segment_id] = sequential 1-based index among args in this article.
@@ -356,6 +366,7 @@ def _article_view(ltree_path: str, st_locator: str):
         formulas=_formulas,
         constraints=constraints,
         pending_counts=pending_counts,
+        comment_counts=comment_counts,
     )
 
 
@@ -445,6 +456,87 @@ def review_segment_route(segment_id: int):
     if result == "notfound":
         return jsonify({"ok": False, "error": "not found"}), 404
     return jsonify({"ok": False, "error": "conflict"}), 409
+
+
+# ---------------------------------------------------------------------------
+# Comment threads (editor-internal, per segment)
+# ---------------------------------------------------------------------------
+
+
+def _thread_json(thread) -> dict:
+    return {
+        "comments": [_comment_json(c) for c in thread.comments],
+        "resolved": thread.resolved,
+        "open_count": thread.open_count,
+    }
+
+
+def _comment_json(c) -> dict:
+    return {
+        "comment_id": c.comment_id,
+        "segment_id": c.segment_id,
+        "author": c.author,
+        "body": c.body,
+        "created_at": c.created_at.isoformat(),
+        "resolved": c.resolved,
+        "resolved_by": c.resolved_by,
+        "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
+    }
+
+
+@app.route("/api/segment/<int:segment_id>/comments", methods=["GET"])
+@requires_editor
+def list_comments_route(segment_id: int):
+    """Return a segment's comment thread and mark it read for the current user."""
+    with get_conn() as conn:
+        thread = list_comments(conn, segment_id)
+        mark_thread_read(conn, segment_id, session["email"])
+    return jsonify({"ok": True, **_thread_json(thread)})
+
+
+@app.route("/api/segment/<int:segment_id>/comments", methods=["POST"])
+@requires_editor
+def add_comment_route(segment_id: int):
+    """Add a comment. Body: ``{body}``. Reopens the thread if it was resolved."""
+    data = request.get_json(silent=True) or {}
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"ok": False, "error": "empty body"}), 400
+
+    with get_conn() as conn:
+        comment = add_comment(conn, segment_id, session["email"], body)
+    return jsonify({"ok": True, "comment": _comment_json(comment)})
+
+
+@app.route("/api/segment/<int:segment_id>/comments/resolve", methods=["POST"])
+@requires_editor
+def resolve_thread_route(segment_id: int):
+    """Mark every open comment in the segment's thread as resolved."""
+    with get_conn() as conn:
+        resolve_thread(conn, segment_id, session["email"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/segment/<int:segment_id>/comments/reopen", methods=["POST"])
+@requires_editor
+def reopen_thread_route(segment_id: int):
+    """Clear resolved state on the segment's thread."""
+    with get_conn() as conn:
+        reopen_thread(conn, segment_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/comment/<int:comment_id>", methods=["DELETE"])
+@requires_editor
+def delete_comment_route(comment_id: int):
+    """Delete a comment. Only its author may delete it."""
+    with get_conn() as conn:
+        result = delete_comment(conn, comment_id, session["email"])
+    if result == "ok":
+        return jsonify({"ok": True})
+    if result == "notfound":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    return jsonify({"ok": False, "error": "forbidden"}), 403
 
 
 # ---------------------------------------------------------------------------

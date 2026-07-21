@@ -19,6 +19,7 @@ from review.glossary_apply import (
     apply_sense_here,
 )
 from storage.db import source_id
+from storage.models import Comment, CommentCount, CommentThread
 from storage.repositories import GlossaryRepository, ProposalRepository
 
 # Editor glossary-proposal kinds (glossary_proposal.kind CHECK constraint,
@@ -941,6 +942,144 @@ def review_segment(
             )
 
         return ("ok", new_version)
+
+
+# ---------------------------------------------------------------------------
+# Comment threads (editor-internal, per segment)
+# ---------------------------------------------------------------------------
+
+_COMMENT_COLUMNS = (
+    "comment_id, segment_id, author, body, created_at, resolved, resolved_by, resolved_at"
+)
+
+
+def list_comments(conn: psycopg2.extensions.connection, segment_id: int) -> CommentThread:
+    """Return the full comment thread for a segment, oldest first."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            SELECT {_COMMENT_COLUMNS}
+            FROM segment_comment
+            WHERE segment_id = %s
+            ORDER BY created_at ASC
+            """,
+            (segment_id,),
+        )
+        comments = [Comment(**dict(row)) for row in cur.fetchall()]
+    open_count = sum(1 for c in comments if not c.resolved)
+    resolved = bool(comments) and open_count == 0
+    return CommentThread(comments=comments, resolved=resolved, open_count=open_count)
+
+
+def add_comment(conn: psycopg2.extensions.connection, segment_id: int, author: str, body: str) -> Comment:
+    """Insert a new comment. A new comment on a resolved thread implicitly reopens it."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            INSERT INTO segment_comment (segment_id, author, body)
+            VALUES (%s, %s, %s)
+            RETURNING {_COMMENT_COLUMNS}
+            """,
+            (segment_id, author, body),
+        )
+        row = cur.fetchone()
+    return Comment(**dict(row))
+
+
+def resolve_thread(conn: psycopg2.extensions.connection, segment_id: int, resolver_email: str) -> int:
+    """Mark every open comment in the thread as resolved. Returns the number of rows flipped."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE segment_comment
+               SET resolved = true, resolved_by = %s, resolved_at = now()
+             WHERE segment_id = %s AND resolved = false
+            """,
+            (resolver_email, segment_id),
+        )
+        return cur.rowcount
+
+
+def reopen_thread(conn: psycopg2.extensions.connection, segment_id: int) -> int:
+    """Clear resolved state on every comment in the thread. Returns rows flipped."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE segment_comment
+               SET resolved = false, resolved_by = NULL, resolved_at = NULL
+             WHERE segment_id = %s AND resolved = true
+            """,
+            (segment_id,),
+        )
+        return cur.rowcount
+
+
+def delete_comment(conn: psycopg2.extensions.connection, comment_id: int, requester_email: str) -> str:
+    """Delete a comment iff the requester is its author.
+
+    Returns ``"ok"``, ``"notfound"``, or ``"forbidden"``.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT author FROM segment_comment WHERE comment_id = %s", (comment_id,))
+        row = cur.fetchone()
+        if row is None:
+            return "notfound"
+        if row[0] != requester_email:
+            return "forbidden"
+        cur.execute("DELETE FROM segment_comment WHERE comment_id = %s", (comment_id,))
+    return "ok"
+
+
+def mark_thread_read(conn: psycopg2.extensions.connection, segment_id: int, user_email: str) -> None:
+    """Bump the viewer's read watermark for a segment's thread (clears the unread dot)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO comment_thread_state (segment_id, user_email, last_read_at)
+            VALUES (%s, %s, now())
+            ON CONFLICT (segment_id, user_email) DO UPDATE SET last_read_at = now()
+            """,
+            (segment_id, user_email),
+        )
+
+
+def get_comment_counts(
+    conn: psycopg2.extensions.connection, segment_ids: list[int], viewer_email: str
+) -> dict[int, CommentCount]:
+    """Return per-segment comment badge counts for the given segments.
+
+    ``unread`` counts comments by other authors newer than the viewer's
+    ``last_read_at`` watermark (NULL watermark means everything is unread).
+    Segments with no comments are omitted from the result.
+    """
+    if not segment_ids:
+        return {}
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+                c.segment_id,
+                count(*)                                                      AS total,
+                count(*) FILTER (WHERE NOT c.resolved)                        AS open_count,
+                count(*) FILTER (
+                    WHERE c.author <> %s
+                      AND c.created_at > COALESCE(st.last_read_at, '-infinity'::timestamptz)
+                )                                                             AS unread
+            FROM segment_comment c
+            LEFT JOIN comment_thread_state st
+                   ON st.segment_id = c.segment_id AND st.user_email = %s
+            WHERE c.segment_id = ANY(%s)
+            GROUP BY c.segment_id
+            """,
+            (viewer_email, viewer_email, segment_ids),
+        )
+        rows = cur.fetchall()
+    return {
+        row["segment_id"]: CommentCount(
+            total=int(row["total"]), open_count=int(row["open_count"]), unread=int(row["unread"])
+        )
+        for row in rows
+    }
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:
