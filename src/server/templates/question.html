@@ -32,7 +32,8 @@
     {% if title_seg %}
     {% set seg = title_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr class="row-question_title{% if needs_human and is_editor %} row-needs-human{% endif %}"
+    <tr id="seg-{{ seg.segment_id }}"
+      class="row-question_title{% if needs_human and is_editor %} row-needs-human{% endif %}"
       data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Nadpis</td>
       <td class="col-latin">
@@ -43,7 +44,7 @@
       <td class="col-slovak slovak">
         {{ panel.segment_panel(seg, title_constraints, is_editor, pending_counts) }}
       </td>
-      {{ panel.status_cell(seg, is_editor) }}
+      {{ panel.status_cell(seg, is_editor, comment_counts) }}
     </tr>
     {% endif %}
 
@@ -51,7 +52,8 @@
     {% if preamble_seg %}
     {% set seg = preamble_seg %}
     {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr class="row-preamble{% if needs_human and is_editor %} row-needs-human{% endif %}"
+    <tr id="seg-{{ seg.segment_id }}"
+      class="row-preamble{% if needs_human and is_editor %} row-needs-human{% endif %}"
       data-segment-id="{{ seg.segment_id }}">
       <td class="col-label">Preambula</td>
       <td class="col-latin">
@@ -62,7 +64,7 @@
       <td class="col-slovak slovak">
         {{ panel.segment_panel(seg, preamble_constraints, is_editor, pending_counts) }}
       </td>
-      {{ panel.status_cell(seg, is_editor) }}
+      {{ panel.status_cell(seg, is_editor, comment_counts) }}
     </tr>
     {% endif %}
   </tbody>
@@ -127,9 +129,11 @@
   }());
 </script>
 {% if is_editor %}
+{% include "_comment_sidebar.html" %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
 <script src="{{ url_for('static', filename='review.js') }}"></script>
 <script src="{{ url_for('static', filename='proposals.js') }}"></script>
+<script src="{{ url_for('static', filename='comments.js') }}"></script>
 {% endif %}
 {% endif %}
 {% endblock %}

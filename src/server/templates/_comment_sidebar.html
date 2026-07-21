@@ -1,0 +1,23 @@
+{#
+  Google-Docs-style thread drawer for the active segment's comments.
+  Included once per page (article.html / question.html); driven entirely by comments.js.
+#}
+<aside id="comment-sidebar" class="comment-sidebar" style="display:none" data-segment-id="">
+  <div class="comment-sidebar-header">
+    <span class="comment-sidebar-title">Comments</span>
+    <button id="comment-sidebar-close" class="btn-comment-close" title="close">&times;</button>
+  </div>
+
+  <div id="comment-sidebar-status" class="comment-sidebar-status" style="display:none"></div>
+
+  <div id="comment-list" class="comment-list"></div>
+
+  <div class="comment-compose">
+    <textarea id="comment-textarea" rows="2" placeholder="Add a comment…"></textarea>
+    <div class="comment-compose-actions">
+      <button id="comment-add-btn" class="btn-comment-add">Add comment</button>
+      <button id="comment-resolve-btn" class="btn-comment-resolve">Resolve</button>
+      <button id="comment-reopen-btn" class="btn-comment-reopen" style="display:none">Reopen</button>
+    </div>
+  </div>
+</aside>

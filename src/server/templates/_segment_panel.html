@@ -7,9 +7,10 @@
     — seg_constraints: list of {sense_id, latin_lemma, context_label, slovak} dicts.
     — pending_counts: {sense_id: pending_proposal_count} — powers the "proposal pending" badge.
 
-  status_cell(seg, is_editor)
-    — renders the <td class="col-status"> (badge + Review button).
+  status_cell(seg, is_editor, comment_counts={})
+    — renders the <td class="col-status"> (badge + Review button + Comment button).
       Outputs nothing when is_editor is false.
+    — comment_counts: {segment_id: CommentCount(total, open_count, unread)}.
 #}
 
 {% macro segment_panel(seg, seg_constraints, is_editor, pending_counts={}) %}
@@ -196,10 +197,11 @@
 {% endmacro %}
 
 
-{% macro status_cell(seg, is_editor) %}
+{% macro status_cell(seg, is_editor, comment_counts={}) %}
   {% if is_editor %}
   {% set ts          = seg.translation_status %}
   {% set needs_human = (ts == 'needs_human') %}
+  {% set c           = comment_counts.get(seg.segment_id) %}
   <td class="col-status">
     <div class="status-badges">
       {% if ts == 'translated' %}
@@ -213,6 +215,14 @@
               data-segment-id="{{ seg.segment_id }}"
               {% if seg.human_reviewed_by %}title="Reviewed by {{ seg.human_reviewed_by }}"{% endif %}>
         {% if seg.human_reviewed_by %}&#10003; Reviewed{% else %}&#9998; Review{% endif %}
+      </button>
+      <button class="btn-comment{% if c and c.open_count %} btn-comment-open{% endif %}"
+              data-segment-id="{{ seg.segment_id }}"
+              data-open-count="{{ c.open_count if c else 0 }}"
+              data-unread="{{ c.unread if c else 0 }}"
+              title="comments">
+        &#128172;{% if c and c.open_count %} {{ c.open_count }}{% endif %}
+        <span class="comment-unread-dot" {% if not (c and c.unread) %}style="display:none"{% endif %}></span>
       </button>
     </div>
   </td>

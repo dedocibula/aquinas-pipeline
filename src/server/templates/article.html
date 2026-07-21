@@ -82,7 +82,8 @@
       {% set needs_human = (ts == 'needs_human') %}
 
 
-      <tr class="row-{{ etype }}{% if needs_human and is_editor %} row-needs-human{% endif %}"
+      <tr id="seg-{{ seg.segment_id }}"
+          class="row-{{ etype }}{% if needs_human and is_editor %} row-needs-human{% endif %}"
           data-segment-id="{{ seg.segment_id }}">
         <td class="col-label">
           {{ label }}
@@ -95,7 +96,7 @@
         <td class="col-slovak slovak">
           {{ panel.segment_panel(seg, constraints.get(seg.segment_id, []), is_editor, pending_counts) }}
         </td>
-        {{ panel.status_cell(seg, is_editor) }}
+        {{ panel.status_cell(seg, is_editor, comment_counts) }}
       </tr>
     {% else %}
       <tr>
@@ -145,8 +146,10 @@ document.querySelectorAll('.detail-toggle').forEach(function (btn) {
 });
 </script>
 {% if is_editor %}
+{% include "_comment_sidebar.html" %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
 <script src="{{ url_for('static', filename='review.js') }}"></script>
 <script src="{{ url_for('static', filename='proposals.js') }}"></script>
+<script src="{{ url_for('static', filename='comments.js') }}"></script>
 {% endif %}
 {% endblock %}
