@@ -340,6 +340,44 @@ CREATE TABLE segment_review (
 );
 
 
+-- ── segment_comment ─────────────────────────────────────────────────────────
+-- Editor-internal threaded comments per segment (Google-Docs-style sidebar).
+-- Flat thread per segment; resolution is thread-level (all open rows flipped
+-- together). A new comment on a resolved thread reopens it (resolved=false).
+--   Produced by: server/db.py add_comment()/resolve_thread()/reopen_thread().
+--   Consumed by: server/db.py list_comments()/get_comment_counts() (sidebar,
+--   status_cell badge), get_activity_feed() (admin timeline), collect_digests()
+--   (daily email digest).
+CREATE TABLE segment_comment (
+    comment_id   serial      PRIMARY KEY,
+    segment_id   integer     NOT NULL REFERENCES segment(segment_id),
+    author       text        NOT NULL,
+    body         text        NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    resolved     boolean     NOT NULL DEFAULT false,
+    resolved_by  text        NULL,
+    resolved_at  timestamptz NULL
+);
+CREATE INDEX segment_comment_segment_idx ON segment_comment (segment_id, created_at);
+
+
+-- ── comment_thread_state ────────────────────────────────────────────────────
+-- Per-(user,segment) read/notify watermarks for comment threads.
+-- last_read_at bumps when the user opens the sidebar (in-app unread dot).
+-- last_notified_at bumps when a digest email covering this segment is sent
+-- (digest de-dupe, independent of last_read_at).
+--   Produced by: server/db.py mark_thread_read() / notify.digest mark_thread_notified().
+--   Consumed by: server/db.py get_comment_counts() (unread), collect_digests()
+--   (email-worthy filter).
+CREATE TABLE comment_thread_state (
+    segment_id       integer     NOT NULL REFERENCES segment(segment_id),
+    user_email       text        NOT NULL,
+    last_read_at     timestamptz NULL,
+    last_notified_at timestamptz NULL,
+    PRIMARY KEY (segment_id, user_email)
+);
+
+
 -- ============================================================================
 -- SEED DATA — required for a functional fresh install (part of the schema, not
 -- corpus content). The source precedence order is load, not preference.

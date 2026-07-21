@@ -353,6 +353,56 @@ CLI-only.
 
 ---
 
+## `segment_comment`
+
+Editor-internal threaded comments per segment, added by migration 015 (Comment Threads, Admin
+Timeline & Daily Digest plan, `.claude/server_comments_timeline_digest_plan.md`). Google-Docs-style
+sidebar, editor-only (not shown to anonymous readers) — coexists with, does not replace, the
+existing single public "translator note" (`segment_review.human_note`). Flat thread per segment;
+resolution is thread-level (all open rows flip together on Resolve). A new comment on a resolved
+thread reopens it.
+
+| column | type | notes |
+|---|---|---|
+| `comment_id` | serial PK | |
+| `segment_id` | FK→segment NOT NULL | |
+| `author` | text NOT NULL | editor email (plain text, like `segment_review.human_reviewed_by`) |
+| `body` | text NOT NULL | |
+| `created_at` | timestamptz NOT NULL DEFAULT now() | |
+| `resolved` | boolean NOT NULL DEFAULT false | |
+| `resolved_by` | text NULL | admin/editor email that resolved the thread |
+| `resolved_at` | timestamptz NULL | |
+
+Produced by: `server/db.py` `add_comment()` (insert), `resolve_thread()`/`reopen_thread()` (bulk
+update all rows for a segment), `delete_comment()` (author-only delete).
+Read by: `list_comments()`/`get_comment_counts()` (sidebar + `status_cell` 💬 badge);
+`get_activity_feed()` (admin `/timeline`, comment rows); `collect_digests()` (daily email digest —
+each comment is a candidate digest item for every other thread participant).
+
+## `comment_thread_state`
+
+Per-(user, segment) read/notify watermarks for comment threads, added by migration 015 alongside
+`segment_comment`. Two independent watermarks: `last_read_at` drives the in-app unread indicator,
+`last_notified_at` drives digest de-duplication — a comment can be read without being notified (or
+vice versa), so both are tracked separately.
+
+| column | type | notes |
+|---|---|---|
+| `segment_id` | FK→segment NOT NULL | |
+| `user_email` | text NOT NULL | |
+| `last_read_at` | timestamptz NULL | bumped when the user opens the sidebar for this segment |
+| `last_notified_at` | timestamptz NULL | bumped after a digest email covering this segment is sent to this user |
+
+PK: `(segment_id, user_email)`.
+
+Produced by: `server/db.py` `mark_thread_read()` (upsert on sidebar open); `notify/digest.py`
+`mark_thread_notified()` (upsert after a successful digest send, per recipient/segment).
+Read by: `get_comment_counts()` (unread = comments by others newer than `last_read_at`);
+`collect_digests()` (email-worthy = `created_at > COALESCE(GREATEST(last_read_at,
+last_notified_at), -infinity)`; a NULL watermark means "everything is unread/unnotified").
+
+---
+
 ## Views
 
 ```sql

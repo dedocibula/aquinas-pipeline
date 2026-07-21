@@ -16,12 +16,19 @@ re-exported here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 __all__ = [
     "Sense",
     "Term",
     "Segment",
     "Constraint",
+    "Comment",
+    "CommentThread",
+    "CommentCount",
+    "ActivityEntry",
+    "DigestItem",
+    "UserDigest",
 ]
 
 
@@ -186,6 +193,72 @@ class Constraint:
             "context_label": self.context_label,
             "category": self.category or "term",
         }
+
+
+@dataclass(frozen=True)
+class Comment:
+    """One reply in a segment's editor-internal comment thread."""
+
+    comment_id: int
+    segment_id: int
+    author: str
+    body: str
+    created_at: datetime
+    resolved: bool
+    resolved_by: str | None
+    resolved_at: datetime | None
+
+
+@dataclass(frozen=True)
+class CommentThread:
+    """A segment's full comment thread, with the resolve state derived."""
+
+    comments: list[Comment]
+    resolved: bool  # thread is resolved when it has comments and none are open
+    open_count: int
+
+
+@dataclass(frozen=True)
+class CommentCount:
+    """Per-segment comment badge counts, from ``get_comment_counts``."""
+
+    total: int
+    open_count: int
+    unread: int  # comments by others newer than the viewer's last_read_at
+
+
+@dataclass(frozen=True)
+class ActivityEntry:
+    """One row of the admin `/timeline` activity feed (review, comment, or run)."""
+
+    ts: datetime
+    kind: str  # "review" | "comment" | "run"
+    author: str | None
+    segment_id: int | None
+    locator: str | None
+    summary: str
+    translated: int | None = None  # run-only
+    needs_human: int | None = None  # run-only
+    cost: float | None = None  # run-only
+
+
+@dataclass(frozen=True)
+class DigestItem:
+    """One unread comment reply to include in a recipient's daily digest email."""
+
+    segment_id: int
+    locator: str
+    author: str
+    created_at: datetime
+    body: str
+
+
+@dataclass(frozen=True)
+class UserDigest:
+    """All digest-worthy items for one recipient, from ``collect_digests``."""
+
+    user_email: str
+    items: list[DigestItem]
 
 
 def _get(row, key, default=None):
