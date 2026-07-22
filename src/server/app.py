@@ -274,6 +274,12 @@ def text_view(st_locator: str):
     elif depth == 2:
         return _question_view(ltree_path, st_locator)
     elif depth == 3:
+        # 'preamble' is the one element_type whose locator sits at article depth
+        # (<question_path>.preamble) but is rendered on the question page, not
+        # its own article page (see get_question_articles / get_question_preamble_segment).
+        if ltree_path.rsplit(".", 1)[-1].lower() == "preamble":
+            question_path = ltree_path.rsplit(".", 1)[0]
+            return _question_view(question_path, _ltree_to_url_locator(question_path))
         return _article_view(ltree_path, st_locator)
     else:
         abort(404)
@@ -296,7 +302,9 @@ def _question_view(ltree_path: str, st_locator: str):
             {c["sense_id"] for lst in (title_constraints, preamble_constraints) for c in lst}
         )
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
-        comment_counts = get_comment_counts(conn, constraint_ids, session.get("email"))
+        comment_counts = (
+            get_comment_counts(conn, constraint_ids, session["email"]) if session.get("is_editor") else {}
+        )
 
     if not articles:
         abort(404)
@@ -330,7 +338,9 @@ def _article_view(ltree_path: str, st_locator: str):
         constraints = get_segment_constraints(conn, segment_ids)
         pending_sense_ids = sorted({c["sense_id"] for lst in constraints.values() for c in lst})
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
-        comment_counts = get_comment_counts(conn, segment_ids, session.get("email"))
+        comment_counts = (
+            get_comment_counts(conn, segment_ids, session["email"]) if session.get("is_editor") else {}
+        )
 
     # Build arg/reply numbering maps.
     # arg_number[segment_id] = sequential 1-based index among args in this article.
@@ -506,7 +516,8 @@ def add_comment_route(segment_id: int):
 
     with get_conn() as conn:
         comment = add_comment(conn, segment_id, session["email"], body)
-    return jsonify({"ok": True, "comment": _comment_json(comment)})
+        thread = list_comments(conn, segment_id)
+    return jsonify({"ok": True, "comment": _comment_json(comment), "open_count": thread.open_count})
 
 
 @app.route("/api/segment/<int:segment_id>/comments/resolve", methods=["POST"])

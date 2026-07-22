@@ -141,14 +141,12 @@
         var emptyEl = listEl.querySelector('.comment-empty');
         if (emptyEl) emptyEl.remove();
         listEl.appendChild(_renderComment(data.comment));
-        // A new comment always reopens the thread.
+        // A new comment always reopens the thread, but earlier comments keep
+        // whatever resolved state they already had — only the thread-level
+        // resolved flag (derived from open_count) flips.
         resolveBtn.style.display = '';
         reopenBtn.style.display  = 'none';
-        listEl.querySelectorAll('.comment-card-resolved').forEach(function (el) {
-          el.classList.remove('comment-card-resolved');
-        });
-        var openCount = listEl.querySelectorAll('.comment-card').length;
-        _updateButton(segId, openCount, 0);
+        _updateButton(segId, data.open_count, 0);
       })
       .catch(function () {
         addBtn.disabled = false;

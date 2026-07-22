@@ -30,10 +30,12 @@
     </li>
     {% else %}
     {% set article_path = e.locator.split('.')[:3] | join('.') %}
+    {% set coord = ltree_to_url(article_path) %}
     <li class="timeline-entry timeline-{{ e.kind }}">
       <span class="timeline-time">{{ e.ts.strftime('%H:%M') }}</span>
       <span class="timeline-author">{{ e.author or '—' }}</span>
-      <a class="timeline-link" href="/~{{ ltree_to_url(article_path) }}#seg-{{ e.segment_id }}">
+      <span class="timeline-coord">{{ coord }}</span>
+      <a class="timeline-link" href="/~{{ coord }}#seg-{{ e.segment_id }}">
         {{ e.kind }}: {{ e.summary }}
       </a>
     </li>

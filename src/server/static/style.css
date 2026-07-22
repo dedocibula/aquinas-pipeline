@@ -100,6 +100,18 @@ main {
   margin-bottom: 2rem;
 }
 
+.progress-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.progress-header-link {
+  font-family: inherit;
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
 .progress-track {
   height: 16px;
   background: #e8e0d0;
@@ -300,11 +312,6 @@ a.badge:hover {
 .badge-proposals {
   background: #d1e7fb;
   color: #1a5a96;
-}
-
-.badge-timeline {
-  background: #e5dcf5;
-  color: #5a3a96;
 }
 
 /* --- needs_human row prominence --- */
@@ -1369,6 +1376,16 @@ tr.row-comment-active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.timeline-coord {
+  color: #6a5a3a;
+  font-family: sans-serif;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  width: 11rem;
+  margin-right: 0.6rem;
+  flex-shrink: 0;
 }
 
 .timeline-link {

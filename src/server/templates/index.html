@@ -7,47 +7,51 @@
 
 {% if is_editor %}
 <section class="progress-bar-section">
-  <h2>Translation progress</h2>
+  <div class="progress-header">
+    <h2>Translation progress</h2>
+    {% if is_admin %}
+    <a href="/timeline" class="progress-header-link">Activity Timeline</a>
+    {% endif %}
+  </div>
   {% set total = progress.pending + progress.translated + progress.needs_human %}
   {% if total > 0 %}
-    {% set pct = (progress.translated / total * 100) | round(1) %}
-    <div class="progress-track">
-      <div class="progress-fill" style="width: {{ pct }}%"></div>
-    </div>
-    <p class="progress-legend">
-      <a href="/status/translated" class="badge badge-ok">&#10003; {{ progress.translated }} translated</a>
-      <a href="/status/needs_human" class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</a>
-      <a href="/status/pending" class="badge badge-pending">&#8230; {{ progress.pending }} pending</a>
-      {% if is_admin %}
-      <a href="/glossary/proposals" class="badge badge-proposals">{{ progress.pending_proposals }} glossary proposals</a>
-      <a href="/timeline" class="badge badge-timeline">Timeline</a>
-      {% endif %}
-    </p>
+  {% set pct = (progress.translated / total * 100) | round(1) %}
+  <div class="progress-track">
+    <div class="progress-fill" style="width: {{ pct }}%"></div>
+  </div>
+  <p class="progress-legend">
+    <a href="/status/translated" class="badge badge-ok">&#10003; {{ progress.translated }} translated</a>
+    <a href="/status/needs_human" class="badge badge-warn">&#9888; {{ progress.needs_human }} needs review</a>
+    <a href="/status/pending" class="badge badge-pending">&#8230; {{ progress.pending }} pending</a>
+    {% if is_admin %}
+    <a href="/glossary/proposals" class="badge badge-proposals">{{ progress.pending_proposals }} glossary proposals</a>
+    {% endif %}
+  </p>
   {% else %}
-    <p>No segments found.</p>
+  <p>No segments found.</p>
   {% endif %}
 </section>
 {% endif %}
 
 {% for pars, questions in grouped.items() %}
-  <section class="pars-section">
-    <h2>
-      Pars {{ pars }}
-      {% if is_editor %}
-        <a href="/export/{{ pars }}" class="btn-export">&#8595; XLIFF</a>
-      {% endif %}
-    </h2>
-    <ul class="question-list">
-      {% for q in questions %}
-        <li>
-          <a href="/~{{ ltree_to_url(q['question_path']) }}">
-            {{ ltree_to_url(q['question_path']) }}
-          </a>
-        </li>
-      {% endfor %}
-    </ul>
-  </section>
+<section class="pars-section">
+  <h2>
+    Pars {{ pars }}
+    {% if is_editor %}
+    <a href="/export/{{ pars }}" class="btn-export">&#8595; XLIFF</a>
+    {% endif %}
+  </h2>
+  <ul class="question-list">
+    {% for q in questions %}
+    <li>
+      <a href="/~{{ ltree_to_url(q['question_path']) }}">
+        {{ ltree_to_url(q['question_path']) }}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
 {% else %}
-  <p>No questions found in the database.</p>
+<p>No questions found in the database.</p>
 {% endfor %}
 {% endblock %}
