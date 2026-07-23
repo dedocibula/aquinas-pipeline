@@ -55,6 +55,10 @@ class EmailSender:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                # Resend sits behind Cloudflare, which blocks the default
+                # "Python-urllib/x.y" User-Agent as a bot signature (its own
+                # error 1010) before the request ever reaches Resend's API.
+                "User-Agent": "aquinas-pipeline-digest/1.0",
             },
         )
         try:
