@@ -1,29 +1,25 @@
 """Daily digest of unread comment replies — one consolidated email per user.
 
-Prefect flow: ``collect_digests`` -> render one text email per recipient -> send ->
-mark_thread_notified (only after a successful send, per recipient). Idempotent: a clean
-re-run (nothing new since the last send) yields ``[]``.
+``collect_digests`` -> render one text email per recipient -> send -> mark_thread_notified
+(only after a successful send, per recipient). Idempotent: a clean re-run (nothing new
+since the last send) yields ``[]``.
 
-Scheduling is an operational step, not a code gate: deploy ``send_comment_digest`` as a
-daily Prefect deployment at ~18:00 Europe/Bratislava, e.g.
-
-    uv run prefect deployment build src/notify/digest.py:send_comment_digest \\
-        -n daily-comment-digest --cron "0 18 * * *" --timezone Europe/Bratislava
+Scheduling is an operational step, not a code gate: run this as a Railway cron service
+(Settings -> Cron Schedule, UTC only), e.g. ``0 16 * * *`` for ~18:00 Europe/Bratislava.
 """
 
 from __future__ import annotations
 
-import logging
 import os
-
-from prefect import flow
 
 from notify.email_sender import DryRunEmailSender, EmailSender
 from server.db import collect_digests, mark_thread_notified
 from storage.db import get_conn
 from storage.models import UserDigest
 
-log = logging.getLogger(__name__)
+
+def _log(msg: str) -> None:
+    print(f"digest: {msg}", flush=True)
 
 
 def _ltree_to_url_locator(ltree_path: str) -> str:
@@ -72,32 +68,43 @@ def render_digest(digest: UserDigest, base_url: str) -> tuple[str, str]:
     return subject, "\n".join(lines).rstrip() + "\n"
 
 
-@flow(name="send-comment-digest")
 def send_comment_digest(sender: EmailSender | DryRunEmailSender | None = None) -> list[str]:
     """Send today's digest to every recipient with unread comment replies.
 
     ``sender`` defaults to ``EmailSender.from_env()``; pass a ``DryRunEmailSender`` for
-    tests/local runs without SMTP. Returns the user_emails a digest was sent to.
+    tests/local runs without SMTP. Returns the user_emails a digest was actually sent to
+    (a recipient whose send fails is skipped, logged, and left un-notified for retry).
     """
     base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
     sender = sender or EmailSender.from_env()
 
+    _log("starting comment scan")
     with get_conn() as conn:
         digests = collect_digests(conn)
+    total_items = sum(len(d.items) for d in digests)
+    _log(f"found {len(digests)} recipient(s), {total_items} unread item(s) total")
 
     sent_to: list[str] = []
+    failed_to: list[str] = []
     for digest in digests:
         subject, body = render_digest(digest, base_url)
-        sender.send(digest.user_email, subject, body)
+        _log(f"sending to {digest.user_email} ({len(digest.items)} item(s))")
+        try:
+            sender.send(digest.user_email, subject, body)
+        except Exception as exc:
+            _log(f"FAILED sending to {digest.user_email}: {exc!r}")
+            failed_to.append(digest.user_email)
+            continue
+
         sent_to.append(digest.user_email)
         with get_conn() as conn:
             for seg_id in {item.segment_id for item in digest.items}:
                 mark_thread_notified(conn, seg_id, digest.user_email)
+        _log(f"sent to {digest.user_email}")
 
-    log.info("send_comment_digest: sent %d digest(s)", len(sent_to))
+    _log(f"complete — sent {len(sent_to)}/{len(digests)}, failed {len(failed_to)}")
     return sent_to
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     send_comment_digest()
