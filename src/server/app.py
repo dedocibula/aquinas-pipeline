@@ -69,6 +69,7 @@ from server.db import (  # noqa: E402
     reopen_thread,
     resolve_thread,
     review_segment,
+    segment_exists,
     unapprove_segment,
 )
 from storage.db import get_conn  # noqa: E402 — must come after load_dotenv
@@ -500,6 +501,8 @@ def _comment_json(c) -> dict:
 def list_comments_route(segment_id: int):
     """Return a segment's comment thread and mark it read for the current user."""
     with get_conn() as conn:
+        if not segment_exists(conn, segment_id):
+            return jsonify({"ok": False, "error": "not found"}), 404
         thread = list_comments(conn, segment_id)
         mark_thread_read(conn, segment_id, session["email"])
     return jsonify({"ok": True, **_thread_json(thread)})
@@ -515,6 +518,8 @@ def add_comment_route(segment_id: int):
         return jsonify({"ok": False, "error": "empty body"}), 400
 
     with get_conn() as conn:
+        if not segment_exists(conn, segment_id):
+            return jsonify({"ok": False, "error": "not found"}), 404
         comment = add_comment(conn, segment_id, session["email"], body)
         thread = list_comments(conn, segment_id)
     return jsonify({"ok": True, "comment": _comment_json(comment), "open_count": thread.open_count})

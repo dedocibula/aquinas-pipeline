@@ -189,6 +189,13 @@
         }
         var openCount = listEl.querySelectorAll('.comment-card:not(.comment-card-resolved)').length;
         _updateButton(segId, openCount, 0);
+        // Deleting the last open comment can implicitly resolve the thread (mirrors
+        // list_comments' resolved = bool(comments) and open_count==0 on the server);
+        // keep the Resolve/Reopen toggle in sync instead of leaving it stale.
+        var hasComments = !!listEl.querySelector('.comment-card');
+        var nowResolved = hasComments && openCount === 0;
+        resolveBtn.style.display = nowResolved ? 'none' : '';
+        reopenBtn.style.display  = nowResolved ? '' : 'none';
       })
       .catch(function () { alert('Delete failed — server error.'); });
   }

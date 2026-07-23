@@ -25,6 +25,7 @@ from server.db import (
     propose_sense_change,
     reopen_thread,
     resolve_thread,
+    segment_exists,
     segment_has_locked_sense,
 )
 
@@ -396,6 +397,16 @@ _COMMENT_ROW_2 = {
     "resolved_by": None,
     "resolved_at": None,
 }
+
+
+def test_segment_exists_true_when_row_found(fake_conn):
+    conn = fake_conn(fetchone_results=[(1,)])
+    assert segment_exists(conn, 42) is True
+
+
+def test_segment_exists_false_when_no_row(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert segment_exists(conn, 999999) is False
 
 
 def test_list_comments_open_thread(fake_conn):

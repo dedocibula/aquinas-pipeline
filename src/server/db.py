@@ -953,6 +953,19 @@ _COMMENT_COLUMNS = (
 )
 
 
+def segment_exists(conn: psycopg2.extensions.connection, segment_id: int) -> bool:
+    """True if segment_id is a real segment.
+
+    Callers that insert into segment_comment / comment_thread_state (both FK'd to
+    segment) must check this first — otherwise an unknown segment_id surfaces as an
+    unhandled IntegrityError (500) instead of a clean 404, unlike review_segment's
+    explicit notfound check.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+        return cur.fetchone() is not None
+
+
 def list_comments(conn: psycopg2.extensions.connection, segment_id: int) -> CommentThread:
     """Return the full comment thread for a segment, oldest first."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

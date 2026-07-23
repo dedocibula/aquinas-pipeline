@@ -697,6 +697,33 @@ def test_add_comment_route_403_for_non_editor(client):
     assert resp.status_code == 403
 
 
+def test_list_comments_route_404_for_unknown_segment(editor_client):
+    """GET .../comments returns a clean 404 instead of a 500 on a bad FK insert."""
+    with (
+        patch("server.app.segment_exists", return_value=False) as mock_exists,
+        patch("server.app.mark_thread_read") as mock_mark,
+    ):
+        resp = editor_client.get("/api/segment/999999/comments")
+    assert resp.status_code == 404
+    assert resp.get_json() == {"ok": False, "error": "not found"}
+    mock_exists.assert_called_once_with(mock_exists.call_args[0][0], 999999)
+    mock_mark.assert_not_called()
+
+
+def test_add_comment_route_404_for_unknown_segment(editor_client):
+    """POST .../comments returns a clean 404 instead of a 500 on a bad FK insert."""
+    with (
+        patch("server.app.segment_exists", return_value=False),
+        patch("server.app.add_comment") as mock_add,
+    ):
+        resp = editor_client.post(
+            "/api/segment/999999/comments", json={"body": "x"}, content_type="application/json",
+        )
+    assert resp.status_code == 404
+    assert resp.get_json() == {"ok": False, "error": "not found"}
+    mock_add.assert_not_called()
+
+
 def test_resolve_thread_route_returns_ok(editor_client):
     with patch("server.app.resolve_thread") as mock_resolve:
         resp = editor_client.post("/api/segment/42/comments/resolve")
