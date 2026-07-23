@@ -19,7 +19,14 @@ from review.glossary_apply import (
     apply_sense_here,
 )
 from storage.db import source_id
-from storage.models import ActivityEntry, Comment, CommentCount, CommentThread
+from storage.models import (
+    ActivityEntry,
+    Comment,
+    CommentCount,
+    CommentThread,
+    DigestItem,
+    UserDigest,
+)
 from storage.repositories import GlossaryRepository, ProposalRepository
 
 # Editor glossary-proposal kinds (glossary_proposal.kind CHECK constraint,
@@ -1151,6 +1158,67 @@ def get_activity_feed(
         )
         for row in rows
     ]
+
+
+def collect_digests(conn: psycopg2.extensions.connection) -> list[UserDigest]:
+    """Return, per recipient, the unread comment replies their daily digest should cover.
+
+    Recipients = thread participants (everyone who has commented on the segment) ∪ the
+    segment's reviewer, minus each comment's own author. A comment is digest-worthy for a
+    recipient when it postdates both their read and their last-notified watermark (NULL
+    watermark means everything qualifies).
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH participants AS (
+                SELECT DISTINCT segment_id, author AS user_email FROM segment_comment
+                UNION
+                SELECT sr.segment_id, sr.human_reviewed_by
+                FROM segment_review sr
+                WHERE sr.human_reviewed_by IS NOT NULL
+                  AND sr.segment_id IN (SELECT DISTINCT segment_id FROM segment_comment)
+            )
+            SELECT p.user_email, c.segment_id, s.locator_path::text AS locator,
+                   c.author, c.created_at, c.body
+            FROM participants p
+            JOIN segment_comment c ON c.segment_id = p.segment_id
+            JOIN segment s        ON s.segment_id = c.segment_id
+            LEFT JOIN comment_thread_state st
+                   ON st.segment_id = p.segment_id AND st.user_email = p.user_email
+            WHERE c.author <> p.user_email
+              AND c.created_at > COALESCE(GREATEST(st.last_read_at, st.last_notified_at),
+                                          '-infinity'::timestamptz)
+            ORDER BY p.user_email, c.created_at
+            """
+        )
+        rows = cur.fetchall()
+
+    digests: dict[str, list[DigestItem]] = {}
+    for row in rows:
+        digests.setdefault(row["user_email"], []).append(
+            DigestItem(
+                segment_id=row["segment_id"],
+                locator=row["locator"],
+                author=row["author"],
+                created_at=row["created_at"],
+                body=row["body"],
+            )
+        )
+    return [UserDigest(user_email=email, items=items) for email, items in digests.items()]
+
+
+def mark_thread_notified(conn: psycopg2.extensions.connection, segment_id: int, user_email: str) -> None:
+    """Bump the recipient's notified watermark for a segment's thread (digest de-dupe)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO comment_thread_state (segment_id, user_email, last_notified_at)
+            VALUES (%s, %s, now())
+            ON CONFLICT (segment_id, user_email) DO UPDATE SET last_notified_at = now()
+            """,
+            (segment_id, user_email),
+        )
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:
