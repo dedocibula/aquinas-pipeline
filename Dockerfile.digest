@@ -1,0 +1,22 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
+
+WORKDIR /app
+
+# notify.digest only needs psycopg2 (storage.db) and python-dotenv (local .env
+# loading, a no-op on Railway) — install directly rather than `uv sync` against
+# the full project lockfile, which would otherwise pull in the whole project's
+# dependency tree (cltk, ufal.morphodita, lxml, gspread, anthropic, prefect, ...)
+# for a service that only reads Postgres and speaks SMTP.
+RUN pip install --no-cache-dir psycopg2-binary python-dotenv
+
+COPY src/notify src/notify
+COPY src/server/__init__.py src/server/__init__.py
+COPY src/server/db.py src/server/db.py
+COPY src/review/__init__.py src/review/__init__.py
+COPY src/review/glossary_apply.py src/review/glossary_apply.py
+COPY src/storage src/storage
+
+CMD ["python", "-m", "notify.digest"]

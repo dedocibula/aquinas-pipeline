@@ -1,6 +1,10 @@
-"""Tests for EmailSender (stdlib smtplib) — monkeypatched, no real network."""
+"""Tests for EmailSender (Resend HTTP API) — monkeypatched, no real network."""
 
 from __future__ import annotations
+
+import io
+import json
+import urllib.error
 
 import pytest
 
@@ -8,86 +12,69 @@ from notify.email_sender import DryRunEmailSender, EmailSender
 
 
 def test_from_env_fails_closed_on_missing_vars(monkeypatch):
-    monkeypatch.delenv("SMTP_HOST", raising=False)
-    monkeypatch.delenv("SMTP_PORT", raising=False)
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
     monkeypatch.delenv("MAIL_FROM", raising=False)
-    with pytest.raises(RuntimeError, match="SMTP_HOST"):
+    with pytest.raises(RuntimeError, match="RESEND_API_KEY"):
         EmailSender.from_env()
 
 
 def test_from_env_builds_sender(monkeypatch):
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
-    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
     monkeypatch.setenv("MAIL_FROM", "aquinas@example.com")
-    monkeypatch.setenv("SMTP_USER", "user")
-    monkeypatch.setenv("SMTP_PASS", "pass")
 
     sender = EmailSender.from_env()
-    assert sender.host == "smtp.example.com"
-    assert sender.port == 587
+    assert sender.api_key == "re_test_key"
     assert sender.mail_from == "aquinas@example.com"
-    assert sender.user == "user"
-    assert sender.password == "pass"
 
 
-class _FakeSMTP:
-    instances: list["_FakeSMTP"] = []
-
-    def __init__(self, host, port):
-        self.host = host
-        self.port = port
-        self.started_tls = False
-        self.login_args = None
-        self.sent = None
-        _FakeSMTP.instances.append(self)
-
+class _FakeResponse:
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         return False
 
-    def starttls(self):
-        self.started_tls = True
-
-    def login(self, user, password):
-        self.login_args = (user, password)
-
-    def send_message(self, msg):
-        self.sent = msg
+    def read(self):
+        return b'{"id": "fake"}'
 
 
-def test_send_uses_smtplib_and_authenticates(monkeypatch):
-    _FakeSMTP.instances = []
-    monkeypatch.setattr("notify.email_sender.smtplib.SMTP", _FakeSMTP)
+def test_send_posts_to_resend_api(monkeypatch):
+    captured = {}
 
-    sender = EmailSender(
-        host="smtp.example.com", port=587, user="user", password="pass",
-        mail_from="aquinas@example.com",
-    )
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["method"] = req.get_method()
+        captured["headers"] = {k.lower(): v for k, v in req.headers.items()}
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResponse()
+
+    monkeypatch.setattr("notify.email_sender.urllib.request.urlopen", fake_urlopen)
+
+    sender = EmailSender(api_key="re_test_key", mail_from="aquinas@example.com")
     sender.send("alice@example.com", "subject line", "body text")
 
-    smtp = _FakeSMTP.instances[0]
-    assert smtp.started_tls
-    assert smtp.login_args == ("user", "pass")
-    assert smtp.sent["To"] == "alice@example.com"
-    assert smtp.sent["From"] == "aquinas@example.com"
-    assert smtp.sent["Subject"] == "subject line"
-    assert smtp.sent.get_content().strip() == "body text"
+    assert captured["url"] == "https://api.resend.com/emails"
+    assert captured["method"] == "POST"
+    assert captured["headers"]["authorization"] == "Bearer re_test_key"
+    assert captured["body"] == {
+        "from": "aquinas@example.com",
+        "to": "alice@example.com",
+        "subject": "subject line",
+        "text": "body text",
+    }
 
 
-def test_send_skips_login_without_credentials(monkeypatch):
-    _FakeSMTP.instances = []
-    monkeypatch.setattr("notify.email_sender.smtplib.SMTP", _FakeSMTP)
+def test_send_raises_on_http_error(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 422, "Unprocessable Entity", {}, io.BytesIO(b'{"message": "bad from"}')
+        )
 
-    sender = EmailSender(
-        host="smtp.example.com", port=25, user=None, password=None,
-        mail_from="aquinas@example.com",
-    )
-    sender.send("alice@example.com", "subject", "body")
+    monkeypatch.setattr("notify.email_sender.urllib.request.urlopen", fake_urlopen)
 
-    smtp = _FakeSMTP.instances[0]
-    assert smtp.login_args is None
+    sender = EmailSender(api_key="re_test_key", mail_from="aquinas@example.com")
+    with pytest.raises(RuntimeError, match="Resend API error 422"):
+        sender.send("alice@example.com", "subject", "body")
 
 
 def test_dry_run_sender_logs_without_network():

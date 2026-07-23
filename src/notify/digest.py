@@ -75,10 +75,10 @@ def send_comment_digest(sender: EmailSender | DryRunEmailSender | None = None) -
     tests/local runs without SMTP. Returns the user_emails a digest was actually sent to
     (a recipient whose send fails is skipped, logged, and left un-notified for retry).
     """
+    _log("starting comment scan")
     base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
     sender = sender or EmailSender.from_env()
 
-    _log("starting comment scan")
     with get_conn() as conn:
         digests = collect_digests(conn)
     total_items = sum(len(d.items) for d in digests)
