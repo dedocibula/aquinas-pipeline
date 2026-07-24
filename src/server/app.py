@@ -46,6 +46,7 @@ from server.db import (  # noqa: E402
     get_article_segments,
     get_comment_counts,
     get_cost_per_segment,
+    get_decided_proposals_view,
     get_distinct_pars,
     get_pending_proposal_count,
     get_pending_proposal_counts,
@@ -66,6 +67,7 @@ from server.db import (  # noqa: E402
     propose_add_term,
     propose_sense_change,
     reject_proposal,
+    reopen_proposal,
     reopen_thread,
     resolve_thread,
     review_segment,
@@ -697,11 +699,13 @@ def glossary_proposals_page():
     with get_conn() as conn:
         proposals = get_pending_proposals_view(conn)
         cost_per_segment = get_cost_per_segment(conn)
+        decided = get_decided_proposals_view(conn)
     return render_template(
         "glossary_proposals.html",
         sense_wide=[p for p in proposals if p["kind"] in _SENSE_WIDE_PROPOSAL_KINDS],
         per_segment=[p for p in proposals if p["kind"] in _PER_SEGMENT_PROPOSAL_KINDS],
         add_terms=[p for p in proposals if p["kind"] == PROPOSAL_KIND_ADD_TERM],
+        decided=decided,
         cost_per_segment=cost_per_segment,
         ltree_to_url=_ltree_to_url_locator,
     )
@@ -763,6 +767,26 @@ def reject_proposal_route(proposal_id: int):
     if status == "not_pending":
         return jsonify({"ok": False, "error": "not pending"}), 409
     return jsonify({"ok": True})
+
+
+@app.route("/api/proposal/<int:proposal_id>/reopen", methods=["POST"])
+@requires_admin
+def reopen_proposal_route(proposal_id: int):
+    """Clone a rejected proposal into a new pending row for reconsideration.
+
+    The rejected row itself is untouched — it stays in the audit trail exactly
+    as decided. Only ``rejected`` proposals may be reopened this way.
+    """
+    try:
+        with get_conn() as conn:
+            status, new_proposal_id = reopen_proposal(conn, proposal_id, session["email"])
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
+    if status == "not_found":
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if status == "not_rejected":
+        return jsonify({"ok": False, "error": "not rejected"}), 409
+    return jsonify({"ok": True, "proposal_id": new_proposal_id})
 
 
 # ---------------------------------------------------------------------------

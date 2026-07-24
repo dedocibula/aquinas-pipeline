@@ -180,3 +180,83 @@ def test_list_approved_add_terms_filters_kind_and_status(fake_conn):
 def test_list_approved_add_terms_empty(fake_conn):
     conn = fake_conn(fetchall_rows=[])
     assert ProposalRepository(conn).list_approved_add_terms() == []
+
+
+# ── list_decided ─────────────────────────────────────────────────────────────
+
+
+def test_list_decided_excludes_pending_orders_newest_first(fake_conn):
+    conn = fake_conn(fetchall_rows=[{"proposal_id": 9}, {"proposal_id": 3}])
+    result = ProposalRepository(conn).list_decided()
+    assert result == [{"proposal_id": 9}, {"proposal_id": 3}]
+    sql, params = conn.executed[-1]
+    assert "status != 'pending'" in sql
+    assert "ORDER BY decided_at DESC" in sql
+    assert params == (200,)
+
+
+def test_list_decided_respects_limit(fake_conn):
+    conn = fake_conn(fetchall_rows=[])
+    ProposalRepository(conn).list_decided(limit=5)
+    _, params = conn.executed[-1]
+    assert params == (5,)
+
+
+# ── clone_as_pending ─────────────────────────────────────────────────────────
+
+
+def test_clone_as_pending_returns_none_when_source_missing(fake_conn):
+    conn = fake_conn(fetchone_results=[None])
+    assert ProposalRepository(conn).clone_as_pending(999) is None
+
+
+def test_clone_as_pending_inserts_fresh_row_with_source_content(fake_conn):
+    source = {
+        "proposal_id": 5,
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sense_id": None,
+        "latin_lemma": "ratio",
+        "current_sk": "rozum",
+        "proposed_sk": "úsudok",
+        "note": "reconsider",
+        "origin_segment_id": None,
+        "proposed_by": "editor@example.com",
+        "status": "rejected",
+    }
+    # get() consumes the first fetchone; create_or_update_pending's dedup
+    # SELECT (no pending match) consumes the second; INSERT...RETURNING the third.
+    conn = fake_conn(fetchone_results=[source, None, {"proposal_id": 20}])
+    result = ProposalRepository(conn).clone_as_pending(5)
+    assert result == 20
+    insert_sql, insert_params = conn.executed[-1]
+    assert "INSERT INTO glossary_proposal" in insert_sql
+    assert "úsudok" in insert_params
+
+
+def test_clone_as_pending_keeps_original_proposer_not_reopener(fake_conn):
+    """The dedup key on create_or_update_pending is (kind, proposed_by, target,
+    origin_segment_id). If clone_as_pending used the reopening admin's email
+    instead of the original proposer's, two unrelated reopens by the same
+    admin on the same kind/sense/segment would collide and overwrite each
+    other. Cloning must preserve the original proposer's identity."""
+    source = {
+        "proposal_id": 5,
+        "kind": "sense_here",
+        "sense_id": 42,
+        "proposed_sense_id": 43,
+        "latin_lemma": "ratio",
+        "current_sk": "rozum",
+        "proposed_sk": None,
+        "note": None,
+        "origin_segment_id": 101,
+        "proposed_by": "original-editor@example.com",
+        "status": "rejected",
+    }
+    conn = fake_conn(fetchone_results=[source, None, {"proposal_id": 21}])
+    ProposalRepository(conn).clone_as_pending(5)
+    # executed[0] is clone_as_pending's own get() SELECT; executed[1] is the
+    # dedup SELECT inside create_or_update_pending.
+    select_sql, select_params = conn.executed[1]
+    assert "proposed_by = %s" in select_sql
+    assert select_params[1] == "original-editor@example.com"

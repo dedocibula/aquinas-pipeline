@@ -508,35 +508,74 @@ def get_cost_per_segment(conn: psycopg2.extensions.connection) -> float:
     return (_AVG_SEGMENT_TOKENS / 1000) * _COST_PER_1K_INPUT
 
 
+def _enrich_proposal_display(conn: psycopg2.extensions.connection, row: dict) -> dict:
+    """Attach term/sense display fields shared by the pending queue and the
+    decided-proposal audit trail.
+
+    Adds ``context_label`` — the acted-on sense's context_label (None for
+    add_term); ``proposed_context_label`` / ``proposed_slovak`` — for
+    sense_here with a chosen ``proposed_sense_id`` (None for the free-text
+    record-only path); ``origin_locator`` — the origin segment's locator
+    path, only for per-segment kinds (``sense_here``, ``remove_here``).
+    """
+    kind = row["kind"]
+    sense_id = row["sense_id"]
+
+    row["context_label"] = None
+    row["proposed_context_label"] = None
+    row["proposed_slovak"] = None
+    row["origin_locator"] = None
+
+    if sense_id is not None:
+        term = get_term_senses(conn, sense_id)
+        if term is not None:
+            sense_row = next(
+                (s for s in term["senses"] if s["sense_id"] == sense_id), None
+            )
+            if sense_row is not None:
+                row["context_label"] = sense_row["context_label"]
+
+            if row["proposed_sense_id"] is not None:
+                proposed_row = next(
+                    (
+                        s
+                        for s in term["senses"]
+                        if s["sense_id"] == row["proposed_sense_id"]
+                    ),
+                    None,
+                )
+                if proposed_row is not None:
+                    row["proposed_context_label"] = proposed_row["context_label"]
+                    row["proposed_slovak"] = proposed_row["slovak"]
+
+    if kind in _PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
+        row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
+
+    return row
+
+
 def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dict]:
     """Return every pending proposal enriched for the admin queue (Stage 4).
 
-    Each dict is the raw ``glossary_proposal`` row plus:
-      - ``context_label`` — the acted-on sense's context_label (None for add_term).
-      - ``proposed_context_label`` / ``proposed_slovak`` — for sense_here with a
-        chosen ``proposed_sense_id`` (None for the free-text record-only path).
+    Each dict is the raw ``glossary_proposal`` row plus the shared display
+    fields from ``_enrich_proposal_display``, plus:
       - ``live_current_sk`` / ``drift`` — the sense's *current* winning rendering
         vs. the snapshot taken at propose time; drift=True means the glossary
         moved since the editor proposed (admin should re-check before approving).
       - ``blast_radius`` — dict from ``_sense_blast_radius``, only for sense-wide
         kinds (``rendering``, ``retire_sense``).
-      - ``origin_locator`` — the origin segment's locator path, only for
-        per-segment kinds (``sense_here``, ``remove_here``).
     """
     glossary = GlossaryRepository(conn)
     rows = ProposalRepository(conn).list_pending()
 
     for row in rows:
+        _enrich_proposal_display(conn, row)
         kind = row["kind"]
         sense_id = row["sense_id"]
 
-        row["context_label"] = None
-        row["proposed_context_label"] = None
-        row["proposed_slovak"] = None
         row["live_current_sk"] = None
         row["drift"] = False
         row["blast_radius"] = None
-        row["origin_locator"] = None
 
         if sense_id is not None:
             current = glossary.get_current_sense(sense_id)
@@ -545,32 +584,24 @@ def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dic
                 row["live_current_sk"] = live_sk
                 row["drift"] = live_sk != row["current_sk"]
 
-            term = get_term_senses(conn, sense_id)
-            if term is not None:
-                sense_row = next(
-                    (s for s in term["senses"] if s["sense_id"] == sense_id), None
-                )
-                if sense_row is not None:
-                    row["context_label"] = sense_row["context_label"]
-
-                if row["proposed_sense_id"] is not None:
-                    proposed_row = next(
-                        (
-                            s
-                            for s in term["senses"]
-                            if s["sense_id"] == row["proposed_sense_id"]
-                        ),
-                        None,
-                    )
-                    if proposed_row is not None:
-                        row["proposed_context_label"] = proposed_row["context_label"]
-                        row["proposed_slovak"] = proposed_row["slovak"]
-
         if kind in _SENSE_WIDE_KINDS and sense_id is not None:
             row["blast_radius"] = _sense_blast_radius(conn, sense_id)
-        elif kind in _PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
-            row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
 
+    return rows
+
+
+def get_decided_proposals_view(
+    conn: psycopg2.extensions.connection, limit: int = 200
+) -> list[dict]:
+    """Return the most recent decided proposals for the admin audit trail.
+
+    Same shared display fields as ``get_pending_proposals_view`` (minus
+    drift/blast-radius, which only matter before a decision is made) so the
+    history table can reuse the same rendering as the live queue.
+    """
+    rows = ProposalRepository(conn).list_decided(limit=limit)
+    for row in rows:
+        _enrich_proposal_display(conn, row)
     return rows
 
 
@@ -670,6 +701,47 @@ def reject_proposal(
     if not repo.decide(proposal_id, "rejected", admin_email, decision_note):
         return "not_pending"
     return "ok"
+
+
+def reopen_proposal(
+    conn: psycopg2.extensions.connection, proposal_id: int, admin_email: str
+) -> tuple[str, int | None]:
+    """Re-open a rejected proposal for reconsideration.
+
+    The rejected row is never mutated — reopening only clones its content into
+    a brand-new pending row (D5's dedup applies to it like any other propose
+    call, keyed on the *original* proposer, not ``admin_email`` — see
+    ``ProposalRepository.clone_as_pending``), so the original rejection stays
+    permanently visible in the audit trail. Only ``rejected`` proposals may be
+    reopened: an ``approved`` one already changed the glossary, and
+    re-deciding it here would not undo that; a ``superseded`` one lost to a
+    sibling sense-wide decision, not a standalone rejection.
+
+    Fails loudly (raises ``ValueError``) if the proposal's target no longer
+    exists — a sense retired or a segment removed since the original rejection
+    would otherwise silently re-enter the live queue pointing at nothing.
+
+    Returns ``(status, new_proposal_id)``:
+      "ok"           -> new_proposal_id is the freshly created pending row.
+      "not_found"    -> proposal_id doesn't exist; new_proposal_id is None.
+      "not_rejected" -> proposal exists but isn't rejected; new_proposal_id is None.
+    """
+    repo = ProposalRepository(conn)
+    proposal = repo.get(proposal_id)
+    if proposal is None:
+        return ("not_found", None)
+    if proposal["status"] != "rejected":
+        return ("not_rejected", None)
+
+    sense_id = proposal["sense_id"]
+    if sense_id is not None and GlossaryRepository(conn).get_current_sense(sense_id) is None:
+        raise ValueError(f"sense {sense_id} no longer exists")
+    origin_segment_id = proposal["origin_segment_id"]
+    if origin_segment_id is not None and not segment_exists(conn, origin_segment_id):
+        raise ValueError(f"segment {origin_segment_id} no longer exists")
+
+    new_id = repo.clone_as_pending(proposal_id)
+    return ("ok", new_id)
 
 
 def segment_has_locked_sense(

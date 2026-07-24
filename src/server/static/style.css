@@ -1122,6 +1122,41 @@ a.badge:hover {
   color: #666;
   font-style: italic;
 }
+
+.proposal-status-approved {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.proposal-status-rejected {
+  color: #c62828;
+  font-weight: bold;
+}
+
+.proposal-status-superseded {
+  color: #777;
+  font-weight: bold;
+}
+
+.btn-reopen-proposal {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-family: sans-serif;
+  border: 1px solid #6a5acd;
+  border-radius: 3px;
+  background: #ede9fe;
+  color: #6a5acd;
+  cursor: pointer;
+}
+
+.btn-reopen-proposal:hover:not(:disabled) {
+  background: #ddd6fe;
+}
+
+.btn-reopen-proposal:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 /* ── Comment threads ──────────────────────────────────────────────────────── */
 
 .btn-comment {

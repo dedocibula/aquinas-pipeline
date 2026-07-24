@@ -291,4 +291,34 @@
     btn.addEventListener('click', function () { _decideProposal(btn, 'reject'); });
   });
 
+  // ---------------------------------------------------------------------------
+  // Decision history — reopen a rejected proposal
+  // ---------------------------------------------------------------------------
+
+  document.querySelectorAll('.btn-reopen-proposal').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('tr');
+      var proposalId = btn.dataset.proposalId;
+      var status = row.querySelector('.decision-status');
+
+      btn.disabled = true;
+      status.textContent = 'Reopening…';
+
+      _postJson('/api/proposal/' + proposalId + '/reopen', {})
+        .then(function (result) {
+          if (result.status === 200 && result.data.ok) {
+            status.textContent = 'Reopened as #' + result.data.proposal_id + ' — reloading…';
+            setTimeout(function () { window.location.reload(); }, 800);
+          } else {
+            btn.disabled = false;
+            status.textContent = (result.data && result.data.error) || 'Reopen failed.';
+          }
+        })
+        .catch(function () {
+          btn.disabled = false;
+          status.textContent = 'Reopen failed — server error.';
+        });
+    });
+  });
+
 }());

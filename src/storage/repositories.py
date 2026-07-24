@@ -1355,6 +1355,50 @@ class ProposalRepository:
             )
             return {row[0]: row[1] for row in cur.fetchall()}
 
+    def list_decided(self, limit: int = 200) -> list[dict]:
+        """Return the most recently decided proposals (approved/rejected/superseded).
+
+        Newest decision first — this is the admin audit trail: every past
+        decision stays visible here forever, none are ever deleted.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM glossary_proposal WHERE status != 'pending' "
+                "ORDER BY decided_at DESC LIMIT %s",
+                (limit,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def clone_as_pending(self, proposal_id: int) -> int | None:
+        """Re-open a decided proposal as a brand-new pending row.
+
+        The decided row (and its decided_by/decided_at/decision_note) is left
+        untouched forever — this only inserts a fresh proposal with the same
+        content, which then goes through the normal approve/reject flow. Returns
+        None if ``proposal_id`` doesn't exist.
+
+        Keeps the *original* ``proposed_by`` rather than the admin doing the
+        reopening. ``create_or_update_pending``'s dedup key includes
+        ``proposed_by`` — using the admin's email here would make two reopens
+        by the same admin on two unrelated original proposals (different
+        original authors, same kind/sense/segment) collide and silently
+        overwrite each other instead of producing two independent pending rows.
+        """
+        source = self.get(proposal_id)
+        if source is None:
+            return None
+        return self.create_or_update_pending(
+            kind=source["kind"],
+            sense_id=source["sense_id"],
+            proposed_sense_id=source["proposed_sense_id"],
+            latin_lemma=source["latin_lemma"],
+            current_sk=source["current_sk"],
+            proposed_sk=source["proposed_sk"],
+            note=source["note"],
+            origin_segment_id=source["origin_segment_id"],
+            proposed_by=source["proposed_by"],
+        )
+
     def list_approved_add_terms(self) -> list[dict]:
         """Approved add_term proposals — candidates for Stage 6 corpus application.
 

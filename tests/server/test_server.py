@@ -1452,6 +1452,7 @@ def test_glossary_proposals_page_returns_200_for_admin(admin_client):
     with (
         patch("server.app.get_pending_proposals_view", return_value=[]),
         patch("server.app.get_cost_per_segment", return_value=0.001),
+        patch("server.app.get_decided_proposals_view", return_value=[]),
     ):
         resp = admin_client.get("/glossary/proposals")
     assert resp.status_code == 200
@@ -1484,6 +1485,7 @@ def test_glossary_proposals_page_groups_by_kind(admin_client):
     with (
         patch("server.app.get_pending_proposals_view", return_value=proposals),
         patch("server.app.get_cost_per_segment", return_value=0.001),
+        patch("server.app.get_decided_proposals_view", return_value=[]),
     ):
         resp = admin_client.get("/glossary/proposals")
     assert resp.status_code == 200
@@ -1491,6 +1493,43 @@ def test_glossary_proposals_page_groups_by_kind(admin_client):
     # Weak but DB-free smoke check: each proposal row id is rendered somewhere.
     for p in proposals:
         assert f'prow-{p["proposal_id"]}' in body
+
+
+def test_glossary_proposals_page_renders_decision_history(admin_client):
+    decided = [
+        {
+            "proposal_id": 6,
+            "kind": "rendering",
+            "latin_lemma": "gratia",
+            "context_label": None,
+            "current_sk": "milosť",
+            "proposed_sk": "milosť Božia",
+            "note": None,
+            "proposed_by": "editor@example.com",
+            "created_at": "2026-07-01",
+            "proposed_sense_id": None,
+            "proposed_context_label": None,
+            "proposed_slovak": None,
+            "origin_locator": None,
+            "status": "rejected",
+            "decided_by": "admin@example.com",
+            "decided_at": "2026-07-02",
+            "decision_note": "not authoritative",
+        }
+    ]
+    with (
+        patch("server.app.get_pending_proposals_view", return_value=[]),
+        patch("server.app.get_cost_per_segment", return_value=0.001),
+        patch("server.app.get_decided_proposals_view", return_value=decided),
+    ):
+        resp = admin_client.get("/glossary/proposals")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "hrow-6" in body
+    assert "not authoritative" in body
+    assert 'data-proposal-id="6"' in body
+    # Only rejected rows get a Reopen button.
+    assert "btn-reopen-proposal" in body
 
 
 def test_approve_route_returns_403_for_non_admin(editor_client):
@@ -1567,6 +1606,42 @@ def test_reject_route_not_pending_returns_409(admin_client):
     with patch("server.app.reject_proposal", return_value="not_pending"):
         resp = admin_client.post("/api/proposal/1/reject")
     assert resp.status_code == 409
+
+
+def test_reopen_route_returns_403_for_non_admin(editor_client):
+    resp = editor_client.post("/api/proposal/1/reopen")
+    assert resp.status_code == 403
+
+
+def test_reopen_route_ok_returns_new_proposal_id(admin_client):
+    with patch("server.app.reopen_proposal", return_value=("ok", 42)) as mock_reopen:
+        resp = admin_client.post("/api/proposal/1/reopen")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["proposal_id"] == 42
+    args, _ = mock_reopen.call_args
+    assert args[1] == 1
+    assert args[2] == "admin@example.com"
+
+
+def test_reopen_route_not_found_returns_404(admin_client):
+    with patch("server.app.reopen_proposal", return_value=("not_found", None)):
+        resp = admin_client.post("/api/proposal/999/reopen")
+    assert resp.status_code == 404
+
+
+def test_reopen_route_not_rejected_returns_409(admin_client):
+    with patch("server.app.reopen_proposal", return_value=("not_rejected", None)):
+        resp = admin_client.post("/api/proposal/1/reopen")
+    assert resp.status_code == 409
+
+
+def test_reopen_route_value_error_returns_409(admin_client):
+    with patch("server.app.reopen_proposal", side_effect=ValueError("sense 42 no longer exists")):
+        resp = admin_client.post("/api/proposal/1/reopen")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "sense 42 no longer exists"
 
 
 # ---------------------------------------------------------------------------
@@ -1709,6 +1784,43 @@ def test_sense_blast_radius_marginal_is_not_already_stale_count():
 
 
 # ---------------------------------------------------------------------------
+# db.get_decided_proposals_view
+# ---------------------------------------------------------------------------
+
+
+def test_get_decided_proposals_view_enriches_and_excludes_blast_radius():
+    from server.db import get_decided_proposals_view
+
+    decided_row = {
+        "proposal_id": 6,
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sense_id": None,
+        "current_sk": "milosť",
+        "proposed_sk": "milosť Božia",
+        "origin_segment_id": None,
+        "status": "rejected",
+    }
+    mock_repo = MagicMock()
+    mock_repo.list_decided.return_value = [decided_row]
+
+    with (
+        patch("server.db.ProposalRepository", return_value=mock_repo),
+        patch(
+            "server.db.get_term_senses",
+            return_value={"senses": [{"sense_id": 42, "context_label": "as passion"}]},
+        ),
+    ):
+        result = get_decided_proposals_view(MagicMock(), limit=50)
+
+    mock_repo.list_decided.assert_called_once_with(limit=50)
+    assert result[0]["context_label"] == "as passion"
+    # Drift/blast-radius only matter for still-pending rows.
+    assert "drift" not in result[0]
+    assert "blast_radius" not in result[0]
+
+
+# ---------------------------------------------------------------------------
 # db.approve_proposal — dispatch per kind, race, and rollback propagation
 # ---------------------------------------------------------------------------
 
@@ -1842,5 +1954,89 @@ def test_reject_proposal_not_pending_returns_status():
     with patcher:
         status = reject_proposal(MagicMock(), 1, "admin@example.com", None)
     assert status == "not_pending"
+
+
+# ---------------------------------------------------------------------------
+# db.reopen_proposal — clone a rejected proposal into a new pending row
+# ---------------------------------------------------------------------------
+
+
+def test_reopen_proposal_not_found_returns_status():
+    from server.db import reopen_proposal
+
+    patcher, mock_repo = _make_repo_patch(None)
+    with patcher:
+        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert status == "not_found"
+    assert new_id is None
+    mock_repo.clone_as_pending.assert_not_called()
+
+
+def test_reopen_proposal_not_rejected_returns_status():
+    from server.db import reopen_proposal
+
+    patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "approved"})
+    with patcher:
+        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert status == "not_rejected"
+    assert new_id is None
+    mock_repo.clone_as_pending.assert_not_called()
+
+
+def test_reopen_proposal_clones_rejected_row():
+    from server.db import reopen_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "rejected",
+        "sense_id": None,
+        "origin_segment_id": None,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    mock_repo.clone_as_pending.return_value = 42
+    with patcher:
+        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert status == "ok"
+    assert new_id == 42
+    mock_repo.clone_as_pending.assert_called_once_with(1)
+
+
+def test_reopen_proposal_raises_when_sense_no_longer_exists():
+    from server.db import reopen_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "rejected",
+        "sense_id": 42,
+        "origin_segment_id": None,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.GlossaryRepository") as mock_glossary_cls,
+    ):
+        mock_glossary_cls.return_value.get_current_sense.return_value = None
+        with pytest.raises(ValueError, match="sense 42"):
+            reopen_proposal(MagicMock(), 1, "admin@example.com")
+    mock_repo.clone_as_pending.assert_not_called()
+
+
+def test_reopen_proposal_raises_when_origin_segment_no_longer_exists():
+    from server.db import reopen_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "rejected",
+        "sense_id": None,
+        "origin_segment_id": 999,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.segment_exists", return_value=False),
+    ):
+        with pytest.raises(ValueError, match="segment 999"):
+            reopen_proposal(MagicMock(), 1, "admin@example.com")
+    mock_repo.clone_as_pending.assert_not_called()
 
 
