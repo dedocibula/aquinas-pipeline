@@ -77,27 +77,7 @@
         {% set label = etype %}
       {% endif %}
 
-      {# Translation status #}
-      {% set ts = seg.translation_status %}
-      {% set needs_human = (ts == 'needs_human') %}
-
-
-      <tr id="seg-{{ seg.segment_id }}"
-          class="row-{{ etype }}{% if needs_human and is_editor %} row-needs-human{% endif %}"
-          data-segment-id="{{ seg.segment_id }}">
-        <td class="col-label">
-          {{ label }}
-        </td>
-        <td class="col-latin">
-          <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
-          <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
-          <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
-        </td>
-        <td class="col-slovak slovak">
-          {{ panel.segment_panel(seg, constraints.get(seg.segment_id, []), is_editor, pending_counts) }}
-        </td>
-        {{ panel.status_cell(seg, is_editor, comment_counts) }}
-      </tr>
+      {{ panel.segment_row(seg, etype, label, constraints.get(seg.segment_id, []), is_editor, pending_counts, comment_counts) }}
     {% else %}
       <tr>
         <td colspan="{% if is_editor %}4{% else %}3{% endif %}">No segments found for this article.</td>
@@ -105,48 +85,15 @@
     {% endfor %}
   </tbody>
 </table>
-
-<script>
-// ---------------------------------------------------------------------------
-// Reference language switcher
-// ---------------------------------------------------------------------------
-document.getElementById('ref-lang-select').addEventListener('change', function () {
-  var lang = this.value;
-  document.querySelectorAll('.ref-text').forEach(function (el) {
-    el.style.display = el.dataset.lang === lang ? '' : 'none';
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Detail panel toggles
-// ---------------------------------------------------------------------------
-document.querySelectorAll('.detail-toggle').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var targetId = btn.dataset.target;
-    var panel    = document.getElementById(targetId);
-    if (!panel) return;
-    var open = panel.style.display !== 'none';
-    if (open) {
-      panel.style.display = 'none';
-      btn.setAttribute('aria-expanded', 'false');
-      btn.innerHTML = '&#9654; details';
-    } else {
-      panel.style.display = '';
-      btn.setAttribute('aria-expanded', 'true');
-      btn.innerHTML = '&#9660; details';
-    }
-  });
-
-  // Sync initial button label for panels that start open (needs_human)
-  var targetId = btn.dataset.target;
-  var panel    = document.getElementById(targetId);
-  if (panel && panel.style.display !== 'none') {
-    btn.innerHTML = '&#9660; details';
-  }
-});
-</script>
 {% if is_editor %}
 {% include "_comment_sidebar.html" %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='util.js') }}"></script>
+<script src="{{ url_for('static', filename='viewer.js') }}"></script>
+{% if is_editor %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>
 <script src="{{ url_for('static', filename='review.js') }}"></script>
 <script src="{{ url_for('static', filename='proposals.js') }}"></script>

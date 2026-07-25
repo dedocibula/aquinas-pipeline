@@ -2,7 +2,7 @@
 DB query helpers for the Flask preview server.
 
 All functions accept a psycopg2 connection.
-They are intentionally separate from src/common/db.py — that module manages
+They are intentionally separate from src/storage/db.py — that module manages
 connection lifecycle; this module owns the server-specific SQL.
 """
 
@@ -417,8 +417,10 @@ def get_pending_proposal_count(conn: psycopg2.extensions.connection) -> int:
     return len(ProposalRepository(conn).list_pending())
 
 
-_SENSE_WIDE_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
-_PER_SEGMENT_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
+# Public: the single source of truth for these groupings. app.py imports them
+# directly; do not re-declare local copies elsewhere in Python.
+SENSE_WIDE_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
+PER_SEGMENT_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
 
 
 def _sense_blast_radius(conn: psycopg2.extensions.connection, sense_id: int) -> dict:
@@ -548,7 +550,7 @@ def _enrich_proposal_display(conn: psycopg2.extensions.connection, row: dict) ->
                     row["proposed_context_label"] = proposed_row["context_label"]
                     row["proposed_slovak"] = proposed_row["slovak"]
 
-    if kind in _PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
+    if kind in PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
         row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
 
     return row
@@ -584,7 +586,7 @@ def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dic
                 row["live_current_sk"] = live_sk
                 row["drift"] = live_sk != row["current_sk"]
 
-        if kind in _SENSE_WIDE_KINDS and sense_id is not None:
+        if kind in SENSE_WIDE_KINDS and sense_id is not None:
             row["blast_radius"] = _sense_blast_radius(conn, sense_id)
 
     return rows
@@ -702,7 +704,7 @@ def approve_proposal(
     ):
         raise ProposalRaceError(f"proposal {proposal_id} was already decided")
 
-    if kind in _SENSE_WIDE_KINDS:
+    if kind in SENSE_WIDE_KINDS:
         repo.supersede_sense_wide_siblings(sense_id, proposal_id, admin_email)
 
     return ("ok", result)

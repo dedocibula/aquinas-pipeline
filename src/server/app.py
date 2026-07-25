@@ -31,11 +31,13 @@ load_dotenv()
 
 from export.xliff import export_pars_bytes  # noqa: E402
 from server.db import (  # noqa: E402
+    PER_SEGMENT_KINDS,
     PROPOSAL_KIND_ADD_TERM,
     PROPOSAL_KIND_CHANGE_EVERYWHERE,
     PROPOSAL_KIND_REMOVE_HERE,
     PROPOSAL_KIND_RETIRE_EVERYWHERE,
     PROPOSAL_KIND_WRONG_SENSE_HERE,
+    SENSE_WIDE_KINDS,
     ProposalRaceError,
     add_comment,
     approve_proposal,
@@ -117,6 +119,35 @@ def requires_admin(f):
 
 # Populated on the first request; lives for the process lifetime.
 _formulas: dict[str, str] = {}
+
+
+# ---------------------------------------------------------------------------
+# status -> HTTP dispatch helper
+# ---------------------------------------------------------------------------
+
+# Every status string an action function in server.db can return. A missing
+# key is a bug — fail loudly via KeyError rather than defaulting silently.
+_STATUS_HTTP = {
+    "ok": 200,
+    "notfound": 404,
+    "not_found": 404,
+    "conflict": 409,
+    "forbidden": 403,
+    "not_pending": 409,
+    "not_rejected": 409,
+    "wrong_status": 409,
+    "already_polished": 409,
+    "proposed_sk_required": 400,
+    "missing_target": 400,
+    "no_change": 400,
+    "wrong_term": 400,
+    "not_locked_here": 400,
+    "term_exists": 400,
+}
+
+
+def _json(status: str, **payload):
+    return jsonify({"ok": status == "ok", **payload}), _STATUS_HTTP[status]
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +412,7 @@ def _article_view(ltree_path: str, st_locator: str):
         constraints=constraints,
         pending_counts=pending_counts,
         comment_counts=comment_counts,
+        ltree_to_url=_ltree_to_url_locator,
     )
 
 
@@ -466,10 +498,10 @@ def review_segment_route(segment_id: int):
         )
 
     if result == "ok":
-        return jsonify({"ok": True, "human_version": new_version})
+        return _json("ok", human_version=new_version)
     if result == "notfound":
-        return jsonify({"ok": False, "error": "not found"}), 404
-    return jsonify({"ok": False, "error": "conflict"}), 409
+        return _json("notfound", error="not found")
+    return _json("conflict", error="conflict")
 
 
 # ---------------------------------------------------------------------------
@@ -504,10 +536,10 @@ def list_comments_route(segment_id: int):
     """Return a segment's comment thread and mark it read for the current user."""
     with get_conn() as conn:
         if not segment_exists(conn, segment_id):
-            return jsonify({"ok": False, "error": "not found"}), 404
+            return _json("not_found", error="not found")
         thread = list_comments(conn, segment_id)
         mark_thread_read(conn, segment_id, session["email"])
-    return jsonify({"ok": True, **_thread_json(thread)})
+    return _json("ok", **_thread_json(thread))
 
 
 @app.route("/api/segment/<int:segment_id>/comments", methods=["POST"])
@@ -521,10 +553,10 @@ def add_comment_route(segment_id: int):
 
     with get_conn() as conn:
         if not segment_exists(conn, segment_id):
-            return jsonify({"ok": False, "error": "not found"}), 404
+            return _json("not_found", error="not found")
         comment = add_comment(conn, segment_id, session["email"], body)
         thread = list_comments(conn, segment_id)
-    return jsonify({"ok": True, "comment": _comment_json(comment), "open_count": thread.open_count})
+    return _json("ok", comment=_comment_json(comment), open_count=thread.open_count)
 
 
 @app.route("/api/segment/<int:segment_id>/comments/resolve", methods=["POST"])
@@ -552,10 +584,10 @@ def delete_comment_route(comment_id: int):
     with get_conn() as conn:
         result = delete_comment(conn, comment_id, session["email"])
     if result == "ok":
-        return jsonify({"ok": True})
+        return _json("ok")
     if result == "notfound":
-        return jsonify({"ok": False, "error": "not found"}), 404
-    return jsonify({"ok": False, "error": "forbidden"}), 403
+        return _json("notfound", error="not found")
+    return _json("forbidden", error="forbidden")
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +610,8 @@ def sense_alternatives_route(sense_id: int):
     with get_conn() as conn:
         term = get_term_senses(conn, sense_id)
     if term is None:
-        return jsonify({"ok": False, "error": "not found"}), 404
-    return jsonify({"ok": True, "latin_lemma": term["latin_lemma"], "senses": term["senses"]})
+        return _json("not_found", error="not found")
+    return _json("ok", latin_lemma=term["latin_lemma"], senses=term["senses"])
 
 
 @app.route("/api/sense/<int:sense_id>/propose", methods=["POST"])
@@ -631,17 +663,15 @@ def propose_sense_change_route(sense_id: int):
         )
 
     if status == "ok":
-        return jsonify({"ok": True, "proposal_id": proposal_id})
+        return _json("ok", proposal_id=proposal_id)
     if status == "not_found":
-        return jsonify({"ok": False, "error": "not found"}), 404
+        return _json("not_found", error="not found")
     if status == "proposed_sk_required":
-        return jsonify({"ok": False, "error": "proposed_sk required"}), 400
+        return _json("proposed_sk_required", error="proposed_sk required")
     if status == "missing_target":
-        return jsonify(
-            {"ok": False, "error": "proposed_sense_id or proposed_sk required"}
-        ), 400
+        return _json("missing_target", error="proposed_sense_id or proposed_sk required")
     # "no_change" / "wrong_term" / "not_locked_here"
-    return jsonify({"ok": False, "error": status}), 400
+    return _json(status, error=status)
 
 
 @app.route("/api/term-proposal", methods=["POST"])
@@ -677,19 +707,16 @@ def propose_term_route():
         )
 
     if status == "term_exists":
-        return jsonify(
-            {"ok": False, "error": f"term_exists: '{latin_lemma}' is already in the glossary"}
-        ), 400
-    return jsonify({"ok": True, "proposal_id": proposal_id})
+        return _json(
+            "term_exists",
+            error=f"term_exists: '{latin_lemma}' is already in the glossary",
+        )
+    return _json("ok", proposal_id=proposal_id)
 
 
 # ---------------------------------------------------------------------------
 # Admin proposal queue (Stage 4 of the editor-glossary-proposals plan)
 # ---------------------------------------------------------------------------
-
-_SENSE_WIDE_PROPOSAL_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_RETIRE_EVERYWHERE)
-_PER_SEGMENT_PROPOSAL_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
-
 
 @app.route("/glossary/proposals")
 @requires_admin
@@ -702,8 +729,8 @@ def glossary_proposals_page():
         decided = get_decided_proposals_view(conn)
     return render_template(
         "glossary_proposals.html",
-        sense_wide=[p for p in proposals if p["kind"] in _SENSE_WIDE_PROPOSAL_KINDS],
-        per_segment=[p for p in proposals if p["kind"] in _PER_SEGMENT_PROPOSAL_KINDS],
+        sense_wide=[p for p in proposals if p["kind"] in SENSE_WIDE_KINDS],
+        per_segment=[p for p in proposals if p["kind"] in PER_SEGMENT_KINDS],
         add_terms=[p for p in proposals if p["kind"] == PROPOSAL_KIND_ADD_TERM],
         decided=decided,
         cost_per_segment=cost_per_segment,
@@ -754,10 +781,10 @@ def approve_proposal_route(proposal_id: int):
         return jsonify({"ok": False, "error": str(e)}), 409
 
     if status == "not_found":
-        return jsonify({"ok": False, "error": "not found"}), 404
+        return _json("not_found", error="not found")
     if status == "not_pending":
-        return jsonify({"ok": False, "error": "not pending"}), 409
-    return jsonify({"ok": True, **result})
+        return _json("not_pending", error="not pending")
+    return _json("ok", **result)
 
 
 @app.route("/api/proposal/<int:proposal_id>/reject", methods=["POST"])
@@ -769,10 +796,10 @@ def reject_proposal_route(proposal_id: int):
     with get_conn() as conn:
         status = reject_proposal(conn, proposal_id, session["email"], decision_note)
     if status == "not_found":
-        return jsonify({"ok": False, "error": "not found"}), 404
+        return _json("not_found", error="not found")
     if status == "not_pending":
-        return jsonify({"ok": False, "error": "not pending"}), 409
-    return jsonify({"ok": True})
+        return _json("not_pending", error="not pending")
+    return _json("ok")
 
 
 @app.route("/api/proposal/<int:proposal_id>/reopen", methods=["POST"])
@@ -789,10 +816,10 @@ def reopen_proposal_route(proposal_id: int):
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 409
     if status == "not_found":
-        return jsonify({"ok": False, "error": "not found"}), 404
+        return _json("not_found", error="not found")
     if status == "not_rejected":
-        return jsonify({"ok": False, "error": "not rejected"}), 409
-    return jsonify({"ok": True, "proposal_id": new_proposal_id})
+        return _json("not_rejected", error="not rejected")
+    return _json("ok", proposal_id=new_proposal_id)
 
 
 # ---------------------------------------------------------------------------
@@ -835,10 +862,10 @@ def approve_segment_route(segment_id: int):
     with get_conn() as conn:
         result = approve_segment(conn, segment_id)
     if result == "ok":
-        return jsonify({"ok": True})
+        return _json("ok")
     if result == "notfound":
-        return jsonify({"ok": False, "error": "not found"}), 404
-    return jsonify({"ok": False, "error": "wrong_status"}), 409
+        return _json("notfound", error="not found")
+    return _json("wrong_status", error="wrong_status")
 
 
 @app.route("/api/segment/<int:segment_id>/unapprove", methods=["POST"])
@@ -854,12 +881,12 @@ def unapprove_segment_route(segment_id: int):
     with get_conn() as conn:
         result = unapprove_segment(conn, segment_id)
     if result == "ok":
-        return jsonify({"ok": True})
+        return _json("ok")
     if result == "notfound":
-        return jsonify({"ok": False, "error": "not found"}), 404
+        return _json("notfound", error="not found")
     if result == "already_polished":
-        return jsonify({"ok": False, "error": "already_polished"}), 409
-    return jsonify({"ok": False, "error": "wrong_status"}), 409
+        return _json("already_polished", error="already_polished")
+    return _json("wrong_status", error="wrong_status")
 
 
 # ---------------------------------------------------------------------------

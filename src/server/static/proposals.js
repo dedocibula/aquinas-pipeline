@@ -5,7 +5,10 @@
 
   // ---------------------------------------------------------------------------
   // Proposal kinds (glossary_proposal.kind CHECK constraint, migration 013).
-  // Values are locked schema truth — mirrors server/db.py's PROPOSAL_KIND_*.
+  // The repo is deliberately build-free, so this JS cannot import Python —
+  // this is the one permitted mirror of server/db.py's SENSE_WIDE_KINDS /
+  // PER_SEGMENT_KINDS (and their underlying PROPOSAL_KIND_* strings). Keep
+  // in sync by hand; do not add other Python-side duplicates elsewhere.
   // ---------------------------------------------------------------------------
 
   var KIND_CHANGE_EVERYWHERE = 'rendering';
@@ -16,18 +19,6 @@
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  function _postJson(url, body) {
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(function (resp) {
-      return resp.json().then(function (data) {
-        return { status: resp.status, data: data };
-      });
-    });
-  }
 
   function _setPendingBadge(senseId, on) {
     var badge = document.querySelector(
@@ -183,7 +174,7 @@
       form.querySelector('.tpf-submit').disabled = true;
       status.textContent = 'Submitting…';
 
-      _postJson('/api/sense/' + senseId + '/propose', body)
+      AQ.postJson('/api/sense/' + senseId + '/propose', body)
         .then(function (result) {
           form.querySelector('.tpf-submit').disabled = false;
           if (result.status === 200 && result.data.ok) {
@@ -229,7 +220,7 @@
       btn.disabled = true;
       status.textContent = 'Submitting…';
 
-      _postJson('/api/term-proposal', {
+      AQ.postJson('/api/term-proposal', {
         latin_lemma: lemma,
         proposed_sk: rendering,
         note: note,
@@ -280,7 +271,7 @@
     buttons.forEach(function (b) { b.disabled = true; });
     status.textContent = action === 'approve' ? 'Applying…' : 'Rejecting…';
 
-    _postJson('/api/proposal/' + proposalId + '/' + action, body)
+    AQ.postJson('/api/proposal/' + proposalId + '/' + action, body)
       .then(function (result) {
         if (result.status === 200 && result.data.ok) {
           status.textContent = action === 'approve' ? 'Applied.' : 'Rejected.';
@@ -317,7 +308,7 @@
       btn.disabled = true;
       status.textContent = 'Reopening…';
 
-      _postJson('/api/proposal/' + proposalId + '/reopen', {})
+      AQ.postJson('/api/proposal/' + proposalId + '/reopen', {})
         .then(function (result) {
           if (result.status === 200 && result.data.ok) {
             status.textContent = 'Reopened as #' + result.data.proposal_id + ' — reloading…';

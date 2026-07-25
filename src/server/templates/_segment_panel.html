@@ -11,6 +11,12 @@
     — renders the <td class="col-status"> (badge + Review button + Comment button).
       Outputs nothing when is_editor is false.
     — comment_counts: {segment_id: CommentCount(total, open_count, unread)}.
+
+  segment_row(seg, row_type, label, seg_constraints, is_editor, pending_counts={}, comment_counts={})
+    — renders the full <tr> for one segment in a parallel-text table: label cell,
+      Latin/Czech/English ref-text cell, segment_panel cell, status_cell.
+    — row_type: suffix for the "row-<row_type>" CSS class (e.g. an element_type,
+      or 'question_title' / 'preamble').
 #}
 
 {% macro segment_panel(seg, seg_constraints, is_editor, pending_counts={}) %}
@@ -45,7 +51,7 @@
 
     <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
       <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
-                >{{ seg.slovak_human or seg.slovak_polish or seg.slovak_model or '' }}</textarea>
+                >{{ slovak_display or '' }}</textarea>
       <div class="review-actions">
         <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
         <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>
@@ -227,4 +233,25 @@
     </div>
   </td>
   {% endif %}
+{% endmacro %}
+
+
+{% macro segment_row(seg, row_type, label, seg_constraints, is_editor, pending_counts={}, comment_counts={}) %}
+  {% set needs_human = (seg.translation_status == 'needs_human') %}
+  <tr id="seg-{{ seg.segment_id }}"
+      class="row-{{ row_type }}{% if needs_human and is_editor %} row-needs-human{% endif %}"
+      data-segment-id="{{ seg.segment_id }}">
+    <td class="col-label">
+      {{ label }}
+    </td>
+    <td class="col-latin">
+      <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
+      <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
+      <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
+    </td>
+    <td class="col-slovak slovak">
+      {{ segment_panel(seg, seg_constraints, is_editor, pending_counts) }}
+    </td>
+    {{ status_cell(seg, is_editor, comment_counts) }}
+  </tr>
 {% endmacro %}

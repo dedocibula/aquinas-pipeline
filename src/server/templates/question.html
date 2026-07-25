@@ -30,42 +30,12 @@
 
     {# --- Nadpis row --- #}
     {% if title_seg %}
-    {% set seg = title_seg %}
-    {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr id="seg-{{ seg.segment_id }}"
-      class="row-question_title{% if needs_human and is_editor %} row-needs-human{% endif %}"
-      data-segment-id="{{ seg.segment_id }}">
-      <td class="col-label">Nadpis</td>
-      <td class="col-latin">
-        <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
-        <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
-        <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
-      </td>
-      <td class="col-slovak slovak">
-        {{ panel.segment_panel(seg, title_constraints, is_editor, pending_counts) }}
-      </td>
-      {{ panel.status_cell(seg, is_editor, comment_counts) }}
-    </tr>
+    {{ panel.segment_row(title_seg, 'question_title', 'Nadpis', title_constraints, is_editor, pending_counts, comment_counts) }}
     {% endif %}
 
     {# --- Preambula row --- #}
     {% if preamble_seg %}
-    {% set seg = preamble_seg %}
-    {% set needs_human = (seg.translation_status == 'needs_human') %}
-    <tr id="seg-{{ seg.segment_id }}"
-      class="row-preamble{% if needs_human and is_editor %} row-needs-human{% endif %}"
-      data-segment-id="{{ seg.segment_id }}">
-      <td class="col-label">Preambula</td>
-      <td class="col-latin">
-        <span class="ref-text" data-lang="la">{{ seg.latin or '' }}</span>
-        <span class="ref-text" data-lang="cs" style="display:none">{{ seg.czech or '' }}</span>
-        <span class="ref-text" data-lang="en" style="display:none">{{ seg.english or '' }}</span>
-      </td>
-      <td class="col-slovak slovak">
-        {{ panel.segment_panel(seg, preamble_constraints, is_editor, pending_counts) }}
-      </td>
-      {{ panel.status_cell(seg, is_editor, comment_counts) }}
-    </tr>
+    {{ panel.segment_row(preamble_seg, 'preamble', 'Preambula', preamble_constraints, is_editor, pending_counts, comment_counts) }}
     {% endif %}
   </tbody>
 </table>
@@ -103,31 +73,8 @@
 
 {% block scripts %}
 {% if title_seg or preamble_seg %}
-<script>
-  (function () {
-    // Language switcher
-    var sel = document.getElementById('ref-lang-select');
-    if (sel) sel.addEventListener('change', function () {
-      var lang = this.value;
-      document.querySelectorAll('.ref-text').forEach(function (el) {
-        el.style.display = el.dataset.lang === lang ? '' : 'none';
-      });
-    });
-
-    // Detail panel toggles
-    document.querySelectorAll('.detail-toggle').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var panel = document.getElementById(btn.dataset.target);
-        if (!panel) return;
-        var open = panel.style.display !== 'none';
-        panel.style.display = open ? 'none' : '';
-        btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-        btn.innerHTML = open ? '&#9654; details' : '&#9660; details';
-      });
-    });
-
-  }());
-</script>
+<script src="{{ url_for('static', filename='util.js') }}"></script>
+<script src="{{ url_for('static', filename='viewer.js') }}"></script>
 {% if is_editor %}
 {% include "_comment_sidebar.html" %}
 <script>var _currentUserEmail = {{ current_user_email | tojson }};</script>

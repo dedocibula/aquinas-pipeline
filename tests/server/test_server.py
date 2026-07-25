@@ -269,11 +269,11 @@ def test_article_view_embeds_all_ref_language_spans(client):
 
 
 def test_article_view_has_switcher_script(client):
-    """Article view includes the JS listener for the language switcher."""
+    """Article view includes the language switcher and loads viewer.js for it."""
     response = client.get("/~ST.I.Q3.A1")
     html = response.data.decode()
     assert "ref-lang-select" in html
-    assert "querySelectorAll('.ref-text')" in html
+    assert '<script src="/static/viewer.js"></script>' in html
 
 
 def test_status_endpoint_returns_progress_keys(client):

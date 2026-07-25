@@ -106,12 +106,11 @@
     var row = _row(segId);
     if (row) row.classList.add('row-comment-active');
 
-    fetch('/api/segment/' + segId + '/comments')
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
+    AQ.getJson('/api/segment/' + segId + '/comments')
+      .then(function (result) {
         _setStatus('');
-        if (!data.ok) { _setStatus('Failed to load comments.'); return; }
-        _renderThread(segId, data);
+        if (!result.data.ok) { _setStatus('Failed to load comments.'); return; }
+        _renderThread(segId, result.data);
       })
       .catch(function () { _setStatus('Failed to load comments — server error.'); });
   }
@@ -128,13 +127,9 @@
     var body  = textarea.value.trim();
     if (!segId || !body) return;
     addBtn.disabled = true;
-    fetch('/api/segment/' + segId + '/comments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: body }),
-    })
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
+    AQ.postJson('/api/segment/' + segId + '/comments', { body: body })
+      .then(function (result) {
+        var data = result.data;
         addBtn.disabled = false;
         if (!data.ok) { alert('Add comment failed: ' + (data.error || 'server error')); return; }
         textarea.value = '';
@@ -158,9 +153,9 @@
     var segId = sidebar.dataset.segmentId;
     if (!segId) return;
     var url = '/api/segment/' + segId + '/comments/' + (resolved ? 'resolve' : 'reopen');
-    fetch(url, { method: 'POST' })
-      .then(function (resp) { return resp.json(); })
-      .then(function (data) {
+    AQ.postJson(url, {})
+      .then(function (result) {
+        var data = result.data;
         if (!data.ok) { alert('Action failed: ' + (data.error || 'server error')); return; }
         listEl.querySelectorAll('.comment-card').forEach(function (el) {
           el.classList.toggle('comment-card-resolved', resolved);

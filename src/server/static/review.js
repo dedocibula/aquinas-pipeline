@@ -92,15 +92,7 @@
       { action: action, expected_version: _getVersion(segId) },
       extra || {}
     );
-    return fetch('/api/segment/' + segId + '/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(function (resp) {
-      return resp.json().then(function (data) {
-        return { status: resp.status, data: data };
-      });
-    });
+    return AQ.postJson('/api/segment/' + segId + '/review', body);
   }
 
   function _handleResult(segId, result, onOk) {
@@ -280,8 +272,7 @@
       btn.disabled = true;
       btn.textContent = approved ? 'Reverting…' : 'Approving…';
 
-      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-        .then(function (resp) { return resp.json().then(function (d) { return { status: resp.status, data: d }; }); })
+      AQ.postJson(url, {})
         .then(function (result) {
           if (result.status === 200 && result.data.ok) {
             if (!approved) {
