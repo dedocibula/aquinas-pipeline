@@ -28,13 +28,14 @@ from server.db import (
     segment_exists,
     segment_has_locked_sense,
 )
+from storage.models import Sense
 
 FAKE_TERM = {
     "term_id": 5,
     "latin_lemma": "ratio",
     "senses": [
-        {"sense_id": 100, "context_label": None, "status": "approved", "slovak": "rozum"},
-        {"sense_id": 101, "context_label": "reason", "status": "approved", "slovak": "dôvod"},
+        Sense(sense_id=100, context_label=None, status="approved", sk_content="rozum"),
+        Sense(sense_id=101, context_label="reason", status="approved", sk_content="dôvod"),
     ],
 }
 
@@ -87,7 +88,7 @@ def test_get_segment_constraints_emits_sense_id(fake_conn):
         ]
     )
     result = get_segment_constraints(conn, [1])
-    assert result[1][0]["sense_id"] == 100
+    assert result[1][0].sense_id == 100
     sql, _ = conn.executed[-1]
     assert "gs.sense_id" in sql
 
@@ -108,7 +109,7 @@ def test_get_term_senses_returns_term_and_senses(fake_conn):
     result = get_term_senses(conn, 100)
     assert result["term_id"] == 5
     assert result["latin_lemma"] == "ratio"
-    assert [s["sense_id"] for s in result["senses"]] == [100, 101]
+    assert [s.sense_id for s in result["senses"]] == [100, 101]
     _, second_params = conn.executed[-1]
     assert second_params == (5,)
 
@@ -146,26 +147,26 @@ def test_propose_sense_change_not_found(fake_conn):
     mock_glossary.get_current_sense.return_value = None
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, proposal_id = propose_sense_change(
+        result = propose_sense_change(
             conn, 999, PROPOSAL_KIND_CHANGE_EVERYWHERE,
             proposed_sk="myseľ", proposed_sense_id=None, note=None,
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "not_found"
-    assert proposal_id is None
+    assert result.status == "not_found"
+    assert not (result.payload or {}).get("proposal_id")
 
 
 def test_propose_sense_change_rendering_valid(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(current_sk="rozum")
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, proposal_id = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_CHANGE_EVERYWHERE,
             proposed_sk="myseľ", proposed_sense_id=None, note=None,
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "ok"
-    assert proposal_id == 55
+    assert result.status == "ok"
+    assert result.payload["proposal_id"] == 55
     _, kwargs = mock_proposal.create_or_update_pending.call_args
     assert kwargs["kind"] == PROPOSAL_KIND_CHANGE_EVERYWHERE
     assert kwargs["proposed_sk"] == "myseľ"
@@ -176,12 +177,12 @@ def test_propose_sense_change_rendering_missing_sk_returns_proposed_sk_required(
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, proposal_id = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_CHANGE_EVERYWHERE,
             proposed_sk=None, proposed_sense_id=None, note=None,
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "proposed_sk_required"
+    assert result.status == "proposed_sk_required"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -189,12 +190,12 @@ def test_propose_sense_change_rendering_no_change(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(current_sk="rozum")
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_CHANGE_EVERYWHERE,
             proposed_sk="rozum", proposed_sense_id=None, note=None,
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "no_change"
+    assert result.status == "no_change"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -202,12 +203,12 @@ def test_propose_sense_change_wrong_sense_here_not_locked(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(locked=False)
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk=None, proposed_sense_id=101, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "not_locked_here"
+    assert result.status == "not_locked_here"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -215,12 +216,12 @@ def test_propose_sense_change_wrong_sense_here_wrong_term(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk=None, proposed_sense_id=999, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "wrong_term"
+    assert result.status == "wrong_term"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -228,25 +229,25 @@ def test_propose_sense_change_wrong_sense_here_same_sense_no_change(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk=None, proposed_sense_id=100, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "no_change"
+    assert result.status == "no_change"
 
 
 def test_propose_sense_change_wrong_sense_here_valid_sense_id(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, proposal_id = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk=None, proposed_sense_id=101, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "ok"
-    assert proposal_id == 55
+    assert result.status == "ok"
+    assert result.payload["proposal_id"] == 55
     _, kwargs = mock_proposal.create_or_update_pending.call_args
     assert kwargs["proposed_sense_id"] == 101
     assert kwargs["proposed_sk"] is None
@@ -256,12 +257,12 @@ def test_propose_sense_change_wrong_sense_here_free_text(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(current_sk="rozum")
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk="iný zmysel", proposed_sense_id=None, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "ok"
+    assert result.status == "ok"
     _, kwargs = mock_proposal.create_or_update_pending.call_args
     assert kwargs["proposed_sk"] == "iný zmysel"
     assert kwargs["proposed_sense_id"] is None
@@ -271,12 +272,12 @@ def test_propose_sense_change_wrong_sense_here_free_text_no_change(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(current_sk="rozum")
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk="rozum", proposed_sense_id=None, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "no_change"
+    assert result.status == "no_change"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -284,12 +285,12 @@ def test_propose_sense_change_wrong_sense_here_missing_target(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_WRONG_SENSE_HERE,
             proposed_sk=None, proposed_sense_id=None, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "missing_target"
+    assert result.status == "missing_target"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -297,12 +298,12 @@ def test_propose_sense_change_remove_here_not_locked(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose(locked=False)
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_REMOVE_HERE,
             proposed_sk="ignored", proposed_sense_id=None, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "not_locked_here"
+    assert result.status == "not_locked_here"
     mock_proposal.create_or_update_pending.assert_not_called()
 
 
@@ -310,12 +311,12 @@ def test_propose_sense_change_remove_here_ignores_proposed_sk(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_REMOVE_HERE,
             proposed_sk="should be ignored", proposed_sense_id=None, note=None,
             origin_segment_id=42, proposed_by="editor@example.com",
         )
-    assert status == "ok"
+    assert result.status == "ok"
     _, kwargs = mock_proposal.create_or_update_pending.call_args
     assert kwargs["kind"] == PROPOSAL_KIND_REMOVE_HERE
     assert kwargs["proposed_sk"] is None
@@ -325,12 +326,12 @@ def test_propose_sense_change_retire_everywhere(fake_conn):
     p1, p2, p3, p4, _, mock_proposal = _patched_propose()
     conn = fake_conn()
     with p1, p2, p3, p4:
-        status, _ = propose_sense_change(
+        result = propose_sense_change(
             conn, 100, PROPOSAL_KIND_RETIRE_EVERYWHERE,
             proposed_sk=None, proposed_sense_id=None, note="overfit",
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "ok"
+    assert result.status == "ok"
     _, kwargs = mock_proposal.create_or_update_pending.call_args
     assert kwargs["kind"] == PROPOSAL_KIND_RETIRE_EVERYWHERE
     assert kwargs["proposed_sk"] is None
@@ -342,12 +343,12 @@ def test_propose_add_term_existing_lemma(fake_conn):
     mock_glossary_cls = MagicMock()
     mock_glossary_cls.return_value.find_term_by_lemma.return_value = 7
     with patch("server.db.GlossaryRepository", mock_glossary_cls):
-        status, proposal_id = propose_add_term(
+        result = propose_add_term(
             conn, latin_lemma="ratio", proposed_sk="rozum", note=None,
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "term_exists"
-    assert proposal_id is None
+    assert result.status == "term_exists"
+    assert not (result.payload or {}).get("proposal_id")
 
 
 def test_propose_add_term_valid(fake_conn):
@@ -360,12 +361,12 @@ def test_propose_add_term_valid(fake_conn):
         patch("server.db.GlossaryRepository", mock_glossary_cls),
         patch("server.db.ProposalRepository", mock_proposal_cls),
     ):
-        status, proposal_id = propose_add_term(
+        result = propose_add_term(
             conn, latin_lemma="novum", proposed_sk="nové", note="missing",
             origin_segment_id=None, proposed_by="editor@example.com",
         )
-    assert status == "ok"
-    assert proposal_id == 77
+    assert result.status == "ok"
+    assert result.payload["proposal_id"] == 77
     _, kwargs = mock_proposal_cls.return_value.create_or_update_pending.call_args
     assert kwargs["kind"] == PROPOSAL_KIND_ADD_TERM
     assert kwargs["latin_lemma"] == "novum"

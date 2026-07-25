@@ -15,7 +15,7 @@ re-exported here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 __all__ = [
@@ -29,6 +29,8 @@ __all__ = [
     "ActivityEntry",
     "DigestItem",
     "UserDigest",
+    "ReviewerNotes",
+    "ActionResult",
 ]
 
 
@@ -42,26 +44,32 @@ class Sense:
     """
 
     sense_id: int
-    context_label: str | None
-    version: int
-    cs_lemma: str | None
-    cs_content: str | None
-    en_cue: str | None
-    sk_content: str | None
-    la_surface: str | None
+    context_label: str | None = None
+    version: int | None = None
+    cs_lemma: str | None = None
+    cs_content: str | None = None
+    en_cue: str | None = None
+    sk_content: str | None = None
+    la_surface: str | None = None
+    status: str | None = None
 
     @classmethod
     def from_row(cls, row) -> Sense:
-        """Build from a mapping (RealDictRow or dict) keyed by the sense columns."""
+        """Build from a mapping (RealDictRow or dict) keyed by the sense columns.
+
+        Every field but ``sense_id`` is read tolerantly: callers such as
+        ``server.db.get_term_senses`` only produce a subset of these columns.
+        """
         return cls(
             sense_id=row["sense_id"],
-            context_label=row["context_label"],
-            version=row["version"],
-            cs_lemma=row["cs_lemma"],
-            cs_content=row["cs_content"],
-            en_cue=row["en_cue"],
-            sk_content=row["sk_content"],
-            la_surface=row["la_surface"],
+            context_label=_get(row, "context_label"),
+            version=_get(row, "version"),
+            cs_lemma=_get(row, "cs_lemma"),
+            cs_content=_get(row, "cs_content"),
+            en_cue=_get(row, "en_cue"),
+            sk_content=_get(row, "sk_content"),
+            la_surface=_get(row, "la_surface"),
+            status=_get(row, "status"),
         )
 
 
@@ -94,6 +102,31 @@ class Term:
 
 
 @dataclass(frozen=True)
+class ReviewerNotes:
+    """Parsed shape of the ``segment.reviewer_notes`` JSONB column, for display.
+
+    The column holds either a mapping with ``iteration``/``raw``/``last_feedback``
+    keys (pilot writer) or a legacy plain string. All fields are ``None`` for the
+    legacy string shape or when there are no notes — mirrors the display fallback
+    the preview server template used before this parsing moved into Python.
+    """
+
+    iteration: int | None = None
+    raw: str | None = None
+    last_feedback: str | None = None
+
+    @classmethod
+    def from_raw(cls, raw) -> ReviewerNotes:
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(
+            iteration=raw.get("iteration"),
+            raw=raw.get("raw") or None,
+            last_feedback=raw.get("last_feedback") or None,
+        )
+
+
+@dataclass(frozen=True)
 class Segment:
     """A corpus segment with its source-language texts.
 
@@ -102,6 +135,10 @@ class Segment:
     carries ``reply_to`` and ``translation_status`` — both optional here so the
     one model covers both producers. (Verified against the loop query and the
     ``v_segment`` view, which additionally exposes slovak_draft/slovak_final.)
+
+    The remaining fields are populated only by ``server.db``'s segment-select
+    query (machine/human Slovak drafts and human-review metadata); they default
+    to unset for every other producer.
     """
 
     segment_id: int
@@ -112,10 +149,17 @@ class Segment:
     english: str | None
     reply_to: int | None = None
     translation_status: str | None = None
+    slovak_model: str | None = None
+    slovak_polish: str | None = None
+    slovak_human: str | None = None
+    human_note: str | None = None
+    human_reviewed_by: str | None = None
+    human_version: int = 0
+    reviewer_notes: ReviewerNotes = field(default_factory=ReviewerNotes)
 
     @classmethod
     def from_row(cls, row) -> Segment:
-        """Build from a mapping; reply_to/translation_status default when absent."""
+        """Build from a mapping; every field but the first six defaults when absent."""
         return cls(
             segment_id=row["segment_id"],
             locator_path=row["locator_path"],
@@ -125,6 +169,13 @@ class Segment:
             english=row["english"],
             reply_to=_get(row, "reply_to"),
             translation_status=_get(row, "translation_status"),
+            slovak_model=_get(row, "slovak_model"),
+            slovak_polish=_get(row, "slovak_polish"),
+            slovak_human=_get(row, "slovak_human"),
+            human_note=_get(row, "human_note"),
+            human_reviewed_by=_get(row, "human_reviewed_by"),
+            human_version=_get(row, "human_version", 0),
+            reviewer_notes=ReviewerNotes.from_raw(_get(row, "reviewer_notes")),
         )
 
     def as_dict(self) -> dict:
@@ -259,6 +310,19 @@ class UserDigest:
 
     user_email: str
     items: list[DigestItem]
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    """Outcome of a db-layer action (approve/reject/reopen/propose/review).
+
+    ``status`` is a key into ``server.app._STATUS_HTTP``. ``payload`` is merged
+    into the JSON response on success, and supplies the ``error`` message (and
+    any other extra keys) on failure.
+    """
+
+    status: str
+    payload: dict | None = None
 
 
 def _get(row, key, default=None):

@@ -326,14 +326,14 @@ def _question_view(ltree_path: str, st_locator: str):
         preamble_seg = get_question_preamble_segment(conn, ltree_path)
         constraint_ids = []
         if title_seg:
-            constraint_ids.append(title_seg["segment_id"])
+            constraint_ids.append(title_seg.segment_id)
         if preamble_seg:
-            constraint_ids.append(preamble_seg["segment_id"])
+            constraint_ids.append(preamble_seg.segment_id)
         all_constraints = get_segment_constraints(conn, constraint_ids) if constraint_ids else {}
-        title_constraints = all_constraints.get(title_seg["segment_id"], []) if title_seg else []
-        preamble_constraints = all_constraints.get(preamble_seg["segment_id"], []) if preamble_seg else []
+        title_constraints = all_constraints.get(title_seg.segment_id, []) if title_seg else []
+        preamble_constraints = all_constraints.get(preamble_seg.segment_id, []) if preamble_seg else []
         pending_sense_ids = sorted(
-            {c["sense_id"] for lst in (title_constraints, preamble_constraints) for c in lst}
+            {c.sense_id for lst in (title_constraints, preamble_constraints) for c in lst}
         )
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
         comment_counts = (
@@ -368,9 +368,9 @@ def _article_view(ltree_path: str, st_locator: str):
         if not segments:
             abort(404)
         nav = get_prev_next_article(conn, ltree_path)
-        segment_ids = [s["segment_id"] for s in segments]
+        segment_ids = [s.segment_id for s in segments]
         constraints = get_segment_constraints(conn, segment_ids)
-        pending_sense_ids = sorted({c["sense_id"] for lst in constraints.values() for c in lst})
+        pending_sense_ids = sorted({c.sense_id for lst in constraints.values() for c in lst})
         pending_counts = get_pending_proposal_counts(conn, pending_sense_ids)
         comment_counts = (
             get_comment_counts(conn, segment_ids, session["email"]) if session.get("is_editor") else {}
@@ -382,16 +382,16 @@ def _article_view(ltree_path: str, st_locator: str):
     arg_number: dict[int, int] = {}
     arg_counter = 0
     for seg in segments:
-        if seg["element_type"] == "arg":
+        if seg.element_type == "arg":
             arg_counter += 1
-            arg_number[seg["segment_id"]] = arg_counter
+            arg_number[seg.segment_id] = arg_counter
 
     reply_number: dict[int, int] = {}
     for seg in segments:
-        if seg["element_type"] == "reply":
-            reply_to_id = seg["reply_to"]
+        if seg.element_type == "reply":
+            reply_to_id = seg.reply_to
             if reply_to_id is not None and reply_to_id in arg_number:
-                reply_number[seg["segment_id"]] = arg_number[reply_to_id]
+                reply_number[seg.segment_id] = arg_number[reply_to_id]
 
     # Convert nav paths to URL locators.
     nav_urls = {
@@ -489,7 +489,7 @@ def review_segment_route(segment_id: int):
     reviewer_email: str = session["email"]
 
     with get_conn() as conn:
-        result, new_version = review_segment(
+        result = review_segment(
             conn, segment_id, action,
             expected_version=expected_version,
             reviewer_email=reviewer_email,
@@ -497,11 +497,7 @@ def review_segment_route(segment_id: int):
             note=note,
         )
 
-    if result == "ok":
-        return _json("ok", human_version=new_version)
-    if result == "notfound":
-        return _json("notfound", error="not found")
-    return _json("conflict", error="conflict")
+    return _json(result.status, **(result.payload or {}))
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +607,16 @@ def sense_alternatives_route(sense_id: int):
         term = get_term_senses(conn, sense_id)
     if term is None:
         return _json("not_found", error="not found")
-    return _json("ok", latin_lemma=term["latin_lemma"], senses=term["senses"])
+    senses = [
+        {
+            "sense_id": s.sense_id,
+            "context_label": s.context_label,
+            "status": s.status,
+            "slovak": s.sk_content,
+        }
+        for s in term["senses"]
+    ]
+    return _json("ok", latin_lemma=term["latin_lemma"], senses=senses)
 
 
 @app.route("/api/sense/<int:sense_id>/propose", methods=["POST"])
@@ -651,7 +656,7 @@ def propose_sense_change_route(sense_id: int):
             return jsonify({"ok": False, "error": "invalid proposed_sense_id"}), 400
 
     with get_conn() as conn:
-        status, proposal_id = propose_sense_change(
+        result = propose_sense_change(
             conn,
             sense_id,
             kind,
@@ -662,16 +667,7 @@ def propose_sense_change_route(sense_id: int):
             proposed_by=session["email"],
         )
 
-    if status == "ok":
-        return _json("ok", proposal_id=proposal_id)
-    if status == "not_found":
-        return _json("not_found", error="not found")
-    if status == "proposed_sk_required":
-        return _json("proposed_sk_required", error="proposed_sk required")
-    if status == "missing_target":
-        return _json("missing_target", error="proposed_sense_id or proposed_sk required")
-    # "no_change" / "wrong_term" / "not_locked_here"
-    return _json(status, error=status)
+    return _json(result.status, **(result.payload or {}))
 
 
 @app.route("/api/term-proposal", methods=["POST"])
@@ -697,7 +693,7 @@ def propose_term_route():
             return jsonify({"ok": False, "error": "invalid origin_segment_id"}), 400
 
     with get_conn() as conn:
-        status, proposal_id = propose_add_term(
+        result = propose_add_term(
             conn,
             latin_lemma=latin_lemma,
             proposed_sk=proposed_sk,
@@ -706,12 +702,7 @@ def propose_term_route():
             proposed_by=session["email"],
         )
 
-    if status == "term_exists":
-        return _json(
-            "term_exists",
-            error=f"term_exists: '{latin_lemma}' is already in the glossary",
-        )
-    return _json("ok", proposal_id=proposal_id)
+    return _json(result.status, **(result.payload or {}))
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +763,7 @@ def approve_proposal_route(proposal_id: int):
 
     try:
         with get_conn() as conn:
-            status, result = approve_proposal(
+            result = approve_proposal(
                 conn, proposal_id, session["email"], decision_note, edited_sk=edited_sk
             )
     except ProposalRaceError:
@@ -780,11 +771,7 @@ def approve_proposal_route(proposal_id: int):
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 409
 
-    if status == "not_found":
-        return _json("not_found", error="not found")
-    if status == "not_pending":
-        return _json("not_pending", error="not pending")
-    return _json("ok", **result)
+    return _json(result.status, **(result.payload or {}))
 
 
 @app.route("/api/proposal/<int:proposal_id>/reject", methods=["POST"])
@@ -794,12 +781,8 @@ def reject_proposal_route(proposal_id: int):
     data = request.get_json(silent=True) or {}
     decision_note = (data.get("note") or "").strip() or None
     with get_conn() as conn:
-        status = reject_proposal(conn, proposal_id, session["email"], decision_note)
-    if status == "not_found":
-        return _json("not_found", error="not found")
-    if status == "not_pending":
-        return _json("not_pending", error="not pending")
-    return _json("ok")
+        result = reject_proposal(conn, proposal_id, session["email"], decision_note)
+    return _json(result.status, **(result.payload or {}))
 
 
 @app.route("/api/proposal/<int:proposal_id>/reopen", methods=["POST"])
@@ -812,14 +795,10 @@ def reopen_proposal_route(proposal_id: int):
     """
     try:
         with get_conn() as conn:
-            status, new_proposal_id = reopen_proposal(conn, proposal_id, session["email"])
+            result = reopen_proposal(conn, proposal_id, session["email"])
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 409
-    if status == "not_found":
-        return _json("not_found", error="not found")
-    if status == "not_rejected":
-        return _json("not_rejected", error="not rejected")
-    return _json("ok", proposal_id=new_proposal_id)
+    return _json(result.status, **(result.payload or {}))
 
 
 # ---------------------------------------------------------------------------

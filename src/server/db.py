@@ -20,11 +20,15 @@ from review.glossary_apply import (
 )
 from storage.db import source_id
 from storage.models import (
+    ActionResult,
     ActivityEntry,
     Comment,
     CommentCount,
     CommentThread,
+    Constraint,
     DigestItem,
+    Segment,
+    Sense,
     UserDigest,
 )
 from storage.repositories import GlossaryRepository, ProposalRepository
@@ -186,7 +190,7 @@ def get_question_articles(
 def get_article_segments(
     conn: psycopg2.extensions.connection,
     article_path: str,
-) -> list[dict]:
+) -> list[Segment]:
     """Return all segments for an article with Latin, Czech, English, and Slovak text.
 
     Returns separate machine (slovak_model) and human (slovak_human) Slovak columns,
@@ -208,7 +212,7 @@ def get_article_segments(
     """)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, (article_path,))
-        return [dict(row) for row in cur.fetchall()]
+        return [Segment.from_row(row) for row in cur.fetchall()]
 
 
 def get_prev_next_article(
@@ -283,7 +287,7 @@ def get_translation_progress(conn: psycopg2.extensions.connection) -> dict:
 def get_question_title_segment(
     conn: psycopg2.extensions.connection,
     question_path: str,
-) -> dict | None:
+) -> Segment | None:
     """Return the question_title segment for a question, or None if absent."""
     sql = _segment_select_sql(
         "WHERE s.locator_path = %s::ltree AND s.element_type = 'question_title'"
@@ -291,20 +295,19 @@ def get_question_title_segment(
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, (question_path,))
         row = cur.fetchone()
-    return dict(row) if row else None
+    return Segment.from_row(row) if row else None
 
 
 def get_segment_constraints(
     conn: psycopg2.extensions.connection,
     segment_ids: list[int],
-) -> dict[int, list[dict]]:
+) -> dict[int, list[Constraint]]:
     """Return approved term constraints used for each segment.
 
     Joins term_usage → glossary_sense (status='approved') → sense_rendering (lang='sk')
     → glossary_term to surface the Latin lemma and optional context_label.
 
-    Returns a dict keyed by segment_id; each value is a list of dicts with keys
-    ``sense_id``, ``latin_lemma``, ``slovak``, ``context_label``.
+    Returns a dict keyed by segment_id; each value is a list of ``Constraint``.
     Missing segment_ids are not included (caller treats absence as empty list).
     A 'rejected' term_usage row (D10 tombstone) is excluded even if the sense
     itself is still approved.
@@ -331,18 +334,18 @@ def get_segment_constraints(
           AND sr.lang   = 'sk'
         ORDER BY tu.segment_id, gs.sense_id, s.authority_rank
     """
-    result: dict[int, list[dict]] = {}
+    result: dict[int, list[Constraint]] = {}
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, segment_ids)
         for row in cur.fetchall():
             sid = row["segment_id"]
             result.setdefault(sid, []).append(
-                {
-                    "sense_id": row["sense_id"],
-                    "latin_lemma": row["latin_lemma"],
-                    "slovak": row["slovak"],
-                    "context_label": row["context_label"],
-                }
+                Constraint(
+                    latin_lemma=row["latin_lemma"],
+                    required_slovak=row["slovak"],
+                    context_label=row["context_label"],
+                    sense_id=row["sense_id"],
+                )
             )
     return result
 
@@ -353,10 +356,11 @@ def get_term_senses(conn: psycopg2.extensions.connection, sense_id: int) -> dict
     Powers the "wrong sense here" dropdown (Stage 3). Includes senses of any
     status (proposed/approved/retired) — the editor must be able to name a
     not-yet-approved sense as the correct one; ``apply_sense_here`` approves
-    it on admin approval. Each sense's ``slovak`` is its winning rendering
+    it on admin approval. Each ``Sense.sk_content`` is its winning rendering
     (authority_rank ASC), same join shape as ``get_segment_constraints``, or
-    None if it has no sk rendering yet. Returns None if ``sense_id`` doesn't
-    exist.
+    None if it has no sk rendering yet. Returns
+    ``{"term_id", "latin_lemma", "senses": list[Sense]}``, or None if
+    ``sense_id`` doesn't exist.
     """
     sql = """
         SELECT gt.term_id, gt.latin_lemma
@@ -386,12 +390,12 @@ def get_term_senses(conn: psycopg2.extensions.connection, sense_id: int) -> dict
             (term["term_id"],),
         )
         senses = [
-            {
-                "sense_id": row["sense_id"],
-                "context_label": row["context_label"],
-                "status": row["status"],
-                "slovak": row["slovak"],
-            }
+            Sense(
+                sense_id=row["sense_id"],
+                context_label=row["context_label"],
+                status=row["status"],
+                sk_content=row["slovak"],
+            )
             for row in cur.fetchall()
         ]
 
@@ -532,23 +536,23 @@ def _enrich_proposal_display(conn: psycopg2.extensions.connection, row: dict) ->
         term = get_term_senses(conn, sense_id)
         if term is not None:
             sense_row = next(
-                (s for s in term["senses"] if s["sense_id"] == sense_id), None
+                (s for s in term["senses"] if s.sense_id == sense_id), None
             )
             if sense_row is not None:
-                row["context_label"] = sense_row["context_label"]
+                row["context_label"] = sense_row.context_label
 
             if row["proposed_sense_id"] is not None:
                 proposed_row = next(
                     (
                         s
                         for s in term["senses"]
-                        if s["sense_id"] == row["proposed_sense_id"]
+                        if s.sense_id == row["proposed_sense_id"]
                     ),
                     None,
                 )
                 if proposed_row is not None:
-                    row["proposed_context_label"] = proposed_row["context_label"]
-                    row["proposed_slovak"] = proposed_row["slovak"]
+                    row["proposed_context_label"] = proposed_row.context_label
+                    row["proposed_slovak"] = proposed_row.sk_content
 
     if kind in PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
         row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
@@ -624,7 +628,7 @@ def approve_proposal(
     admin_email: str,
     decision_note: str | None,
     edited_sk: str | None = None,
-) -> tuple[str, dict | None]:
+) -> ActionResult:
     """Apply an admin-approved glossary_proposal and mark it approved (Stage 4).
 
     Dispatches to the ``review.glossary_apply`` service matching the
@@ -641,15 +645,15 @@ def approve_proposal(
     ``sense_here`` in its free-text/record-only branch (``proposed_sense_id``
     is None). Raises ``ValueError`` if given for any other kind, or if blank.
 
-    Returns ``(status, result)``:
-      "ok"          -> result is the service's result dict. A ``sense_here``
+    Returns an ``ActionResult``:
+      "ok"          -> payload is the service's result dict. A ``sense_here``
                        proposal with no ``proposed_sense_id`` (the free-text,
                        record-only gold-label path, D9) calls no service and
                        returns ``{"acknowledged": True}``.
-      "not_found"   -> proposal_id doesn't exist; result is None.
+      "not_found"   -> proposal_id doesn't exist; payload carries an error message.
       "not_pending" -> already decided (by an earlier, already-committed
-                       request); result is None. No writes have happened yet
-                       at this point, so nothing to roll back.
+                       request); payload carries an error message. No writes
+                       have happened yet at this point, so nothing to roll back.
 
     Raises ``ValueError`` (a glossary_apply service's message — including
     "term_exists" for add_term, or a stale-proposal guard) or
@@ -661,9 +665,9 @@ def approve_proposal(
     repo = ProposalRepository(conn)
     proposal = repo.get(proposal_id)
     if proposal is None:
-        return ("not_found", None)
+        return ActionResult("not_found", {"error": "not found"})
     if proposal["status"] != "pending":
-        return ("not_pending", None)
+        return ActionResult("not_pending", {"error": "not pending"})
 
     kind = proposal["kind"]
     sense_id = proposal["sense_id"]
@@ -707,7 +711,7 @@ def approve_proposal(
     if kind in SENSE_WIDE_KINDS:
         repo.supersede_sense_wide_siblings(sense_id, proposal_id, admin_email)
 
-    return ("ok", result)
+    return ActionResult("ok", result)
 
 
 def reject_proposal(
@@ -715,22 +719,22 @@ def reject_proposal(
     proposal_id: int,
     admin_email: str,
     decision_note: str | None,
-) -> str:
-    """Reject a pending proposal. Returns "ok" / "not_found" / "not_pending"."""
+) -> ActionResult:
+    """Reject a pending proposal. Returns an ``ActionResult`` "ok" / "not_found" / "not_pending"."""
     repo = ProposalRepository(conn)
     proposal = repo.get(proposal_id)
     if proposal is None:
-        return "not_found"
+        return ActionResult("not_found", {"error": "not found"})
     if proposal["status"] != "pending":
-        return "not_pending"
+        return ActionResult("not_pending", {"error": "not pending"})
     if not repo.decide(proposal_id, "rejected", admin_email, decision_note):
-        return "not_pending"
-    return "ok"
+        return ActionResult("not_pending", {"error": "not pending"})
+    return ActionResult("ok")
 
 
 def reopen_proposal(
     conn: psycopg2.extensions.connection, proposal_id: int, admin_email: str
-) -> tuple[str, int | None]:
+) -> ActionResult:
     """Re-open a rejected proposal for reconsideration.
 
     The rejected row is never mutated — reopening only clones its content into
@@ -746,17 +750,17 @@ def reopen_proposal(
     exists — a sense retired or a segment removed since the original rejection
     would otherwise silently re-enter the live queue pointing at nothing.
 
-    Returns ``(status, new_proposal_id)``:
-      "ok"           -> new_proposal_id is the freshly created pending row.
-      "not_found"    -> proposal_id doesn't exist; new_proposal_id is None.
-      "not_rejected" -> proposal exists but isn't rejected; new_proposal_id is None.
+    Returns an ``ActionResult``:
+      "ok"           -> payload's proposal_id is the freshly created pending row.
+      "not_found"    -> proposal_id doesn't exist; payload carries an error message.
+      "not_rejected" -> proposal exists but isn't rejected; payload carries an error message.
     """
     repo = ProposalRepository(conn)
     proposal = repo.get(proposal_id)
     if proposal is None:
-        return ("not_found", None)
+        return ActionResult("not_found", {"error": "not found"})
     if proposal["status"] != "rejected":
-        return ("not_rejected", None)
+        return ActionResult("not_rejected", {"error": "not rejected"})
 
     sense_id = proposal["sense_id"]
     if sense_id is not None and GlossaryRepository(conn).get_current_sense(sense_id) is None:
@@ -766,7 +770,7 @@ def reopen_proposal(
         raise ValueError(f"segment {origin_segment_id} no longer exists")
 
     new_id = repo.clone_as_pending(proposal_id)
-    return ("ok", new_id)
+    return ActionResult("ok", {"proposal_id": new_id})
 
 
 def segment_has_locked_sense(
@@ -803,7 +807,7 @@ def propose_sense_change(
     note: str | None,
     origin_segment_id: int | None,
     proposed_by: str,
-) -> tuple[str, int | None]:
+) -> ActionResult:
     """Validate and record an editor's proposed sense-targeted glossary change.
 
     ``kind`` is one of the PROPOSAL_KIND_CHANGE_EVERYWHERE / WRONG_SENSE_HERE /
@@ -812,20 +816,20 @@ def propose_sense_change(
 
     Does NOT commit — caller's ``get_conn()`` handles the commit.
 
-    Returns ``(status, proposal_id)``:
-      "ok"               -> proposal recorded, proposal_id set
+    Returns an ``ActionResult``:
+      "ok"               -> payload's proposal_id is the new/updated pending row
       "not_found"        -> sense_id doesn't exist
       "no_change"        -> proposed_sk/proposed_sense_id equals current state
       "wrong_term"       -> proposed_sense_id isn't a sense of the same term
       "not_locked_here"  -> origin_segment_id doesn't actually lock sense_id (D8)
       "proposed_sk_required" -> rendering kind needs a non-empty proposed_sk
       "missing_target"   -> sense_here needs proposed_sense_id or proposed_sk
-    proposal_id is None unless status == "ok".
+    Every non-"ok" status carries an ``error`` message in its payload.
     """
     glossary = GlossaryRepository(conn)
     current_sense = glossary.get_current_sense(sense_id)
     if current_sense is None:
-        return ("not_found", None)
+        return ActionResult("not_found", {"error": "not found"})
 
     term = get_term_senses(conn, sense_id)
     current_sk = glossary.get_sk_rendering_content(sense_id)
@@ -835,30 +839,32 @@ def propose_sense_change(
 
     if kind == PROPOSAL_KIND_CHANGE_EVERYWHERE:
         if not proposed_sk:
-            return ("proposed_sk_required", None)
+            return ActionResult("proposed_sk_required", {"error": "proposed_sk required"})
         if proposed_sk == (current_sk or ""):
-            return ("no_change", None)
+            return ActionResult("no_change", {"error": "no_change"})
         resolved_proposed_sk = proposed_sk
 
     elif kind == PROPOSAL_KIND_WRONG_SENSE_HERE:
         if not segment_has_locked_sense(conn, origin_segment_id, sense_id):
-            return ("not_locked_here", None)
+            return ActionResult("not_locked_here", {"error": "not_locked_here"})
         if proposed_sense_id is not None:
             if proposed_sense_id == sense_id:
-                return ("no_change", None)
-            if not any(s["sense_id"] == proposed_sense_id for s in term["senses"]):
-                return ("wrong_term", None)
+                return ActionResult("no_change", {"error": "no_change"})
+            if not any(s.sense_id == proposed_sense_id for s in term["senses"]):
+                return ActionResult("wrong_term", {"error": "wrong_term"})
             resolved_proposed_sense_id = proposed_sense_id
         elif proposed_sk:
             if proposed_sk == (current_sk or ""):
-                return ("no_change", None)
+                return ActionResult("no_change", {"error": "no_change"})
             resolved_proposed_sk = proposed_sk
         else:
-            return ("missing_target", None)
+            return ActionResult(
+                "missing_target", {"error": "proposed_sense_id or proposed_sk required"}
+            )
 
     elif kind == PROPOSAL_KIND_REMOVE_HERE:
         if not segment_has_locked_sense(conn, origin_segment_id, sense_id):
-            return ("not_locked_here", None)
+            return ActionResult("not_locked_here", {"error": "not_locked_here"})
 
     else:  # PROPOSAL_KIND_RETIRE_EVERYWHERE
         pass
@@ -874,7 +880,7 @@ def propose_sense_change(
         origin_segment_id=origin_segment_id,
         proposed_by=proposed_by,
     )
-    return ("ok", proposal_id)
+    return ActionResult("ok", {"proposal_id": proposal_id})
 
 
 def propose_add_term(
@@ -885,17 +891,21 @@ def propose_add_term(
     note: str | None,
     origin_segment_id: int | None,
     proposed_by: str,
-) -> tuple[str, int | None]:
+) -> ActionResult:
     """Record an editor's suggestion for a missing glossary term (kind=add_term).
 
     Does NOT commit — caller's ``get_conn()`` handles the commit.
 
-    Returns ``(status, proposal_id)``:
-      "ok"          -> proposal recorded, proposal_id set
-      "term_exists" -> latin_lemma is already a glossary term
+    Returns an ``ActionResult``:
+      "ok"          -> payload's proposal_id is the new pending row
+      "term_exists" -> latin_lemma is already a glossary term; payload carries
+                       an error message naming it
     """
     if GlossaryRepository(conn).find_term_by_lemma(latin_lemma) is not None:
-        return ("term_exists", None)
+        return ActionResult(
+            "term_exists",
+            {"error": f"term_exists: '{latin_lemma}' is already in the glossary"},
+        )
 
     proposal_id = ProposalRepository(conn).create_or_update_pending(
         kind=PROPOSAL_KIND_ADD_TERM,
@@ -908,13 +918,13 @@ def propose_add_term(
         origin_segment_id=origin_segment_id,
         proposed_by=proposed_by,
     )
-    return ("ok", proposal_id)
+    return ActionResult("ok", {"proposal_id": proposal_id})
 
 
 def get_question_preamble_segment(
     conn: psycopg2.extensions.connection,
     question_path: str,
-) -> dict | None:
+) -> Segment | None:
     """Return the preamble segment for a question, or None if absent.
 
     Preambles sit at ``<question_path>.preamble`` (e.g. 'I.q1.preamble').
@@ -925,7 +935,7 @@ def get_question_preamble_segment(
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(sql, {"qpath": question_path})
         row = cur.fetchone()
-    return dict(row) if row else None
+    return Segment.from_row(row) if row else None
 
 
 def get_questions_by_status(
@@ -972,20 +982,21 @@ def review_segment(
     reviewer_email: str,
     text: str | None = None,
     note: str | None = None,
-) -> tuple[str, int | None]:
+) -> ActionResult:
     """Create or update the human review for a segment.
 
     ``action`` must be one of: ``save``, ``accept``, ``note``, ``reset``.
     ``expected_version`` is the optimistic-lock token the caller last read
     (0 means no review row existed when the caller loaded the segment).
 
-    Returns ``("ok", new_version)``, ``("conflict", None)``, or ``("notfound", None)``.
+    Returns an ``ActionResult`` with status ``ok`` (payload ``{human_version}``),
+    ``conflict``, or ``notfound`` (both carrying an ``error`` message).
     Does NOT commit — caller's ``get_conn()`` handles the commit.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
         if cur.fetchone() is None:
-            return ("notfound", None)
+            return ActionResult("notfound", {"error": "not found"})
 
         if action == "reset":
             cur.execute(
@@ -998,13 +1009,13 @@ def review_segment(
                 # Conflict if wrong version (row still there) OR row was already deleted
                 # by another editor (expected_version > 0 but row is gone).
                 if row_exists or expected_version != 0:
-                    return ("conflict", None)
+                    return ActionResult("conflict", {"error": "conflict"})
             human_src_id = source_id(conn, "human")
             cur.execute(
                 "DELETE FROM segment_text WHERE segment_id = %s AND lang = 'sk' AND source_id = %s",
                 (segment_id, human_src_id),
             )
-            return ("ok", 0)
+            return ActionResult("ok", {"human_version": 0})
 
         # Build the ON CONFLICT SET clause: include human_note only for the "note" action.
         if action == "note":
@@ -1029,7 +1040,7 @@ def review_segment(
         cur.execute(upsert_sql, (segment_id, reviewer_email, insert_note, expected_version))
         row = cur.fetchone()
         if row is None:
-            return ("conflict", None)
+            return ActionResult("conflict", {"error": "conflict"})
 
         new_version: int = row[0]
 
@@ -1045,7 +1056,7 @@ def review_segment(
                 (segment_id, text, human_src_id),
             )
 
-        return ("ok", new_version)
+        return ActionResult("ok", {"human_version": new_version})
 
 
 # ---------------------------------------------------------------------------

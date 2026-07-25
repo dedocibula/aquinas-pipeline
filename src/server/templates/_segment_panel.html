@@ -105,10 +105,10 @@
         <li data-sense-id="{{ c.sense_id }}">
           <code>{{ c.latin_lemma }}</code>
           {% if c.context_label %}<span class="term-context">({{ c.context_label }})</span>{% endif %}
-          &rarr; <span class="term-slovak">{{ c.slovak }}</span>
+          &rarr; <span class="term-slovak">{{ c.required_slovak }}</span>
           {% if is_editor %}
           <button class="btn-term-act" data-act="change" data-sense-id="{{ c.sense_id }}"
-                  data-segment-id="{{ seg.segment_id }}" data-current-sk="{{ c.slovak }}"
+                  data-segment-id="{{ seg.segment_id }}" data-current-sk="{{ c.required_slovak }}"
                   data-lemma="{{ c.latin_lemma }}" title="propose change">&#9998;</button>
           <button class="btn-term-act" data-act="remove" data-sense-id="{{ c.sense_id }}"
                   data-segment-id="{{ seg.segment_id }}" data-lemma="{{ c.latin_lemma }}"
@@ -151,27 +151,19 @@
     </div>
     {% endif %}
 
-    {% set notes              = seg.reviewer_notes %}
-    {% set iter_count         = None %}
-    {% set failure_reason     = None %}
-    {% set approved_with_notes = None %}
-    {% if notes is mapping %}
-      {% if 'iteration'     in notes and notes['iteration'] is not none %}{% set iter_count         = notes['iteration']     %}{% endif %}
-      {% if 'raw'           in notes and notes['raw']                   %}{% set approved_with_notes = notes['raw']           %}{% endif %}
-      {% if 'last_feedback' in notes and notes['last_feedback']         %}{% set failure_reason     = notes['last_feedback'] %}{% endif %}
-    {% endif %}
+    {% set notes = seg.reviewer_notes %}
     <div class="detail-section">
       <span class="detail-label">Precheck / review notes</span>
-      {% if iter_count is not none %}
-        <div class="detail-meta">Iterations: {{ iter_count }}</div>
+      {% if notes.iteration is not none %}
+        <div class="detail-meta">Iterations: {{ notes.iteration }}</div>
       {% endif %}
-      {% if needs_human and failure_reason %}
-        <div class="detail-failure">Failure: {{ failure_reason }}</div>
+      {% if needs_human and notes.last_feedback %}
+        <div class="detail-failure">Failure: {{ notes.last_feedback }}</div>
       {% endif %}
-      {% if approved_with_notes %}
-        <div class="detail-approved-notes">{{ approved_with_notes }}</div>
+      {% if notes.raw %}
+        <div class="detail-approved-notes">{{ notes.raw }}</div>
       {% endif %}
-      {% if iter_count is none and not failure_reason and not approved_with_notes %}
+      {% if notes.iteration is none and not notes.last_feedback and not notes.raw %}
         {% if needs_human %}
           <span class="detail-none">No feedback recorded — check pilot log</span>
         {% else %}

@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from storage.models import ActionResult, ReviewerNotes, Segment, Sense
+
 # ---------------------------------------------------------------------------
 # url_to_ltree unit tests
 # ---------------------------------------------------------------------------
@@ -84,74 +86,74 @@ FAKE_QUESTIONS_BY_STATUS = [
 ]
 
 FAKE_SEGMENTS = [
-    {
-        "segment_id": 1,
-        "locator_path": "I.q3.a1.arg1",
-        "element_type": "arg",
-        "reply_to": None,
-        "translation_status": "pending",
-        "reviewer_notes": None,
-        "latin": "Videtur quod non.",
-        "czech": "Zdá se, že ne.",
-        "english": "It seems that not.",
-        "slovak_model": None,
-        "slovak_polish": None,
-        "slovak_human": None,
-        "human_note": None,
-        "human_reviewed_by": None,
-        "human_version": 0,
-    },
-    {
-        "segment_id": 2,
-        "locator_path": "I.q3.a1.sed_contra",
-        "element_type": "sed_contra",
-        "reply_to": None,
-        "translation_status": "translated",
-        "reviewer_notes": None,
-        "latin": "Sed contra est quod.",
-        "czech": "Avšak proti tomu.",
-        "english": "On the contrary.",
-        "slovak_model": "Na druhej strane:",
-        "slovak_polish": None,
-        "slovak_human": None,
-        "human_note": None,
-        "human_reviewed_by": None,
-        "human_version": 0,
-    },
-    {
-        "segment_id": 3,
-        "locator_path": "I.q3.a1.respondeo",
-        "element_type": "respondeo",
-        "reply_to": None,
-        "translation_status": "translated",
-        "reviewer_notes": "Checked by reviewer",
-        "latin": "Respondeo dicendum.",
-        "czech": "Odpovídám.",
-        "english": "I answer that.",
-        "slovak_model": "Odpoveď:",
-        "slovak_polish": None,
-        "slovak_human": None,
-        "human_note": None,
-        "human_reviewed_by": None,
-        "human_version": 0,
-    },
-    {
-        "segment_id": 4,
-        "locator_path": "I.q3.a1.reply1",
-        "element_type": "reply",
-        "reply_to": 1,
-        "translation_status": "translated",
-        "reviewer_notes": None,
-        "latin": "Ad primum dicendum.",
-        "czech": "K první námitce.",
-        "english": "Reply to objection 1.",
-        "slovak_model": "K námietke 1.",
-        "slovak_polish": None,
-        "slovak_human": None,
-        "human_note": None,
-        "human_reviewed_by": None,
-        "human_version": 0,
-    },
+    Segment(
+        segment_id=1,
+        locator_path="I.q3.a1.arg1",
+        element_type="arg",
+        reply_to=None,
+        translation_status="pending",
+        reviewer_notes=ReviewerNotes(),
+        latin="Videtur quod non.",
+        czech="Zdá se, že ne.",
+        english="It seems that not.",
+        slovak_model=None,
+        slovak_polish=None,
+        slovak_human=None,
+        human_note=None,
+        human_reviewed_by=None,
+        human_version=0,
+    ),
+    Segment(
+        segment_id=2,
+        locator_path="I.q3.a1.sed_contra",
+        element_type="sed_contra",
+        reply_to=None,
+        translation_status="translated",
+        reviewer_notes=ReviewerNotes(),
+        latin="Sed contra est quod.",
+        czech="Avšak proti tomu.",
+        english="On the contrary.",
+        slovak_model="Na druhej strane:",
+        slovak_polish=None,
+        slovak_human=None,
+        human_note=None,
+        human_reviewed_by=None,
+        human_version=0,
+    ),
+    Segment(
+        segment_id=3,
+        locator_path="I.q3.a1.respondeo",
+        element_type="respondeo",
+        reply_to=None,
+        translation_status="translated",
+        reviewer_notes=ReviewerNotes.from_raw("Checked by reviewer"),
+        latin="Respondeo dicendum.",
+        czech="Odpovídám.",
+        english="I answer that.",
+        slovak_model="Odpoveď:",
+        slovak_polish=None,
+        slovak_human=None,
+        human_note=None,
+        human_reviewed_by=None,
+        human_version=0,
+    ),
+    Segment(
+        segment_id=4,
+        locator_path="I.q3.a1.reply1",
+        element_type="reply",
+        reply_to=1,
+        translation_status="translated",
+        reviewer_notes=ReviewerNotes(),
+        latin="Ad primum dicendum.",
+        czech="K první námitce.",
+        english="Reply to objection 1.",
+        slovak_model="K námietke 1.",
+        slovak_polish=None,
+        slovak_human=None,
+        human_note=None,
+        human_reviewed_by=None,
+        human_version=0,
+    ),
 ]
 
 FAKE_PROGRESS = {"pending": 10, "translated": 5, "needs_human": 2, "reviewed": 1}
@@ -320,15 +322,15 @@ def test_review_segment_save_on_pending_writes_text_and_review():
     cursor.fetchone.side_effect = [(1,), (1,)]
 
     with patch("server.db.source_id", return_value=42):
-        result, new_version = review_segment(
+        result = review_segment(
             conn, segment_id=1, action="save",
             expected_version=0,
             reviewer_email="ed@example.com",
             text="Preložený text.",
         )
 
-    assert result == "ok"
-    assert new_version == 1
+    assert result.status == "ok"
+    assert result.payload["human_version"] == 1
 
     sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
     assert not any("translation_status" in c for c in sql_calls), \
@@ -345,14 +347,14 @@ def test_review_segment_accept_creates_review_row_no_text():
     conn, cursor = _make_db_conn()
     cursor.fetchone.side_effect = [(1,), (1,)]  # existence + RETURNING
 
-    result, new_version = review_segment(
+    result = review_segment(
         conn, segment_id=2, action="accept",
         expected_version=0,
         reviewer_email="ed@example.com",
     )
 
-    assert result == "ok"
-    assert new_version == 1
+    assert result.status == "ok"
+    assert result.payload["human_version"] == 1
 
     sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
     assert any("INSERT INTO segment_review" in c for c in sql_calls)
@@ -366,15 +368,15 @@ def test_review_segment_note_roundtrips():
     conn, cursor = _make_db_conn()
     cursor.fetchone.side_effect = [(1,), (2,)]  # existence + RETURNING (version bump)
 
-    result, new_version = review_segment(
+    result = review_segment(
         conn, segment_id=3, action="note",
         expected_version=1,
         reviewer_email="ed@example.com",
         note="Terminological note here.",
     )
 
-    assert result == "ok"
-    assert new_version == 2
+    assert result.status == "ok"
+    assert result.payload["human_version"] == 2
 
     sql_calls = [c[0][0] for c in cursor.execute.call_args_list]
     assert any("human_note" in c for c in sql_calls)
@@ -389,14 +391,14 @@ def test_review_segment_reset_deletes_both():
     cursor.fetchone.side_effect = [(1,)]  # segment existence check
 
     with patch("server.db.source_id", return_value=42):
-        result, new_version = review_segment(
+        result = review_segment(
             conn, segment_id=4, action="reset",
             expected_version=1,
             reviewer_email="ed@example.com",
         )
 
-    assert result == "ok"
-    assert new_version == 0
+    assert result.status == "ok"
+    assert result.payload["human_version"] == 0
 
     sql_calls = [c[0][0].strip() for c in cursor.execute.call_args_list]
     assert any("DELETE FROM segment_review" in c for c in sql_calls)
@@ -411,15 +413,15 @@ def test_review_segment_stale_version_returns_conflict():
     # existence check → found; upsert RETURNING → None (version guard rejected)
     cursor.fetchone.side_effect = [(1,), None]
 
-    result, new_version = review_segment(
+    result = review_segment(
         conn, segment_id=5, action="save",
         expected_version=0,    # stale — real version is 1
         reviewer_email="ed@example.com",
         text="Some text",
     )
 
-    assert result == "conflict"
-    assert new_version is None
+    assert result.status == "conflict"
+    assert result.payload.get("human_version") is None
 
 
 def test_review_segment_unknown_segment_returns_notfound():
@@ -429,15 +431,15 @@ def test_review_segment_unknown_segment_returns_notfound():
     conn, cursor = _make_db_conn()
     cursor.fetchone.return_value = None  # segment does not exist
 
-    result, new_version = review_segment(
+    result = review_segment(
         conn, segment_id=9999, action="save",
         expected_version=0,
         reviewer_email="ed@example.com",
         text="text",
     )
 
-    assert result == "notfound"
-    assert new_version is None
+    assert result.status == "notfound"
+    assert result.payload.get("human_version") is None
 
 
 def test_review_segment_reset_ok_when_no_review_row():
@@ -450,14 +452,14 @@ def test_review_segment_reset_ok_when_no_review_row():
     cursor.fetchone.side_effect = [(1,), None]  # segment exists; no review row
 
     with patch("server.db.source_id", return_value=42):
-        result, new_version = review_segment(
+        result = review_segment(
             conn, segment_id=7, action="reset",
             expected_version=0,
             reviewer_email="ed@example.com",
         )
 
-    assert result == "ok"
-    assert new_version == 0
+    assert result.status == "ok"
+    assert result.payload["human_version"] == 0
 
 
 def test_review_segment_reset_conflict_when_row_exists_with_different_version():
@@ -469,13 +471,13 @@ def test_review_segment_reset_conflict_when_row_exists_with_different_version():
     cursor.rowcount = 0
     cursor.fetchone.side_effect = [(1,), (1,)]  # segment exists; review row still exists
 
-    result, _ = review_segment(
+    result = review_segment(
         conn, segment_id=6, action="reset",
         expected_version=0,   # wrong; actual is 2
         reviewer_email="ed@example.com",
     )
 
-    assert result == "conflict"
+    assert result.status == "conflict"
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +521,10 @@ def editor_client():
 
 def test_review_route_save_returns_ok_with_version(editor_client):
     """POST /api/segment/<id>/review with action=save returns 200 with human_version."""
-    with patch("server.app.review_segment", return_value=("ok", 1)) as mock_rv:
+    with patch(
+        "server.app.review_segment",
+        return_value=ActionResult("ok", {"human_version": 1}),
+    ) as mock_rv:
         resp = editor_client.post(
             "/api/segment/42/review",
             json={"action": "save", "text": "Preložený text.", "expected_version": 0},
@@ -534,7 +539,7 @@ def test_review_route_save_returns_ok_with_version(editor_client):
 
 def test_review_route_accept_returns_ok(editor_client):
     """POST /api/segment/<id>/review with action=accept returns 200."""
-    with patch("server.app.review_segment", return_value=("ok", 1)):
+    with patch("server.app.review_segment", return_value=ActionResult("ok", {"human_version": 1})):
         resp = editor_client.post(
             "/api/segment/42/review",
             json={"action": "accept", "expected_version": 0},
@@ -546,7 +551,7 @@ def test_review_route_accept_returns_ok(editor_client):
 
 def test_review_route_reset_returns_version_zero(editor_client):
     """POST /api/segment/<id>/review with action=reset returns human_version=0."""
-    with patch("server.app.review_segment", return_value=("ok", 0)):
+    with patch("server.app.review_segment", return_value=ActionResult("ok", {"human_version": 0})):
         resp = editor_client.post(
             "/api/segment/42/review",
             json={"action": "reset", "expected_version": 1},
@@ -558,7 +563,7 @@ def test_review_route_reset_returns_version_zero(editor_client):
 
 def test_review_route_conflict_returns_409(editor_client):
     """POST /api/segment/<id>/review returns 409 on stale expected_version."""
-    with patch("server.app.review_segment", return_value=("conflict", None)):
+    with patch("server.app.review_segment", return_value=ActionResult("conflict", {"error": "conflict"})):
         resp = editor_client.post(
             "/api/segment/42/review",
             json={"action": "save", "text": "text", "expected_version": 0},
@@ -570,7 +575,7 @@ def test_review_route_conflict_returns_409(editor_client):
 
 def test_review_route_unknown_segment_returns_404(editor_client):
     """POST /api/segment/<id>/review returns 404 for unknown segment_id."""
-    with patch("server.app.review_segment", return_value=("notfound", None)):
+    with patch("server.app.review_segment", return_value=ActionResult("notfound", {"error": "not found"})):
         resp = editor_client.post(
             "/api/segment/9999/review",
             json={"action": "accept", "expected_version": 0},
@@ -592,7 +597,10 @@ def test_review_route_empty_text_returns_400(editor_client):
 
 def test_review_route_note_empty_clears_note(editor_client):
     """POST /api/segment/<id>/review with action=note and empty note clears the note (not 400)."""
-    with patch("server.app.review_segment", return_value=("ok", 2)) as mock_rev:
+    with patch(
+        "server.app.review_segment",
+        return_value=ActionResult("ok", {"human_version": 2}),
+    ) as mock_rev:
         resp = editor_client.post(
             "/api/segment/42/review",
             json={"action": "note", "expected_version": 1},
@@ -949,27 +957,70 @@ def test_review_button_hidden_for_anonymous(client):
 def test_review_button_visible_for_editor(editor_client):
     """Editors see the btn-review button for all segments."""
     needs_human_segments = [
-        {
-            "segment_id": 10,
-            "locator_path": "I.q3.a1.arg1",
-            "element_type": "arg",
-            "reply_to": None,
-            "translation_status": "needs_human",
-            "reviewer_notes": None,
-            "latin": "Videtur quod.",
-            "czech": "Zdá se.",
-            "english": "It seems.",
-            "slovak_model": "Zdá sa.",
-            "slovak_human": None,
-            "human_note": None,
-            "human_reviewed_by": None,
-            "human_version": 0,
-        }
+        Segment(
+            segment_id=10,
+            locator_path="I.q3.a1.arg1",
+            element_type="arg",
+            reply_to=None,
+            translation_status="needs_human",
+            reviewer_notes=ReviewerNotes(),
+            latin="Videtur quod.",
+            czech="Zdá se.",
+            english="It seems.",
+            slovak_model="Zdá sa.",
+            slovak_human=None,
+            human_note=None,
+            human_reviewed_by=None,
+            human_version=0,
+        )
     ]
     with patch("server.app.get_article_segments", return_value=needs_human_segments):
         resp = editor_client.get("/~ST.I.Q3.A1")
     html = resp.data.decode()
     assert 'class="btn-review' in html
+
+
+def _needs_human_segment_with_notes(reviewer_notes):
+    return Segment(
+        segment_id=11,
+        locator_path="I.q3.a1.arg1",
+        element_type="arg",
+        reply_to=None,
+        translation_status="needs_human",
+        reviewer_notes=reviewer_notes,
+        latin="Videtur quod.",
+        czech="Zdá se.",
+        english="It seems.",
+        slovak_model="Zdá sa.",
+        slovak_human=None,
+        human_note=None,
+        human_reviewed_by=None,
+        human_version=0,
+    )
+
+
+def test_detail_panel_renders_mapping_reviewer_notes(editor_client):
+    """A structured reviewer_notes mapping renders iteration count and last failure."""
+    notes = ReviewerNotes.from_raw({"iteration": 3, "last_feedback": "term mismatch"})
+    segments = [_needs_human_segment_with_notes(notes)]
+    with patch("server.app.get_article_segments", return_value=segments):
+        resp = editor_client.get("/~ST.I.Q3.A1")
+    html = resp.data.decode()
+    assert "Iterations: 3" in html
+    assert "Failure: term mismatch" in html
+
+
+def test_detail_panel_renders_legacy_string_reviewer_notes_as_no_feedback(editor_client):
+    """A legacy plain-string reviewer_notes value has no parsed fields, so it falls
+    back to the "no feedback recorded" message rather than displaying the raw text —
+    matching the pre-refactor Jinja behavior."""
+    notes = ReviewerNotes.from_raw("Checked by reviewer")
+    segments = [_needs_human_segment_with_notes(notes)]
+    with patch("server.app.get_article_segments", return_value=segments):
+        resp = editor_client.get("/~ST.I.Q3.A1")
+    html = resp.data.decode()
+    assert "No feedback recorded" in html
+    assert "Checked by reviewer" not in html
 
 
 # ---------------------------------------------------------------------------
@@ -1261,8 +1312,8 @@ FAKE_TERM_SENSES = {
     "term_id": 7,
     "latin_lemma": "ratio",
     "senses": [
-        {"sense_id": 100, "context_label": None, "status": "approved", "slovak": "rozum"},
-        {"sense_id": 101, "context_label": "faculty", "status": "approved", "slovak": "dôvod"},
+        Sense(sense_id=100, context_label=None, status="approved", sk_content="rozum"),
+        Sense(sense_id=101, context_label="faculty", status="approved", sk_content="dôvod"),
     ],
 }
 
@@ -1279,7 +1330,15 @@ def test_alternatives_route_returns_senses(editor_client):
     data = resp.get_json()
     assert data["ok"] is True
     assert data["latin_lemma"] == "ratio"
-    assert data["senses"] == FAKE_TERM_SENSES["senses"]
+    assert data["senses"] == [
+        {
+            "sense_id": s.sense_id,
+            "context_label": s.context_label,
+            "status": s.status,
+            "slovak": s.sk_content,
+        }
+        for s in FAKE_TERM_SENSES["senses"]
+    ]
 
 
 def test_alternatives_route_404_for_unknown_sense(editor_client):
@@ -1332,7 +1391,10 @@ def test_propose_route_invalid_origin_segment_id_returns_400(editor_client):
 
 
 def test_propose_route_calls_db_with_parsed_fields(editor_client):
-    with patch("server.app.propose_sense_change", return_value=("ok", 55)) as mock_propose:
+    with patch(
+        "server.app.propose_sense_change",
+        return_value=ActionResult("ok", {"proposal_id": 55}),
+    ) as mock_propose:
         resp = editor_client.post(
             "/api/sense/100/propose",
             json={
@@ -1368,7 +1430,10 @@ def test_propose_route_calls_db_with_parsed_fields(editor_client):
 def test_propose_route_maps_db_status_to_response(
     editor_client, status, expected_code, expected_error
 ):
-    with patch("server.app.propose_sense_change", return_value=(status, None)):
+    with patch(
+        "server.app.propose_sense_change",
+        return_value=ActionResult(status, {"error": expected_error}),
+    ):
         resp = editor_client.post(
             "/api/sense/100/propose", json={"kind": "rendering", "proposed_sk": "x"}
         )
@@ -1384,7 +1449,10 @@ def test_term_proposal_route_returns_403_for_non_editor(client):
 
 
 def test_term_proposal_route_valid_returns_200(editor_client):
-    with patch("server.app.propose_add_term", return_value=("ok", 77)) as mock_propose:
+    with patch(
+        "server.app.propose_add_term",
+        return_value=ActionResult("ok", {"proposal_id": 77}),
+    ) as mock_propose:
         resp = editor_client.post(
             "/api/term-proposal",
             json={"latin_lemma": "novum", "proposed_sk": "nové", "note": "missing"},
@@ -1398,7 +1466,10 @@ def test_term_proposal_route_valid_returns_200(editor_client):
 
 
 def test_term_proposal_route_existing_lemma_returns_400(editor_client):
-    with patch("server.app.propose_add_term", return_value=("term_exists", None)):
+    with patch(
+        "server.app.propose_add_term",
+        return_value=ActionResult("term_exists", {"error": "term_exists: already in glossary"}),
+    ):
         resp = editor_client.post(
             "/api/term-proposal",
             json={"latin_lemma": "ratio", "proposed_sk": "rozum"},
@@ -1544,7 +1615,8 @@ def test_reject_route_returns_403_for_non_admin(editor_client):
 
 def test_approve_route_ok_returns_result(admin_client):
     with patch(
-        "server.app.approve_proposal", return_value=("ok", {"acknowledged": True})
+        "server.app.approve_proposal",
+        return_value=ActionResult("ok", {"acknowledged": True}),
     ) as mock_approve:
         resp = admin_client.post("/api/proposal/1/approve", json={"note": "looks good"})
     assert resp.status_code == 200
@@ -1559,7 +1631,8 @@ def test_approve_route_ok_returns_result(admin_client):
 
 def test_approve_route_passes_edited_proposed_sk(admin_client):
     with patch(
-        "server.app.approve_proposal", return_value=("ok", {"acknowledged": True})
+        "server.app.approve_proposal",
+        return_value=ActionResult("ok", {"acknowledged": True}),
     ) as mock_approve:
         resp = admin_client.post(
             "/api/proposal/1/approve", json={"note": "fixed typo", "proposed_sk": " potencia "}
@@ -1579,13 +1652,18 @@ def test_approve_route_value_error_from_edit_returns_409(admin_client):
 
 
 def test_approve_route_not_found_returns_404(admin_client):
-    with patch("server.app.approve_proposal", return_value=("not_found", None)):
+    with patch(
+        "server.app.approve_proposal", return_value=ActionResult("not_found", {"error": "not found"})
+    ):
         resp = admin_client.post("/api/proposal/999/approve")
     assert resp.status_code == 404
 
 
 def test_approve_route_not_pending_returns_409(admin_client):
-    with patch("server.app.approve_proposal", return_value=("not_pending", None)):
+    with patch(
+        "server.app.approve_proposal",
+        return_value=ActionResult("not_pending", {"error": "not pending"}),
+    ):
         resp = admin_client.post("/api/proposal/1/approve")
     assert resp.status_code == 409
 
@@ -1607,7 +1685,9 @@ def test_approve_route_value_error_returns_409(admin_client):
 
 
 def test_reject_route_ok(admin_client):
-    with patch("server.app.reject_proposal", return_value="ok") as mock_reject:
+    with patch(
+        "server.app.reject_proposal", return_value=ActionResult("ok")
+    ) as mock_reject:
         resp = admin_client.post("/api/proposal/1/reject", json={"note": "duplicate"})
     assert resp.status_code == 200
     assert resp.get_json()["ok"] is True
@@ -1618,13 +1698,18 @@ def test_reject_route_ok(admin_client):
 
 
 def test_reject_route_not_found_returns_404(admin_client):
-    with patch("server.app.reject_proposal", return_value="not_found"):
+    with patch(
+        "server.app.reject_proposal", return_value=ActionResult("not_found", {"error": "not found"})
+    ):
         resp = admin_client.post("/api/proposal/999/reject")
     assert resp.status_code == 404
 
 
 def test_reject_route_not_pending_returns_409(admin_client):
-    with patch("server.app.reject_proposal", return_value="not_pending"):
+    with patch(
+        "server.app.reject_proposal",
+        return_value=ActionResult("not_pending", {"error": "not pending"}),
+    ):
         resp = admin_client.post("/api/proposal/1/reject")
     assert resp.status_code == 409
 
@@ -1635,7 +1720,10 @@ def test_reopen_route_returns_403_for_non_admin(editor_client):
 
 
 def test_reopen_route_ok_returns_new_proposal_id(admin_client):
-    with patch("server.app.reopen_proposal", return_value=("ok", 42)) as mock_reopen:
+    with patch(
+        "server.app.reopen_proposal",
+        return_value=ActionResult("ok", {"proposal_id": 42}),
+    ) as mock_reopen:
         resp = admin_client.post("/api/proposal/1/reopen")
     assert resp.status_code == 200
     data = resp.get_json()
@@ -1647,13 +1735,18 @@ def test_reopen_route_ok_returns_new_proposal_id(admin_client):
 
 
 def test_reopen_route_not_found_returns_404(admin_client):
-    with patch("server.app.reopen_proposal", return_value=("not_found", None)):
+    with patch(
+        "server.app.reopen_proposal", return_value=ActionResult("not_found", {"error": "not found"})
+    ):
         resp = admin_client.post("/api/proposal/999/reopen")
     assert resp.status_code == 404
 
 
 def test_reopen_route_not_rejected_returns_409(admin_client):
-    with patch("server.app.reopen_proposal", return_value=("not_rejected", None)):
+    with patch(
+        "server.app.reopen_proposal",
+        return_value=ActionResult("not_rejected", {"error": "not rejected"}),
+    ):
         resp = admin_client.post("/api/proposal/1/reopen")
     assert resp.status_code == 409
 
@@ -1829,7 +1922,7 @@ def test_get_decided_proposals_view_enriches_and_excludes_blast_radius():
         patch("server.db.ProposalRepository", return_value=mock_repo),
         patch(
             "server.db.get_term_senses",
-            return_value={"senses": [{"sense_id": 42, "context_label": "as passion"}]},
+            return_value={"senses": [Sense(sense_id=42, context_label="as passion")]},
         ),
     ):
         result = get_decided_proposals_view(MagicMock(), limit=50)
@@ -1860,9 +1953,9 @@ def test_approve_proposal_not_found_returns_status():
 
     patcher, mock_repo = _make_repo_patch(None)
     with patcher:
-        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", None)
-    assert status == "not_found"
-    assert result is None
+        outcome = approve_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert outcome.status == "not_found"
+    assert outcome.payload.get("error")
 
 
 def test_approve_proposal_not_pending_returns_status():
@@ -1870,9 +1963,9 @@ def test_approve_proposal_not_pending_returns_status():
 
     patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "approved"})
     with patcher:
-        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", None)
-    assert status == "not_pending"
-    assert result is None
+        outcome = approve_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert outcome.status == "not_pending"
+    assert outcome.payload.get("error")
 
 
 def test_approve_proposal_dispatches_rendering_to_correct_service():
@@ -1890,9 +1983,9 @@ def test_approve_proposal_dispatches_rendering_to_correct_service():
         patcher,
         patch("server.db.apply_rendering_change", return_value={"applied": True}) as mock_apply,
     ):
-        status, result = approve_proposal(MagicMock(), 1, "admin@example.com", "note")
-    assert status == "ok"
-    assert result == {"applied": True}
+        outcome = approve_proposal(MagicMock(), 1, "admin@example.com", "note")
+    assert outcome.status == "ok"
+    assert outcome.payload == {"applied": True}
     mock_apply.assert_called_once()
     mock_repo.decide.assert_called_once()
     mock_repo.supersede_sense_wide_siblings.assert_called_once()
@@ -1913,10 +2006,10 @@ def test_approve_proposal_rendering_applies_edited_sk():
         patcher,
         patch("server.db.apply_rendering_change", return_value={"applied": True}) as mock_apply,
     ):
-        status, result = approve_proposal(
+        outcome = approve_proposal(
             MagicMock(), 1, "admin@example.com", None, edited_sk="potencia"
         )
-    assert status == "ok"
+    assert outcome.status == "ok"
     mock_apply.assert_called_once_with(mock_apply.call_args.args[0], 42, "potencia")
     # The decided row's proposed_sk is overwritten to reflect what was applied.
     mock_repo.decide.assert_called_once_with(
@@ -1941,10 +2034,10 @@ def test_approve_proposal_add_term_applies_edited_sk():
         patcher,
         patch("server.db.apply_add_term", return_value={"created": True}) as mock_apply,
     ):
-        status, result = approve_proposal(
+        outcome = approve_proposal(
             MagicMock(), 3, "admin@example.com", None, edited_sk="milosť"
         )
-    assert status == "ok"
+    assert outcome.status == "ok"
     mock_apply.assert_called_once_with(mock_apply.call_args.args[0], "gratia", "milosť", None)
 
 
@@ -1962,11 +2055,11 @@ def test_approve_proposal_sense_here_free_text_applies_edited_sk():
     }
     patcher, mock_repo = _make_repo_patch(proposal_row)
     with patcher:
-        status, result = approve_proposal(
+        outcome = approve_proposal(
             MagicMock(), 2, "admin@example.com", None, edited_sk="milosť"
         )
-    assert status == "ok"
-    assert result == {"acknowledged": True}
+    assert outcome.status == "ok"
+    assert outcome.payload == {"acknowledged": True}
     mock_repo.decide.assert_called_once_with(
         2, "approved", "admin@example.com", None, proposed_sk="milosť"
     )
@@ -2040,9 +2133,9 @@ def test_approve_proposal_sense_here_record_only_calls_no_service():
         patcher,
         patch("server.db.apply_sense_here") as mock_apply,
     ):
-        status, result = approve_proposal(MagicMock(), 2, "admin@example.com", None)
-    assert status == "ok"
-    assert result == {"acknowledged": True}
+        outcome = approve_proposal(MagicMock(), 2, "admin@example.com", None)
+    assert outcome.status == "ok"
+    assert outcome.payload == {"acknowledged": True}
     mock_apply.assert_not_called()
     # Record-only sense_here is per-segment, not sense-wide — no sibling supersede.
     mock_repo.supersede_sense_wide_siblings.assert_not_called()
@@ -2099,8 +2192,8 @@ def test_reject_proposal_not_pending_returns_status():
 
     patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "rejected"})
     with patcher:
-        status = reject_proposal(MagicMock(), 1, "admin@example.com", None)
-    assert status == "not_pending"
+        outcome = reject_proposal(MagicMock(), 1, "admin@example.com", None)
+    assert outcome.status == "not_pending"
 
 
 # ---------------------------------------------------------------------------
@@ -2113,9 +2206,9 @@ def test_reopen_proposal_not_found_returns_status():
 
     patcher, mock_repo = _make_repo_patch(None)
     with patcher:
-        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
-    assert status == "not_found"
-    assert new_id is None
+        outcome = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert outcome.status == "not_found"
+    assert outcome.payload.get("proposal_id") is None
     mock_repo.clone_as_pending.assert_not_called()
 
 
@@ -2124,9 +2217,9 @@ def test_reopen_proposal_not_rejected_returns_status():
 
     patcher, mock_repo = _make_repo_patch({"proposal_id": 1, "status": "approved"})
     with patcher:
-        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
-    assert status == "not_rejected"
-    assert new_id is None
+        outcome = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert outcome.status == "not_rejected"
+    assert outcome.payload.get("proposal_id") is None
     mock_repo.clone_as_pending.assert_not_called()
 
 
@@ -2142,9 +2235,9 @@ def test_reopen_proposal_clones_rejected_row():
     patcher, mock_repo = _make_repo_patch(proposal_row)
     mock_repo.clone_as_pending.return_value = 42
     with patcher:
-        status, new_id = reopen_proposal(MagicMock(), 1, "admin@example.com")
-    assert status == "ok"
-    assert new_id == 42
+        outcome = reopen_proposal(MagicMock(), 1, "admin@example.com")
+    assert outcome.status == "ok"
+    assert outcome.payload["proposal_id"] == 42
     mock_repo.clone_as_pending.assert_called_once_with(1)
 
 
