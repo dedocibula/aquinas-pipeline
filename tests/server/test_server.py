@@ -1557,6 +1557,27 @@ def test_approve_route_ok_returns_result(admin_client):
     assert args[3] == "looks good"
 
 
+def test_approve_route_passes_edited_proposed_sk(admin_client):
+    with patch(
+        "server.app.approve_proposal", return_value=("ok", {"acknowledged": True})
+    ) as mock_approve:
+        resp = admin_client.post(
+            "/api/proposal/1/approve", json={"note": "fixed typo", "proposed_sk": " potencia "}
+        )
+    assert resp.status_code == 200
+    assert mock_approve.call_args.kwargs["edited_sk"] == "potencia"
+
+
+def test_approve_route_value_error_from_edit_returns_409(admin_client):
+    with patch(
+        "server.app.approve_proposal",
+        side_effect=ValueError("proposal kind 'remove_here' does not support edit-before-approve"),
+    ):
+        resp = admin_client.post("/api/proposal/1/approve", json={"proposed_sk": "oops"})
+    assert resp.status_code == 409
+    assert "does not support edit-before-approve" in resp.get_json()["error"]
+
+
 def test_approve_route_not_found_returns_404(admin_client):
     with patch("server.app.approve_proposal", return_value=("not_found", None)):
         resp = admin_client.post("/api/proposal/999/approve")
@@ -1875,6 +1896,132 @@ def test_approve_proposal_dispatches_rendering_to_correct_service():
     mock_apply.assert_called_once()
     mock_repo.decide.assert_called_once()
     mock_repo.supersede_sense_wide_siblings.assert_called_once()
+
+
+def test_approve_proposal_rendering_applies_edited_sk():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "pending",
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sk": "potentia",
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.apply_rendering_change", return_value={"applied": True}) as mock_apply,
+    ):
+        status, result = approve_proposal(
+            MagicMock(), 1, "admin@example.com", None, edited_sk="potencia"
+        )
+    assert status == "ok"
+    mock_apply.assert_called_once_with(mock_apply.call_args.args[0], 42, "potencia")
+    # The decided row's proposed_sk is overwritten to reflect what was applied.
+    mock_repo.decide.assert_called_once_with(
+        1, "approved", "admin@example.com", None, proposed_sk="potencia"
+    )
+
+
+def test_approve_proposal_add_term_applies_edited_sk():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 3,
+        "status": "pending",
+        "kind": "add_term",
+        "sense_id": None,
+        "latin_lemma": "gratia",
+        "proposed_sk": "milost",
+        "note": None,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with (
+        patcher,
+        patch("server.db.apply_add_term", return_value={"created": True}) as mock_apply,
+    ):
+        status, result = approve_proposal(
+            MagicMock(), 3, "admin@example.com", None, edited_sk="milosť"
+        )
+    assert status == "ok"
+    mock_apply.assert_called_once_with(mock_apply.call_args.args[0], "gratia", "milosť", None)
+
+
+def test_approve_proposal_sense_here_free_text_applies_edited_sk():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 2,
+        "status": "pending",
+        "kind": "sense_here",
+        "sense_id": 42,
+        "proposed_sense_id": None,
+        "origin_segment_id": 99,
+        "proposed_sk": "milost",
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with patcher:
+        status, result = approve_proposal(
+            MagicMock(), 2, "admin@example.com", None, edited_sk="milosť"
+        )
+    assert status == "ok"
+    assert result == {"acknowledged": True}
+    mock_repo.decide.assert_called_once_with(
+        2, "approved", "admin@example.com", None, proposed_sk="milosť"
+    )
+
+
+def test_approve_proposal_edited_sk_rejected_for_unsupported_kind():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 5,
+        "status": "pending",
+        "kind": "remove_here",
+        "sense_id": 42,
+        "origin_segment_id": 99,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with patcher:
+        with pytest.raises(ValueError, match="does not support edit-before-approve"):
+            approve_proposal(MagicMock(), 5, "admin@example.com", None, edited_sk="whatever")
+    mock_repo.decide.assert_not_called()
+
+
+def test_approve_proposal_edited_sk_rejected_for_chosen_existing_sense():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 6,
+        "status": "pending",
+        "kind": "sense_here",
+        "sense_id": 42,
+        "proposed_sense_id": 43,
+        "origin_segment_id": 99,
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with patcher:
+        with pytest.raises(ValueError, match="does not support edit-before-approve"):
+            approve_proposal(MagicMock(), 6, "admin@example.com", None, edited_sk="whatever")
+    mock_repo.decide.assert_not_called()
+
+
+def test_approve_proposal_edited_sk_empty_raises_value_error():
+    from server.db import approve_proposal
+
+    proposal_row = {
+        "proposal_id": 1,
+        "status": "pending",
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sk": "potentia",
+    }
+    patcher, mock_repo = _make_repo_patch(proposal_row)
+    with patcher:
+        with pytest.raises(ValueError, match="cannot be empty"):
+            approve_proposal(MagicMock(), 1, "admin@example.com", None, edited_sk="   ")
+    mock_repo.decide.assert_not_called()
 
 
 def test_approve_proposal_sense_here_record_only_calls_no_service():

@@ -41,7 +41,7 @@
           {% else %}
             <span class="proposal-current">{{ p.current_sk or '—' }}</span>
             &rarr;
-            <span class="proposal-proposed">{{ p.proposed_sk }}</span>
+            <input type="text" class="proposed-sk-edit" value="{{ p.proposed_sk }}">
           {% endif %}
           {% if p.drift %}
           <span class="proposal-drift" title="the glossary changed since this was proposed">
@@ -107,7 +107,8 @@
             wrong sense &rarr; <strong>{{ p.proposed_slovak or '—' }}</strong>
             {% if p.proposed_context_label %}<span class="term-context">({{ p.proposed_context_label }})</span>{% endif %}
           {% else %}
-            free-text: &ldquo;{{ p.proposed_sk }}&rdquo; &mdash; record-only (no existing sense fits)
+            free-text: <input type="text" class="proposed-sk-edit" value="{{ p.proposed_sk }}">
+            &mdash; record-only (no existing sense fits)
           {% endif %}
         </td>
         <td>
@@ -157,7 +158,7 @@
       {% for p in add_terms %}
       <tr id="prow-{{ p.proposal_id }}" data-proposal-id="{{ p.proposal_id }}">
         <td><code>{{ p.latin_lemma }}</code></td>
-        <td>{{ p.proposed_sk }}</td>
+        <td><input type="text" class="proposed-sk-edit" value="{{ p.proposed_sk }}"></td>
         <td class="proposal-note">{{ p.note or '—' }}</td>
         <td>{{ p.proposed_by }}<br><small>{{ p.created_at }}</small></td>
         <td>

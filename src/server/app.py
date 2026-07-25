@@ -732,15 +732,21 @@ def timeline_page():
 def approve_proposal_route(proposal_id: int):
     """Apply an approved proposal ($0 — no translation is ever triggered here, D4).
 
-    Body: ``{note?}`` — optional admin decision note.
+    Body: ``{note?, proposed_sk?}`` — optional admin decision note, and an
+    optional lightly-edited replacement for the editor's proposed text (only
+    accepted for kinds carrying free-text ``proposed_sk`` — see
+    ``approve_proposal``'s docstring).
     """
     data = request.get_json(silent=True) or {}
     decision_note = (data.get("note") or "").strip() or None
+    edited_sk = data.get("proposed_sk")
+    if edited_sk is not None:
+        edited_sk = edited_sk.strip()
 
     try:
         with get_conn() as conn:
             status, result = approve_proposal(
-                conn, proposal_id, session["email"], decision_note
+                conn, proposal_id, session["email"], decision_note, edited_sk=edited_sk
             )
     except ProposalRaceError:
         return jsonify({"ok": False, "error": "already decided"}), 409

@@ -1041,6 +1041,17 @@ a.badge:hover {
   font-weight: bold;
 }
 
+.proposed-sk-edit {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: bold;
+  color: #2d6a35;
+  border: 1px solid #aac;
+  border-radius: 3px;
+  padding: 1px 4px;
+  min-width: 10rem;
+}
+
 .proposal-drift {
   display: block;
   margin-top: 0.25rem;

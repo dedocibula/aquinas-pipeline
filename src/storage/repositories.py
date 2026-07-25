@@ -1419,21 +1419,40 @@ class ProposalRepository:
         status: str,
         decided_by: str,
         decision_note: str | None = None,
+        proposed_sk: str | None = None,
     ) -> bool:
         """Transition a pending proposal to approved/rejected/superseded.
 
         Only affects a row still 'pending' — returns False (caller responds 409)
         if it was already decided, e.g. by a racing admin request.
+
+        ``proposed_sk``, when given, overwrites the row's stored proposed text —
+        used when an admin lightly edits a proposal's wording before approving it,
+        so the permanent decision-history record reflects what was actually
+        applied rather than the editor's original wording. Left alone (existing
+        column value kept) when None, which is every reject/reopen call and any
+        approval with no edit.
         """
         with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE glossary_proposal
-                SET status = %s, decided_by = %s, decided_at = now(), decision_note = %s
-                WHERE proposal_id = %s AND status = 'pending'
-                """,
-                (status, decided_by, decision_note, proposal_id),
-            )
+            if proposed_sk is not None:
+                cur.execute(
+                    """
+                    UPDATE glossary_proposal
+                    SET status = %s, decided_by = %s, decided_at = now(),
+                        decision_note = %s, proposed_sk = %s
+                    WHERE proposal_id = %s AND status = 'pending'
+                    """,
+                    (status, decided_by, decision_note, proposed_sk, proposal_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE glossary_proposal
+                    SET status = %s, decided_by = %s, decided_at = now(), decision_note = %s
+                    WHERE proposal_id = %s AND status = 'pending'
+                    """,
+                    (status, decided_by, decision_note, proposal_id),
+                )
             return cur.rowcount == 1
 
     def supersede_sense_wide_siblings(

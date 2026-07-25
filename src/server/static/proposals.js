@@ -264,10 +264,23 @@
     var status = row.querySelector('.decision-status');
     var buttons = row.querySelectorAll('.btn-approve-proposal, .btn-reject-proposal');
 
+    var body = { note: note };
+    if (action === 'approve') {
+      var skInput = row.querySelector('.proposed-sk-edit');
+      if (skInput) {
+        var edited = skInput.value.trim();
+        if (!edited) {
+          status.textContent = 'Proposed text cannot be empty.';
+          return;
+        }
+        body.proposed_sk = edited;
+      }
+    }
+
     buttons.forEach(function (b) { b.disabled = true; });
     status.textContent = action === 'approve' ? 'Applying…' : 'Rejecting…';
 
-    _postJson('/api/proposal/' + proposalId + '/' + action, { note: note })
+    _postJson('/api/proposal/' + proposalId + '/' + action, body)
       .then(function (result) {
         if (result.status === 200 && result.data.ok) {
           status.textContent = action === 'approve' ? 'Applied.' : 'Rejected.';

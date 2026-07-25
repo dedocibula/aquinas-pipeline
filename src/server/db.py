@@ -613,11 +613,15 @@ class ProposalRaceError(Exception):
     """
 
 
+_EDIT_BEFORE_APPROVE_KINDS = (PROPOSAL_KIND_CHANGE_EVERYWHERE, PROPOSAL_KIND_ADD_TERM)
+
+
 def approve_proposal(
     conn: psycopg2.extensions.connection,
     proposal_id: int,
     admin_email: str,
     decision_note: str | None,
+    edited_sk: str | None = None,
 ) -> tuple[str, dict | None]:
     """Apply an admin-approved glossary_proposal and mark it approved (Stage 4).
 
@@ -627,6 +631,13 @@ def approve_proposal(
     runs in the caller's transaction — ``get_conn`` commits on clean exit, so
     a failure at any point (including the race below) rolls back the whole
     thing, including any glossary/term_usage write the service already made.
+
+    ``edited_sk``, when given, lets the approving admin lightly edit the
+    editor's proposed text before it's applied — e.g. fixing a typo — instead
+    of rejecting and asking for a resubmit. Only proposal kinds carrying
+    free-text ``proposed_sk`` accept this: ``rendering``, ``add_term``, and
+    ``sense_here`` in its free-text/record-only branch (``proposed_sense_id``
+    is None). Raises ``ValueError`` if given for any other kind, or if blank.
 
     Returns ``(status, result)``:
       "ok"          -> result is the service's result dict. A ``sense_here``
@@ -655,8 +666,20 @@ def approve_proposal(
     kind = proposal["kind"]
     sense_id = proposal["sense_id"]
 
+    accepts_edit = kind in _EDIT_BEFORE_APPROVE_KINDS or (
+        kind == PROPOSAL_KIND_WRONG_SENSE_HERE and proposal["proposed_sense_id"] is None
+    )
+    if edited_sk is not None:
+        if not accepts_edit:
+            raise ValueError(f"proposal kind '{kind}' does not support edit-before-approve")
+        edited_sk = edited_sk.strip()
+        if not edited_sk:
+            raise ValueError("edited proposed_sk cannot be empty")
+
+    proposed_sk = edited_sk if edited_sk is not None else proposal.get("proposed_sk")
+
     if kind == PROPOSAL_KIND_CHANGE_EVERYWHERE:
-        result = apply_rendering_change(conn, sense_id, proposal["proposed_sk"])
+        result = apply_rendering_change(conn, sense_id, proposed_sk)
     elif kind == PROPOSAL_KIND_WRONG_SENSE_HERE:
         if proposal["proposed_sense_id"] is not None:
             result = apply_sense_here(
@@ -672,11 +695,11 @@ def approve_proposal(
     elif kind == PROPOSAL_KIND_RETIRE_EVERYWHERE:
         result = apply_retire_sense(conn, sense_id)
     else:  # add_term
-        result = apply_add_term(
-            conn, proposal["latin_lemma"], proposal["proposed_sk"], proposal["note"]
-        )
+        result = apply_add_term(conn, proposal["latin_lemma"], proposed_sk, proposal["note"])
 
-    if not repo.decide(proposal_id, "approved", admin_email, decision_note):
+    if not repo.decide(
+        proposal_id, "approved", admin_email, decision_note, proposed_sk=edited_sk
+    ):
         raise ProposalRaceError(f"proposal {proposal_id} was already decided")
 
     if kind in _SENSE_WIDE_KINDS:
