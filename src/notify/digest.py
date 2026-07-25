@@ -50,13 +50,13 @@ def _segment_link(base_url: str, locator: str, segment_id: int) -> str:
 def render_digest(digest: UserDigest, base_url: str) -> tuple[str, str]:
     """Build (subject, text body) for one recipient's digest, items grouped by locator."""
     n = len(digest.items)
-    subject = f"Aquinas: {n} new repl{'y' if n == 1 else 'ies'} to threads you're in"
+    subject = f"Aquinas Pipeline: {n} new repl{'y' if n == 1 else 'ies'} to threads you're in"
 
     by_locator: dict[str, list] = {}
     for item in digest.items:
         by_locator.setdefault(item.locator, []).append(item)
 
-    lines = [subject, ""]
+    lines = ["Aquinas Pipeline — Summa Theologiae", ""]
     for locator, items in by_locator.items():
         link = _segment_link(base_url, locator, items[0].segment_id)
         lines.append(f"{locator}  ({link})")

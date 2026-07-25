@@ -28,8 +28,8 @@ def _digest():
 
 def test_render_digest_subject_counts_items():
     subject, body = render_digest(_digest(), "https://aquinas.example.com")
-    assert subject == "Aquinas: 2 new replies to threads you're in"
-    assert subject in body
+    assert subject == "Aquinas Pipeline: 2 new replies to threads you're in"
+    assert "Aquinas Pipeline — Summa Theologiae" in body
 
 
 def test_render_digest_groups_by_locator_and_builds_deep_link():
@@ -43,7 +43,7 @@ def test_render_digest_groups_by_locator_and_builds_deep_link():
 def test_render_digest_singular_reply():
     single = UserDigest(user_email="alice@example.com", items=_digest().items[:1])
     subject, _ = render_digest(single, "https://aquinas.example.com")
-    assert subject == "Aquinas: 1 new reply to threads you're in"
+    assert subject == "Aquinas Pipeline: 1 new reply to threads you're in"
 
 
 @patch("notify.digest.mark_thread_notified")

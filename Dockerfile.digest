@@ -5,12 +5,13 @@ ENV PYTHONPATH=/app/src
 
 WORKDIR /app
 
-# notify.digest only needs psycopg2 (storage.db) and python-dotenv (local .env
-# loading, a no-op on Railway) — install directly rather than `uv sync` against
-# the full project lockfile, which would otherwise pull in the whole project's
-# dependency tree (cltk, ufal.morphodita, lxml, gspread, anthropic, prefect, ...)
-# for a service that only reads Postgres and speaks SMTP.
-RUN pip install --no-cache-dir psycopg2-binary python-dotenv
+# notify.digest only needs psycopg2 (storage.db), python-dotenv (local .env
+# loading, a no-op on Railway), and google-auth (Gmail API token refresh) —
+# install directly rather than `uv sync` against the full project lockfile,
+# which would otherwise pull in the whole project's dependency tree (cltk,
+# ufal.morphodita, lxml, gspread, anthropic, prefect, ...) for a service that
+# only reads Postgres and speaks HTTPS to the Gmail API.
+RUN pip install --no-cache-dir psycopg2-binary python-dotenv google-auth
 
 COPY src/notify src/notify
 COPY src/server/__init__.py src/server/__init__.py
