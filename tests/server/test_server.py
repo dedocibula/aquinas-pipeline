@@ -16,7 +16,27 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from storage.models import ActionResult, ReviewerNotes, Segment, Sense
+from storage.models import ActionResult, Proposal, ReviewerNotes, Segment, Sense
+
+
+def _make_proposal(**overrides) -> Proposal:
+    """Build a ``Proposal`` for a test, with sane defaults for required fields."""
+    base = dict(
+        proposal_id=0,
+        kind="rendering",
+        sense_id=None,
+        proposed_sense_id=None,
+        latin_lemma="gratia",
+        current_sk=None,
+        proposed_sk=None,
+        note=None,
+        origin_segment_id=None,
+        proposed_by="editor@example.com",
+        created_at="2026-07-01",
+        status="pending",
+    )
+    base.update(overrides)
+    return Proposal(**base)
 
 # ---------------------------------------------------------------------------
 # url_to_ltree unit tests
@@ -1547,11 +1567,11 @@ def test_glossary_proposals_page_groups_by_kind(admin_client):
         "blast_radius": {"translated": 1, "needs_human": 0, "reviewed": 1, "marginal": 1},
     }
     proposals = [
-        {**base, "proposal_id": 1, "kind": "rendering"},
-        {**base, "proposal_id": 2, "kind": "retire_sense"},
-        {**base, "proposal_id": 3, "kind": "sense_here", "blast_radius": None},
-        {**base, "proposal_id": 4, "kind": "remove_here", "blast_radius": None},
-        {**base, "proposal_id": 5, "kind": "add_term", "blast_radius": None},
+        _make_proposal(**{**base, "proposal_id": 1, "kind": "rendering"}),
+        _make_proposal(**{**base, "proposal_id": 2, "kind": "retire_sense"}),
+        _make_proposal(**{**base, "proposal_id": 3, "kind": "sense_here", "blast_radius": None}),
+        _make_proposal(**{**base, "proposal_id": 4, "kind": "remove_here", "blast_radius": None}),
+        _make_proposal(**{**base, "proposal_id": 5, "kind": "add_term", "blast_radius": None}),
     ]
     with (
         patch("server.app.get_pending_proposals_view", return_value=proposals),
@@ -1563,7 +1583,7 @@ def test_glossary_proposals_page_groups_by_kind(admin_client):
     body = resp.get_data(as_text=True)
     # Weak but DB-free smoke check: each proposal row id is rendered somewhere.
     for p in proposals:
-        assert f'prow-{p["proposal_id"]}' in body
+        assert f"prow-{p.proposal_id}" in body
 
 
 def test_glossary_proposals_page_renders_decision_history(admin_client):
@@ -1905,16 +1925,16 @@ def test_sense_blast_radius_marginal_is_not_already_stale_count():
 def test_get_decided_proposals_view_enriches_and_excludes_blast_radius():
     from server.db import get_decided_proposals_view
 
-    decided_row = {
-        "proposal_id": 6,
-        "kind": "rendering",
-        "sense_id": 42,
-        "proposed_sense_id": None,
-        "current_sk": "milosť",
-        "proposed_sk": "milosť Božia",
-        "origin_segment_id": None,
-        "status": "rejected",
-    }
+    decided_row = _make_proposal(
+        proposal_id=6,
+        kind="rendering",
+        sense_id=42,
+        proposed_sense_id=None,
+        current_sk="milosť",
+        proposed_sk="milosť Božia",
+        origin_segment_id=None,
+        status="rejected",
+    )
     mock_repo = MagicMock()
     mock_repo.list_decided.return_value = [decided_row]
 
@@ -1928,10 +1948,10 @@ def test_get_decided_proposals_view_enriches_and_excludes_blast_radius():
         result = get_decided_proposals_view(MagicMock(), limit=50)
 
     mock_repo.list_decided.assert_called_once_with(limit=50)
-    assert result[0]["context_label"] == "as passion"
+    assert result[0].context_label == "as passion"
     # Drift/blast-radius only matter for still-pending rows.
-    assert "drift" not in result[0]
-    assert "blast_radius" not in result[0]
+    assert result[0].drift is False
+    assert result[0].blast_radius is None
 
 
 # ---------------------------------------------------------------------------
@@ -1940,7 +1960,13 @@ def test_get_decided_proposals_view_enriches_and_excludes_blast_radius():
 
 
 def _make_repo_patch(proposal_row):
-    """Patch ProposalRepository so approve_proposal/reject_proposal see one pending row."""
+    """Patch ProposalRepository so approve_proposal/reject_proposal see one pending row.
+
+    ``proposal_row`` may be a dict of overrides (converted to a ``Proposal``
+    via ``_make_proposal``), an existing ``Proposal``, or ``None``.
+    """
+    if isinstance(proposal_row, dict):
+        proposal_row = _make_proposal(**proposal_row)
     mock_repo = MagicMock()
     mock_repo.get.return_value = proposal_row
     mock_repo.decide.return_value = True

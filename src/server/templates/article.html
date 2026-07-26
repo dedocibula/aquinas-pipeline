@@ -5,20 +5,8 @@
 
 {% block breadcrumb %}
   {# Derive question path from article path: drop last component #}
-  {% set q_path_parts = article_path.split('.')[:-1] %}
-  {% set q_ltree = q_path_parts | join('.') %}
-  {# Rebuild question URL locator #}
-  {% set q_url_parts = [] %}
-  {% for p in q_path_parts %}
-    {% if p.startswith('q') and p[1:].isdigit() %}
-      {% set _ = q_url_parts.append('Q' + p[1:]) %}
-    {% elif p.startswith('a') and p[1:].isdigit() %}
-      {% set _ = q_url_parts.append('A' + p[1:]) %}
-    {% else %}
-      {% set _ = q_url_parts.append(p.upper()) %}
-    {% endif %}
-  {% endfor %}
-  {% set q_url = 'ST.' + q_url_parts | join('.') %}
+  {% set q_ltree = article_path.rsplit('.', 1)[0] %}
+  {% set q_url = ltree_to_url(q_ltree) %}
   &rsaquo; <a href="/~{{ q_url }}">{{ q_url }}</a>
   &rsaquo; <span>{{ article_title }}</span>
 {% endblock %}

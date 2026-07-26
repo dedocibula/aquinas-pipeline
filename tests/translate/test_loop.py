@@ -40,6 +40,7 @@ def _seg_row(**overrides) -> dict:
 
 def _term_row(**overrides) -> dict:
     base = {
+        "segment_id": 1,
         "latin_lemma": "ratio",
         "required_slovak": "rozum",
         "sense_id": 42,

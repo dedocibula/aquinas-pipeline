@@ -21,6 +21,26 @@ def _kwargs(**overrides) -> dict:
     return base
 
 
+def _proposal_row(**overrides) -> dict:
+    """A full ``glossary_proposal`` row (``SELECT *`` shape) for ``Proposal.from_row``."""
+    base = {
+        "proposal_id": 1,
+        "kind": "rendering",
+        "sense_id": 42,
+        "proposed_sense_id": None,
+        "latin_lemma": "ratio",
+        "current_sk": "rozum",
+        "proposed_sk": "úsudok",
+        "note": None,
+        "origin_segment_id": None,
+        "proposed_by": "editor@example.com",
+        "created_at": "2026-07-01",
+        "status": "pending",
+    }
+    base.update(overrides)
+    return base
+
+
 # ── create_or_update_pending ────────────────────────────────────────────────
 
 
@@ -90,8 +110,11 @@ def test_create_or_update_pending_update_preserves_proposal_id(fake_conn):
 
 
 def test_get_returns_dict(fake_conn):
-    conn = fake_conn(fetchone_results=[{"proposal_id": 5, "kind": "rendering"}])
-    assert ProposalRepository(conn).get(5) == {"proposal_id": 5, "kind": "rendering"}
+    row = _proposal_row(proposal_id=5, kind="rendering")
+    conn = fake_conn(fetchone_results=[row])
+    result = ProposalRepository(conn).get(5)
+    assert result.proposal_id == 5
+    assert result.kind == "rendering"
 
 
 def test_get_returns_none_when_missing(fake_conn):
@@ -100,9 +123,11 @@ def test_get_returns_none_when_missing(fake_conn):
 
 
 def test_list_pending_orders_oldest_first(fake_conn):
-    conn = fake_conn(fetchall_rows=[{"proposal_id": 1}, {"proposal_id": 2}])
+    conn = fake_conn(
+        fetchall_rows=[_proposal_row(proposal_id=1), _proposal_row(proposal_id=2)]
+    )
     result = ProposalRepository(conn).list_pending()
-    assert result == [{"proposal_id": 1}, {"proposal_id": 2}]
+    assert [p.proposal_id for p in result] == [1, 2]
     sql, _ = conn.executed[-1]
     assert "status = 'pending'" in sql
     assert "ORDER BY created_at ASC" in sql
@@ -186,9 +211,11 @@ def test_list_approved_add_terms_empty(fake_conn):
 
 
 def test_list_decided_excludes_pending_orders_newest_first(fake_conn):
-    conn = fake_conn(fetchall_rows=[{"proposal_id": 9}, {"proposal_id": 3}])
+    conn = fake_conn(
+        fetchall_rows=[_proposal_row(proposal_id=9), _proposal_row(proposal_id=3)]
+    )
     result = ProposalRepository(conn).list_decided()
-    assert result == [{"proposal_id": 9}, {"proposal_id": 3}]
+    assert [p.proposal_id for p in result] == [9, 3]
     sql, params = conn.executed[-1]
     assert "status != 'pending'" in sql
     assert "ORDER BY decided_at DESC" in sql
@@ -211,19 +238,19 @@ def test_clone_as_pending_returns_none_when_source_missing(fake_conn):
 
 
 def test_clone_as_pending_inserts_fresh_row_with_source_content(fake_conn):
-    source = {
-        "proposal_id": 5,
-        "kind": "rendering",
-        "sense_id": 42,
-        "proposed_sense_id": None,
-        "latin_lemma": "ratio",
-        "current_sk": "rozum",
-        "proposed_sk": "úsudok",
-        "note": "reconsider",
-        "origin_segment_id": None,
-        "proposed_by": "editor@example.com",
-        "status": "rejected",
-    }
+    source = _proposal_row(
+        proposal_id=5,
+        kind="rendering",
+        sense_id=42,
+        proposed_sense_id=None,
+        latin_lemma="ratio",
+        current_sk="rozum",
+        proposed_sk="úsudok",
+        note="reconsider",
+        origin_segment_id=None,
+        proposed_by="editor@example.com",
+        status="rejected",
+    )
     # get() consumes the first fetchone; create_or_update_pending's dedup
     # SELECT (no pending match) consumes the second; INSERT...RETURNING the third.
     conn = fake_conn(fetchone_results=[source, None, {"proposal_id": 20}])
@@ -240,19 +267,19 @@ def test_clone_as_pending_keeps_original_proposer_not_reopener(fake_conn):
     instead of the original proposer's, two unrelated reopens by the same
     admin on the same kind/sense/segment would collide and overwrite each
     other. Cloning must preserve the original proposer's identity."""
-    source = {
-        "proposal_id": 5,
-        "kind": "sense_here",
-        "sense_id": 42,
-        "proposed_sense_id": 43,
-        "latin_lemma": "ratio",
-        "current_sk": "rozum",
-        "proposed_sk": None,
-        "note": None,
-        "origin_segment_id": 101,
-        "proposed_by": "original-editor@example.com",
-        "status": "rejected",
-    }
+    source = _proposal_row(
+        proposal_id=5,
+        kind="sense_here",
+        sense_id=42,
+        proposed_sense_id=43,
+        latin_lemma="ratio",
+        current_sk="rozum",
+        proposed_sk=None,
+        note=None,
+        origin_segment_id=101,
+        proposed_by="original-editor@example.com",
+        status="rejected",
+    )
     conn = fake_conn(fetchone_results=[source, None, {"proposal_id": 21}])
     ProposalRepository(conn).clone_as_pending(5)
     # executed[0] is clone_as_pending's own get() SELECT; executed[1] is the

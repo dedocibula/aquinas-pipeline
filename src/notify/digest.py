@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 
+from common.path import segment_link
 from notify.email_sender import DryRunEmailSender, EmailSender
 from server.db import collect_digests, mark_thread_notified
 from storage.db import get_conn
@@ -20,31 +21,6 @@ from storage.models import UserDigest
 
 def _log(msg: str) -> None:
     print(f"digest: {msg}", flush=True)
-
-
-def _ltree_to_url_locator(ltree_path: str) -> str:
-    """Convert an ltree path (e.g. 'I.q3.a1') back to 'ST.I.Q3.A1' for URL construction.
-
-    A pure copy of ``server.app._ltree_to_url_locator`` — kept local so ``notify`` doesn't
-    need to import the Flask app module.
-    """
-    parts = ltree_path.split(".")
-    result = []
-    for p in parts:
-        if p.startswith("q") and p[1:].isdigit():
-            result.append("Q" + p[1:])
-        elif p.startswith("a") and p[1:].isdigit():
-            result.append("A" + p[1:])
-        else:
-            result.append(p.upper())
-    return "ST." + ".".join(result)
-
-
-def _segment_link(base_url: str, locator: str, segment_id: int) -> str:
-    """Deep link to a segment's row within its article page."""
-    article_locator = ".".join(locator.split(".")[:3])
-    coord = _ltree_to_url_locator(article_locator)
-    return f"{base_url}/~{coord}#seg-{segment_id}"
 
 
 def render_digest(digest: UserDigest, base_url: str) -> tuple[str, str]:
@@ -58,7 +34,7 @@ def render_digest(digest: UserDigest, base_url: str) -> tuple[str, str]:
 
     lines = ["Aquinas Pipeline — Summa Theologiae", ""]
     for locator, items in by_locator.items():
-        link = _segment_link(base_url, locator, items[0].segment_id)
+        link = segment_link(base_url, locator, items[0].segment_id)
         lines.append(f"{locator}  ({link})")
         for item in items:
             lines.append(f"  {item.author} · {item.created_at:%Y-%m-%d %H:%M}")

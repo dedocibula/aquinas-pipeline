@@ -113,8 +113,7 @@
         </td>
         <td>
           {% if p.origin_locator %}
-          {% set article_path = p.origin_locator.split('.')[:3] | join('.') %}
-          <a href="/~{{ ltree_to_url(article_path) }}">{{ p.origin_locator }}</a>
+          <a href="/~{{ ltree_to_url(article_path(p.origin_locator)) }}">{{ p.origin_locator }}</a>
           {% else %}—{% endif %}
           <br><small>1 segment (~cents)</small>
         </td>
@@ -225,8 +224,7 @@
             <span class="proposal-proposed">{{ p.proposed_sk }}</span>
           {% endif %}
           {% if p.kind in ('sense_here', 'remove_here') and p.origin_locator %}
-          {% set article_path = p.origin_locator.split('.')[:3] | join('.') %}
-          <br><small><a href="/~{{ ltree_to_url(article_path) }}">{{ p.origin_locator }}</a></small>
+          <br><small><a href="/~{{ ltree_to_url(article_path(p.origin_locator)) }}">{{ p.origin_locator }}</a></small>
           {% endif %}
         </td>
         <td class="proposal-note">{{ p.note or '—' }}</td>

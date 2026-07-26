@@ -9,7 +9,6 @@ can approve/edit segments. Editor emails are stored in the `editor` DB table.
 from __future__ import annotations
 
 import os
-import re
 from functools import wraps
 
 from authlib.integrations.flask_client import OAuth
@@ -26,6 +25,14 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+from common.path import (
+    article_path_from_locator,
+    locator_to_title,
+    ltree_depth,
+    ltree_to_url_locator,
+    url_to_ltree,
+)
 
 load_dotenv()
 
@@ -151,61 +158,6 @@ def _json(status: str, **payload):
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def url_to_ltree(st_locator: str) -> str:
-    """Convert an aquinas.cc-style locator to an ltree path.
-
-    Examples:
-        ST.I.Q3.A1    → I.q3.a1
-        ST.II-I.Q1.A1 → II-I.q1.a1
-        I.Q3.A1       → I.q3.a1
-    """
-    s = st_locator
-    if s.upper().startswith("ST."):
-        s = s[3:]
-    # Only lowercase Q→q and A→a; pars labels (I, II-I) are uppercase in DB.
-    s = re.sub(r"Q(\d+)", lambda m: f"q{m.group(1)}", s)
-    s = re.sub(r"A(\d+)", lambda m: f"a{m.group(1)}", s)
-    return s
-
-
-def _ltree_depth(path: str) -> int:
-    """Count the number of labels in an ltree path string (dot-separated)."""
-    return len(path.split("."))
-
-
-def _locator_to_title(ltree_path: str) -> str:
-    """Turn an ltree path like 'I.q3.a1' into 'ST I, Q3, A1'."""
-    parts = ltree_path.split(".")
-    labels = []
-    for p in parts:
-        if p.startswith("q"):
-            labels.append("Q" + p[1:])
-        elif p.startswith("a"):
-            labels.append("A" + p[1:])
-        else:
-            labels.append(p.upper())
-    return "ST " + ", ".join(labels)
-
-
-def _ltree_to_url_locator(ltree_path: str) -> str:
-    """Convert ltree path back to ST.X.QN.AN form for URL construction."""
-    parts = ltree_path.split(".")
-    result = []
-    for p in parts:
-        if p.startswith("q") and p[1:].isdigit():
-            result.append("Q" + p[1:])
-        elif p.startswith("a") and p[1:].isdigit():
-            result.append("A" + p[1:])
-        else:
-            result.append(p.upper())
-    return "ST." + ".".join(result)
-
-
-# ---------------------------------------------------------------------------
 # Before-request: warm formula cache
 # ---------------------------------------------------------------------------
 
@@ -287,13 +239,13 @@ def index():
 
     # Build display-friendly URL labels.
     for q in questions:
-        q["url_locator"] = _ltree_to_url_locator(q["question_path"])
+        q["url_locator"] = ltree_to_url_locator(q["question_path"])
 
     return render_template(
         "index.html",
         grouped=grouped,
         progress=progress,
-        ltree_to_url=_ltree_to_url_locator,
+        ltree_to_url=ltree_to_url_locator,
     )
 
 
@@ -301,7 +253,7 @@ def index():
 def text_view(st_locator: str):
     """Dispatch to question or article view based on path depth."""
     ltree_path = url_to_ltree(st_locator)
-    depth = _ltree_depth(ltree_path)
+    depth = ltree_depth(ltree_path)
 
     if depth == 1:
         abort(404)  # pars-level view not implemented
@@ -313,7 +265,7 @@ def text_view(st_locator: str):
         # its own article page (see get_question_articles / get_question_preamble_segment).
         if ltree_path.rsplit(".", 1)[-1].lower() == "preamble":
             question_path = ltree_path.rsplit(".", 1)[0]
-            return _question_view(question_path, _ltree_to_url_locator(question_path))
+            return _question_view(question_path, ltree_to_url_locator(question_path))
         return _article_view(ltree_path, st_locator)
     else:
         abort(404)
@@ -344,13 +296,13 @@ def _question_view(ltree_path: str, st_locator: str):
         abort(404)
 
     for a in articles:
-        a["url_locator"] = _ltree_to_url_locator(a["article_path"])
-        a["title"] = _locator_to_title(a["article_path"])
+        a["url_locator"] = ltree_to_url_locator(a["article_path"])
+        a["title"] = locator_to_title(a["article_path"])
 
     return render_template(
         "question.html",
         question_path=ltree_path,
-        question_title=_locator_to_title(ltree_path),
+        question_title=locator_to_title(ltree_path),
         st_locator=st_locator,
         articles=articles,
         title_seg=title_seg,
@@ -395,14 +347,14 @@ def _article_view(ltree_path: str, st_locator: str):
 
     # Convert nav paths to URL locators.
     nav_urls = {
-        "prev": _ltree_to_url_locator(nav["prev"]) if nav["prev"] else None,
-        "next": _ltree_to_url_locator(nav["next"]) if nav["next"] else None,
+        "prev": ltree_to_url_locator(nav["prev"]) if nav["prev"] else None,
+        "next": ltree_to_url_locator(nav["next"]) if nav["next"] else None,
     }
 
     return render_template(
         "article.html",
         article_path=ltree_path,
-        article_title=_locator_to_title(ltree_path),
+        article_title=locator_to_title(ltree_path),
         st_locator=st_locator,
         segments=segments,
         arg_number=arg_number,
@@ -412,7 +364,7 @@ def _article_view(ltree_path: str, st_locator: str):
         constraints=constraints,
         pending_counts=pending_counts,
         comment_counts=comment_counts,
-        ltree_to_url=_ltree_to_url_locator,
+        ltree_to_url=ltree_to_url_locator,
     )
 
 
@@ -429,7 +381,7 @@ def status_list(status: str):
         questions = get_questions_by_status(conn, status)
 
     for q in questions:
-        q["url_locator"] = _ltree_to_url_locator(q["question_path"])
+        q["url_locator"] = ltree_to_url_locator(q["question_path"])
 
     grouped: dict[str, list[dict]] = {}
     for q in questions:
@@ -720,12 +672,13 @@ def glossary_proposals_page():
         decided = get_decided_proposals_view(conn)
     return render_template(
         "glossary_proposals.html",
-        sense_wide=[p for p in proposals if p["kind"] in SENSE_WIDE_KINDS],
-        per_segment=[p for p in proposals if p["kind"] in PER_SEGMENT_KINDS],
-        add_terms=[p for p in proposals if p["kind"] == PROPOSAL_KIND_ADD_TERM],
+        sense_wide=[p for p in proposals if p.kind in SENSE_WIDE_KINDS],
+        per_segment=[p for p in proposals if p.kind in PER_SEGMENT_KINDS],
+        add_terms=[p for p in proposals if p.kind == PROPOSAL_KIND_ADD_TERM],
         decided=decided,
         cost_per_segment=cost_per_segment,
-        ltree_to_url=_ltree_to_url_locator,
+        ltree_to_url=ltree_to_url_locator,
+        article_path=article_path_from_locator,
     )
 
 
@@ -740,7 +693,7 @@ def timeline_page():
     return render_template(
         "timeline.html",
         entries=entries,
-        ltree_to_url=_ltree_to_url_locator,
+        ltree_to_url=ltree_to_url_locator,
         next_before=next_before,
     )
 

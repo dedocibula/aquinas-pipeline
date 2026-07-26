@@ -15,7 +15,19 @@ import json
 
 import psycopg2.extras
 
-from storage.models import Constraint, Segment, Sense, Term
+from storage.models import (
+    ActivityEntry,
+    Comment,
+    CommentCount,
+    CommentThread,
+    Constraint,
+    DigestItem,
+    Proposal,
+    Segment,
+    Sense,
+    Term,
+    UserDigest,
+)
 
 # Element types load_body_segments returns for the resolver. Titles resolve to
 # zero terms (no Latin) but are included so the resolver leaves an auditable
@@ -110,10 +122,21 @@ class GlossaryRepository:
         A 'rejected' term_usage row (D10 tombstone: editor marked this a false
         detection) is excluded even if the sense itself is still approved.
         """
+        return self.locked_terms_for([segment_id]).get(segment_id, [])
+
+    def locked_terms_for(self, segment_ids: list[int]) -> dict[int, list[Constraint]]:
+        """Batch form of ``locked_terms`` — one round trip for many segments.
+
+        Same filtering/ordering as ``locked_terms``; grouped by segment_id in
+        Python since a segment can have several locked senses.
+        """
+        if not segment_ids:
+            return {}
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT DISTINCT ON (gs.sense_id)
+                SELECT DISTINCT ON (tu.segment_id, gs.sense_id)
+                    tu.segment_id,
                     gt.latin_lemma,
                     gt.category,
                     gt.la_surface   AS latin_surface,
@@ -126,14 +149,17 @@ class GlossaryRepository:
                 JOIN glossary_term  gt  ON gt.term_id  = gs.term_id
                 JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
                 JOIN source          s  ON s.source_id  = sr.source_id
-                WHERE tu.segment_id = %s
+                WHERE tu.segment_id = ANY(%s)
                   AND tu.status <> 'rejected'
                   AND sr.content IS NOT NULL
-                ORDER BY gs.sense_id, s.authority_rank
+                ORDER BY tu.segment_id, gs.sense_id, s.authority_rank
                 """,
-                (segment_id,),
+                (segment_ids,),
             )
-            return [Constraint.from_row(r) for r in cur.fetchall()]
+            result: dict[int, list[Constraint]] = {}
+            for row in cur.fetchall():
+                result.setdefault(row["segment_id"], []).append(Constraint.from_row(row))
+            return result
 
     def sense_status_counts(self) -> dict[str, int]:
         """Return {status: count} across all glossary senses (proposed/flagged/approved).
@@ -363,6 +389,156 @@ class GlossaryRepository:
             row = cur.fetchone()
         return row[0] if row else None
 
+    def term_lemma_for_sense(self, sense_id: int) -> tuple[int, str] | None:
+        """Return ``(term_id, latin_lemma)`` for the term owning ``sense_id``, or None."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT gt.term_id, gt.latin_lemma
+                FROM glossary_sense gs
+                JOIN glossary_term  gt ON gt.term_id = gs.term_id
+                WHERE gs.sense_id = %s
+                """,
+                (sense_id,),
+            )
+            row = cur.fetchone()
+        return (row["term_id"], row["latin_lemma"]) if row is not None else None
+
+    def senses_for_term(self, term_id: int) -> list[Sense]:
+        """Return every sense of a term (any status), each with its winning SK rendering.
+
+        Powers the "wrong sense here" dropdown — includes not-yet-approved
+        senses (the editor must be able to name one as the correct sense),
+        unlike ``locked_terms`` which requires approved + a SK rendering.
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT ON (gs.sense_id)
+                    gs.sense_id,
+                    gs.context_label,
+                    gs.status,
+                    sr.content AS sk_content
+                FROM glossary_sense gs
+                LEFT JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+                LEFT JOIN source           s ON s.source_id = sr.source_id
+                WHERE gs.term_id = %s
+                ORDER BY gs.sense_id, s.authority_rank
+                """,
+                (term_id,),
+            )
+            return [Sense.from_row(row) for row in cur.fetchall()]
+
+    def is_locked_in_segment(self, segment_id: int, sense_id: int) -> bool:
+        """True if ``sense_id`` is an active (non-rejected), approved, SK-rendered
+        locked term used by ``segment_id``.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1
+                FROM term_usage tu
+                JOIN glossary_sense gs ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
+                JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
+                WHERE tu.segment_id = %s AND tu.sense_id = %s AND tu.status <> 'rejected'
+                LIMIT 1
+                """,
+                (segment_id, sense_id),
+            )
+            return cur.fetchone() is not None
+
+    def sense_blast_radius(self, sense_id: int) -> dict:
+        """Segments locked by ``sense_id``, split by translation_status, plus the
+        marginal restage count — segments that are not already stale.
+
+        ``reviewed`` piggybacks on the same guard-protected ``segment_review``
+        join as the rest of the server (free — no extra scan of a big table).
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT s.translation_status, count(DISTINCT tu.segment_id) AS n
+                FROM term_usage tu
+                JOIN segment s ON s.segment_id = tu.segment_id
+                WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+                GROUP BY s.translation_status
+                """,
+                (sense_id,),
+            )
+            by_status = {row["translation_status"]: row["n"] for row in cur.fetchall()}
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT tu.segment_id)
+                FROM term_usage tu
+                JOIN segment_review sr ON sr.segment_id = tu.segment_id
+                WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+                """,
+                (sense_id,),
+            )
+            reviewed = cur.fetchone()["count"]
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT tu.segment_id)
+                FROM term_usage tu
+                WHERE tu.sense_id = %s AND tu.status <> 'rejected'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM term_usage tu2
+                      JOIN glossary_sense gs2 ON gs2.sense_id = tu2.sense_id
+                      WHERE tu2.segment_id = tu.segment_id
+                        AND tu2.sense_version_used < gs2.version
+                  )
+                """,
+                (sense_id,),
+            )
+            not_already_stale = cur.fetchone()["count"]
+
+        total = sum(by_status.values())
+        return {
+            "translated": by_status.get("translated", 0),
+            "needs_human": by_status.get("needs_human", 0),
+            "pending": by_status.get("pending", 0),
+            "reviewed": reviewed,
+            "total": total,
+            "marginal": not_already_stale,
+        }
+
+    def get_structural_formulas(self) -> dict[str, str]:
+        """Load approved Slovak forms for sed_contra, respondeo, praeterea.
+
+        Queries glossary_term + glossary_sense + sense_rendering(lang='sk', status='approved').
+        Returns e.g. {"sed_contra": "Na druhej strane:", "respondeo": "Odpoveď:"}
+        Missing formulas are silently omitted (never raises).
+        """
+        latin_terms = ("sed_contra", "respondeo", "praeterea")
+        placeholders = ", ".join(["%s"] * len(latin_terms))
+        sql = f"""
+            SELECT
+                gt.latin_lemma,
+                sr.content
+            FROM glossary_term gt
+            JOIN glossary_sense gs  ON gs.term_id  = gt.term_id
+            JOIN sense_rendering sr ON sr.sense_id = gs.sense_id
+            WHERE gt.latin_lemma IN ({placeholders})
+              AND sr.lang         = 'sk'
+              AND gs.status       = 'approved'
+            ORDER BY gt.latin_lemma
+        """
+        result: dict[str, str] = {}
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(sql, latin_terms)
+                for row in cur.fetchall():
+                    lemma, content = row[0], row[1]
+                    if lemma not in result:
+                        result[lemma] = content
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+        return result
+
 
 class SegmentRepository:
     """All segment / segment_text access, plus corpus-wide status queries."""
@@ -436,6 +612,133 @@ class SegmentRepository:
                 "WHERE element_type = 'article_title' ORDER BY locator_path"
             )
             return [row[0] for row in cur.fetchall()]
+
+    @staticmethod
+    def _display_segment_select_sql(where_clause: str) -> str:
+        """Full segment SELECT+FROM+JOIN block for the preview server's display needs.
+
+        Unlike ``get_segment``/``load_body_segments`` (translation-loop shape:
+        latin/czech/english only), this carries the display-precedence Slovak
+        columns (human → polish → model) and human-review metadata, which only
+        the server's article/question views need.
+        """
+        return f"""
+            SELECT
+                s.segment_id,
+                s.locator_path::text,
+                s.element_type,
+                s.reply_to,
+                s.translation_status,
+                s.reviewer_notes,
+                latin.content      AS latin,
+                czech.content      AS czech,
+                english.content    AS english,
+                sk_model.content   AS slovak_model,
+                sk_polish.content  AS slovak_polish,
+                sk_human.content   AS slovak_human,
+                sr.human_note,
+                sr.human_reviewed_by,
+                COALESCE(sr.human_version, 0) AS human_version
+            FROM segment s
+            LEFT JOIN segment_text latin
+                ON  latin.segment_id = s.segment_id
+                AND latin.lang = 'la'
+            LEFT JOIN LATERAL (
+                SELECT st3.content
+                FROM segment_text st3
+                JOIN source src3 ON src3.source_id = st3.source_id
+                WHERE st3.segment_id = s.segment_id
+                  AND st3.lang = 'cs'
+                ORDER BY src3.authority_rank ASC
+                LIMIT 1
+            ) czech ON true
+            LEFT JOIN LATERAL (
+                SELECT st4.content
+                FROM segment_text st4
+                JOIN source src4 ON src4.source_id = st4.source_id
+                WHERE st4.segment_id = s.segment_id
+                  AND st4.lang = 'en'
+                ORDER BY src4.authority_rank ASC
+                LIMIT 1
+            ) english ON true
+            LEFT JOIN LATERAL (
+                SELECT st_m.content
+                FROM segment_text st_m
+                JOIN source src_m ON src_m.source_id = st_m.source_id
+                WHERE st_m.segment_id = s.segment_id
+                  AND st_m.lang = 'sk'
+                  AND src_m.code = 'model'
+                LIMIT 1
+            ) sk_model ON true
+            LEFT JOIN LATERAL (
+                SELECT st_p.content
+                FROM segment_text st_p
+                JOIN source src_p ON src_p.source_id = st_p.source_id
+                WHERE st_p.segment_id = s.segment_id
+                  AND st_p.lang = 'sk'
+                  AND src_p.code = 'polish'
+                LIMIT 1
+            ) sk_polish ON true
+            LEFT JOIN LATERAL (
+                SELECT st_h.content
+                FROM segment_text st_h
+                JOIN source src_h ON src_h.source_id = st_h.source_id
+                WHERE st_h.segment_id = s.segment_id
+                  AND st_h.lang = 'sk'
+                  AND src_h.code = 'human'
+                LIMIT 1
+            ) sk_human ON true
+            LEFT JOIN segment_review sr ON sr.segment_id = s.segment_id
+            {where_clause}
+        """
+
+    def get_article_segments(self, article_path: str) -> list[Segment]:
+        """Return all segments for an article with Latin, Czech, English, and Slovak text.
+
+        Returns separate machine (slovak_model) and human (slovak_human) Slovak
+        columns, plus human-review metadata from segment_review.
+        """
+        sql = self._display_segment_select_sql("""
+            WHERE s.locator_path <@ %s::ltree
+              AND (latin.content IS NOT NULL OR s.element_type = 'article_title')
+            ORDER BY
+                CASE s.element_type
+                    WHEN 'article_title' THEN 0
+                    WHEN 'arg'           THEN 1
+                    WHEN 'sed_contra'    THEN 2
+                    WHEN 'respondeo'     THEN 3
+                    WHEN 'reply'         THEN 4
+                    ELSE                      5
+                END,
+                (regexp_match(s.locator_path::text, '\\d+$'))[1]::int NULLS LAST
+        """)
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (article_path,))
+            return [Segment.from_row(row) for row in cur.fetchall()]
+
+    def get_question_title_segment(self, question_path: str) -> Segment | None:
+        """Return the question_title segment for a question, or None if absent."""
+        sql = self._display_segment_select_sql(
+            "WHERE s.locator_path = %s::ltree AND s.element_type = 'question_title'"
+        )
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (question_path,))
+            row = cur.fetchone()
+        return Segment.from_row(row) if row else None
+
+    def get_question_preamble_segment(self, question_path: str) -> Segment | None:
+        """Return the preamble segment for a question, or None if absent.
+
+        Preambles sit at ``<question_path>.preamble`` (e.g. 'I.q1.preamble').
+        """
+        sql = self._display_segment_select_sql(
+            "WHERE s.locator_path = (%(qpath)s || '.preamble')::ltree "
+            "AND s.element_type = 'preamble'"
+        )
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, {"qpath": question_path})
+            row = cur.fetchone()
+        return Segment.from_row(row) if row else None
 
     def load_body_segments(self, work_id: int) -> list[Segment]:
         """Return body segments with la/cs/en text for the work, sorted by locator."""
@@ -992,6 +1295,79 @@ class SegmentRepository:
             s: ("needs_human" if s in human_edited else "pending") for s in segment_ids
         }
 
+    def get_distinct_pars(self, work_id: int) -> list[str]:
+        """Return sorted list of pars labels that have translated/needs_human segments.
+
+        Queries v_segment (same surface as the export query) so only pars that
+        would actually produce output are returned.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT subpath(locator_path, 0, 1)::text"
+                " FROM v_segment"
+                " WHERE work_id = %s"
+                "   AND translation_status IN ('translated', 'needs_human')"
+                " ORDER BY 1",
+                (work_id,),
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    def approve_segment(self, segment_id: int) -> str:
+        """Flip a needs_human segment to translated (queues it for batch polish).
+
+        Returns:
+            "ok"           — status flipped; caller's get_conn() will commit.
+            "notfound"     — segment_id does not exist.
+            "wrong_status" — segment is not needs_human.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE segment SET translation_status = 'translated'"
+                " WHERE segment_id = %s AND translation_status = 'needs_human'"
+                " RETURNING segment_id",
+                (segment_id,),
+            )
+            if cur.fetchone() is not None:
+                return "ok"
+            cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+            if cur.fetchone() is None:
+                return "notfound"
+            return "wrong_status"
+
+    def unapprove_segment(self, segment_id: int) -> str:
+        """Flip a translated segment back to needs_human (only if batch polish has not run).
+
+        Returns:
+            "ok"              — status flipped; caller's get_conn() will commit.
+            "notfound"        — segment_id does not exist.
+            "wrong_status"    — segment is not translated.
+            "already_polished"— a (sk, polish) row exists; cannot un-approve.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE segment SET translation_status = 'needs_human'"
+                " WHERE segment_id = %s AND translation_status = 'translated'"
+                "   AND NOT EXISTS ("
+                "     SELECT 1 FROM segment_text st"
+                "     JOIN source s ON s.source_id = st.source_id"
+                "     WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'polish'"
+                "   )"
+                " RETURNING segment_id",
+                (segment_id, segment_id),
+            )
+            if cur.fetchone() is not None:
+                return "ok"
+            cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+            if cur.fetchone() is None:
+                return "notfound"
+            cur.execute(
+                "SELECT translation_status FROM segment WHERE segment_id = %s", (segment_id,)
+            )
+            row = cur.fetchone()
+            if row[0] != "translated":
+                return "wrong_status"
+            return "already_polished"
+
 
 class TermUsageRepository:
     """All term_usage access."""
@@ -1324,23 +1700,23 @@ class ProposalRepository:
             )
             return cur.fetchone()["proposal_id"]
 
-    def get(self, proposal_id: int) -> dict | None:
-        """Return one proposal row (any status), or None if it doesn't exist."""
+    def get(self, proposal_id: int) -> Proposal | None:
+        """Return one proposal (any status), or None if it doesn't exist."""
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT * FROM glossary_proposal WHERE proposal_id = %s", (proposal_id,)
             )
             row = cur.fetchone()
-        return dict(row) if row is not None else None
+        return Proposal.from_row(row) if row is not None else None
 
-    def list_pending(self) -> list[dict]:
+    def list_pending(self) -> list[Proposal]:
         """Return all pending proposals, oldest first — the admin queue's base set."""
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT * FROM glossary_proposal WHERE status = 'pending' "
                 "ORDER BY created_at ASC"
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [Proposal.from_row(r) for r in cur.fetchall()]
 
     def pending_by_sense(self, sense_ids: list[int]) -> dict[int, int]:
         """Count of pending proposals per sense — powers the panel's pending badge."""
@@ -1355,7 +1731,7 @@ class ProposalRepository:
             )
             return {row[0]: row[1] for row in cur.fetchall()}
 
-    def list_decided(self, limit: int = 200) -> list[dict]:
+    def list_decided(self, limit: int = 200) -> list[Proposal]:
         """Return the most recently decided proposals (approved/rejected/superseded).
 
         Newest decision first — this is the admin audit trail: every past
@@ -1367,7 +1743,7 @@ class ProposalRepository:
                 "ORDER BY decided_at DESC LIMIT %s",
                 (limit,),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [Proposal.from_row(r) for r in cur.fetchall()]
 
     def clone_as_pending(self, proposal_id: int) -> int | None:
         """Re-open a decided proposal as a brand-new pending row.
@@ -1388,15 +1764,15 @@ class ProposalRepository:
         if source is None:
             return None
         return self.create_or_update_pending(
-            kind=source["kind"],
-            sense_id=source["sense_id"],
-            proposed_sense_id=source["proposed_sense_id"],
-            latin_lemma=source["latin_lemma"],
-            current_sk=source["current_sk"],
-            proposed_sk=source["proposed_sk"],
-            note=source["note"],
-            origin_segment_id=source["origin_segment_id"],
-            proposed_by=source["proposed_by"],
+            kind=source.kind,
+            sense_id=source.sense_id,
+            proposed_sense_id=source.proposed_sense_id,
+            latin_lemma=source.latin_lemma,
+            current_sk=source.current_sk,
+            proposed_sk=source.proposed_sk,
+            note=source.note,
+            origin_segment_id=source.origin_segment_id,
+            proposed_by=source.proposed_by,
         )
 
     def list_approved_add_terms(self) -> list[dict]:
@@ -1475,3 +1851,272 @@ class ProposalRepository:
                 (decided_by, sense_id, keep_proposal_id),
             )
             return cur.rowcount
+
+
+_COMMENT_COLUMNS = (
+    "comment_id, segment_id, author, body, created_at, resolved, resolved_by, resolved_at"
+)
+
+
+class CommentRepository:
+    """Editor-internal comment threads on segments (per-segment discussion)."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def segment_exists(self, segment_id: int) -> bool:
+        """True if segment_id is a real segment.
+
+        Callers that insert into segment_comment / comment_thread_state (both FK'd to
+        segment) must check this first — otherwise an unknown segment_id surfaces as an
+        unhandled IntegrityError (500) instead of a clean 404, unlike review_segment's
+        explicit notfound check.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
+            return cur.fetchone() is not None
+
+    def list_comments(self, segment_id: int) -> CommentThread:
+        """Return the full comment thread for a segment, oldest first."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT {_COMMENT_COLUMNS}
+                FROM segment_comment
+                WHERE segment_id = %s
+                ORDER BY created_at ASC
+                """,
+                (segment_id,),
+            )
+            comments = [Comment(**dict(row)) for row in cur.fetchall()]
+        open_count = sum(1 for c in comments if not c.resolved)
+        resolved = bool(comments) and open_count == 0
+        return CommentThread(comments=comments, resolved=resolved, open_count=open_count)
+
+    def add_comment(self, segment_id: int, author: str, body: str) -> Comment:
+        """Insert a new comment. A new comment on a resolved thread implicitly reopens it."""
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                INSERT INTO segment_comment (segment_id, author, body)
+                VALUES (%s, %s, %s)
+                RETURNING {_COMMENT_COLUMNS}
+                """,
+                (segment_id, author, body),
+            )
+            row = cur.fetchone()
+        return Comment(**dict(row))
+
+    def resolve_thread(self, segment_id: int, resolver_email: str) -> int:
+        """Mark every open comment in the thread as resolved. Returns the number of rows flipped."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE segment_comment
+                   SET resolved = true, resolved_by = %s, resolved_at = now()
+                 WHERE segment_id = %s AND resolved = false
+                """,
+                (resolver_email, segment_id),
+            )
+            return cur.rowcount
+
+    def reopen_thread(self, segment_id: int) -> int:
+        """Clear resolved state on every comment in the thread. Returns rows flipped."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE segment_comment
+                   SET resolved = false, resolved_by = NULL, resolved_at = NULL
+                 WHERE segment_id = %s AND resolved = true
+                """,
+                (segment_id,),
+            )
+            return cur.rowcount
+
+    def delete_comment(self, comment_id: int, requester_email: str) -> str:
+        """Delete a comment iff the requester is its author.
+
+        Returns ``"ok"``, ``"notfound"``, or ``"forbidden"``.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT author FROM segment_comment WHERE comment_id = %s", (comment_id,))
+            row = cur.fetchone()
+            if row is None:
+                return "notfound"
+            if row[0] != requester_email:
+                return "forbidden"
+            cur.execute("DELETE FROM segment_comment WHERE comment_id = %s", (comment_id,))
+        return "ok"
+
+    def mark_thread_read(self, segment_id: int, user_email: str) -> None:
+        """Bump the viewer's read watermark for a segment's thread (clears the unread dot)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO comment_thread_state (segment_id, user_email, last_read_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (segment_id, user_email) DO UPDATE SET last_read_at = now()
+                """,
+                (segment_id, user_email),
+            )
+
+    def get_comment_counts(
+        self, segment_ids: list[int], viewer_email: str
+    ) -> dict[int, CommentCount]:
+        """Return per-segment comment badge counts for the given segments.
+
+        ``unread`` counts comments by other authors newer than the viewer's
+        ``last_read_at`` watermark (NULL watermark means everything is unread).
+        Segments with no comments are omitted from the result.
+        """
+        if not segment_ids:
+            return {}
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    c.segment_id,
+                    count(*)                                                      AS total,
+                    count(*) FILTER (WHERE NOT c.resolved)                        AS open_count,
+                    count(*) FILTER (
+                        WHERE c.author <> %s
+                          AND c.created_at > COALESCE(st.last_read_at, '-infinity'::timestamptz)
+                    )                                                             AS unread
+                FROM segment_comment c
+                LEFT JOIN comment_thread_state st
+                       ON st.segment_id = c.segment_id AND st.user_email = %s
+                WHERE c.segment_id = ANY(%s)
+                GROUP BY c.segment_id
+                """,
+                (viewer_email, viewer_email, segment_ids),
+            )
+            rows = cur.fetchall()
+        return {
+            row["segment_id"]: CommentCount(
+                total=int(row["total"]), open_count=int(row["open_count"]), unread=int(row["unread"])
+            )
+            for row in rows
+        }
+
+
+class ActivityRepository:
+    """Admin activity feed and per-recipient comment-reply digests."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def get_activity_feed(
+        self, *, before: str | None = None, limit: int = 50
+    ) -> list[ActivityEntry]:
+        """Return the admin `/timeline` activity feed: reviews, comments, and run markers.
+
+        Merges the three sources newest-first. ``before`` (an ISO timestamp) paginates
+        to entries strictly older than it. Uses only existing timestamps — no new
+        per-row timestamp column.
+        """
+        sql = """
+            SELECT ts, kind, author, segment_id, locator, summary,
+                   translated, needs_human, cost
+            FROM (
+                SELECT sr.human_reviewed_at AS ts, 'review' AS kind,
+                       sr.human_reviewed_by AS author, sr.segment_id,
+                       s.locator_path::text AS locator,
+                       (CASE WHEN sr.human_note IS NOT NULL THEN 'noted' ELSE 'reviewed' END) AS summary,
+                       NULL::int AS translated, NULL::int AS needs_human, NULL::numeric AS cost
+                FROM segment_review sr
+                JOIN segment s ON s.segment_id = sr.segment_id
+
+                UNION ALL
+
+                SELECT c.created_at, 'comment', c.author, c.segment_id,
+                       s.locator_path::text, left(c.body, 140),
+                       NULL, NULL, NULL
+                FROM segment_comment c
+                JOIN segment s ON s.segment_id = c.segment_id
+
+                UNION ALL
+
+                SELECT COALESCE(r.finished_at, r.started_at), 'run', NULL, NULL, NULL,
+                       r.flow_name, r.total_translated, r.total_needs_human, r.total_cost_usd
+                FROM translation_run r
+            ) feed
+            WHERE (%(before)s::timestamptz IS NULL OR ts < %(before)s::timestamptz)
+            ORDER BY ts DESC
+            LIMIT %(limit)s
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, {"before": before, "limit": limit})
+            rows = cur.fetchall()
+        return [
+            ActivityEntry(
+                ts=row["ts"],
+                kind=row["kind"],
+                author=row["author"],
+                segment_id=row["segment_id"],
+                locator=row["locator"],
+                summary=row["summary"],
+                translated=row["translated"],
+                needs_human=row["needs_human"],
+                cost=float(row["cost"]) if row["cost"] is not None else None,
+            )
+            for row in rows
+        ]
+
+    def collect_digests(self) -> list[UserDigest]:
+        """Return, per recipient, the unread comment replies their daily digest should cover.
+
+        Recipients = thread participants (everyone who has commented on the segment) ∪ the
+        segment's reviewer, minus each comment's own author. A comment is digest-worthy for a
+        recipient when it postdates both their read and their last-notified watermark (NULL
+        watermark means everything qualifies).
+        """
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                WITH participants AS (
+                    SELECT DISTINCT segment_id, author AS user_email FROM segment_comment
+                    UNION
+                    SELECT sr.segment_id, sr.human_reviewed_by
+                    FROM segment_review sr
+                    WHERE sr.human_reviewed_by IS NOT NULL
+                      AND sr.segment_id IN (SELECT DISTINCT segment_id FROM segment_comment)
+                )
+                SELECT p.user_email, c.segment_id, s.locator_path::text AS locator,
+                       c.author, c.created_at, c.body
+                FROM participants p
+                JOIN segment_comment c ON c.segment_id = p.segment_id
+                JOIN segment s        ON s.segment_id = c.segment_id
+                LEFT JOIN comment_thread_state st
+                       ON st.segment_id = p.segment_id AND st.user_email = p.user_email
+                WHERE c.author <> p.user_email
+                  AND c.created_at > COALESCE(GREATEST(st.last_read_at, st.last_notified_at),
+                                              '-infinity'::timestamptz)
+                ORDER BY p.user_email, c.created_at
+                """
+            )
+            rows = cur.fetchall()
+
+        digests: dict[str, list[DigestItem]] = {}
+        for row in rows:
+            digests.setdefault(row["user_email"], []).append(
+                DigestItem(
+                    segment_id=row["segment_id"],
+                    locator=row["locator"],
+                    author=row["author"],
+                    created_at=row["created_at"],
+                    body=row["body"],
+                )
+            )
+        return [UserDigest(user_email=email, items=items) for email, items in digests.items()]
+
+    def mark_thread_notified(self, segment_id: int, user_email: str) -> None:
+        """Bump the recipient's notified watermark for a segment's thread (digest de-dupe)."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO comment_thread_state (segment_id, user_email, last_notified_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (segment_id, user_email) DO UPDATE SET last_notified_at = now()
+                """,
+                (segment_id, user_email),
+            )

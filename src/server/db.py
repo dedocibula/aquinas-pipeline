@@ -8,6 +8,8 @@ connection lifecycle; this module owns the server-specific SQL.
 
 from __future__ import annotations
 
+import dataclasses
+
 import psycopg2
 import psycopg2.extras
 
@@ -26,12 +28,17 @@ from storage.models import (
     CommentCount,
     CommentThread,
     Constraint,
-    DigestItem,
+    Proposal,
     Segment,
-    Sense,
     UserDigest,
 )
-from storage.repositories import GlossaryRepository, ProposalRepository
+from storage.repositories import (
+    ActivityRepository,
+    CommentRepository,
+    GlossaryRepository,
+    ProposalRepository,
+    SegmentRepository,
+)
 
 # Editor glossary-proposal kinds (glossary_proposal.kind CHECK constraint,
 # migration 013). Values are locked schema truth — do not change them; these
@@ -41,91 +48,6 @@ PROPOSAL_KIND_WRONG_SENSE_HERE = "sense_here"
 PROPOSAL_KIND_REMOVE_HERE = "remove_here"
 PROPOSAL_KIND_RETIRE_EVERYWHERE = "retire_sense"
 PROPOSAL_KIND_ADD_TERM = "add_term"
-
-# ---------------------------------------------------------------------------
-# Shared segment SELECT helper
-# ---------------------------------------------------------------------------
-
-
-def _segment_select_sql(where_clause: str) -> str:
-    """Return the full segment SELECT+FROM+JOIN block with a caller-supplied WHERE clause.
-
-    Columns returned: segment_id, locator_path, element_type, reply_to,
-    translation_status, reviewer_notes, latin, czech, english,
-    slovak_model, slovak_polish, slovak_human, human_note, human_reviewed_by, human_version.
-
-    Display precedence: human → polish → model.
-    """
-    return f"""
-        SELECT
-            s.segment_id,
-            s.locator_path::text,
-            s.element_type,
-            s.reply_to,
-            s.translation_status,
-            s.reviewer_notes,
-            latin.content      AS latin,
-            czech.content      AS czech,
-            english.content    AS english,
-            sk_model.content   AS slovak_model,
-            sk_polish.content  AS slovak_polish,
-            sk_human.content   AS slovak_human,
-            sr.human_note,
-            sr.human_reviewed_by,
-            COALESCE(sr.human_version, 0) AS human_version
-        FROM segment s
-        LEFT JOIN segment_text latin
-            ON  latin.segment_id = s.segment_id
-            AND latin.lang = 'la'
-        LEFT JOIN LATERAL (
-            SELECT st3.content
-            FROM segment_text st3
-            JOIN source src3 ON src3.source_id = st3.source_id
-            WHERE st3.segment_id = s.segment_id
-              AND st3.lang = 'cs'
-            ORDER BY src3.authority_rank ASC
-            LIMIT 1
-        ) czech ON true
-        LEFT JOIN LATERAL (
-            SELECT st4.content
-            FROM segment_text st4
-            JOIN source src4 ON src4.source_id = st4.source_id
-            WHERE st4.segment_id = s.segment_id
-              AND st4.lang = 'en'
-            ORDER BY src4.authority_rank ASC
-            LIMIT 1
-        ) english ON true
-        LEFT JOIN LATERAL (
-            SELECT st_m.content
-            FROM segment_text st_m
-            JOIN source src_m ON src_m.source_id = st_m.source_id
-            WHERE st_m.segment_id = s.segment_id
-              AND st_m.lang = 'sk'
-              AND src_m.code = 'model'
-            LIMIT 1
-        ) sk_model ON true
-        LEFT JOIN LATERAL (
-            SELECT st_p.content
-            FROM segment_text st_p
-            JOIN source src_p ON src_p.source_id = st_p.source_id
-            WHERE st_p.segment_id = s.segment_id
-              AND st_p.lang = 'sk'
-              AND src_p.code = 'polish'
-            LIMIT 1
-        ) sk_polish ON true
-        LEFT JOIN LATERAL (
-            SELECT st_h.content
-            FROM segment_text st_h
-            JOIN source src_h ON src_h.source_id = st_h.source_id
-            WHERE st_h.segment_id = s.segment_id
-              AND st_h.lang = 'sk'
-              AND src_h.code = 'human'
-            LIMIT 1
-        ) sk_human ON true
-        LEFT JOIN segment_review sr ON sr.segment_id = s.segment_id
-        {where_clause}
-    """
-
 
 # ---------------------------------------------------------------------------
 # Public query helpers
@@ -196,23 +118,7 @@ def get_article_segments(
     Returns separate machine (slovak_model) and human (slovak_human) Slovak columns,
     plus human-review metadata from segment_review.
     """
-    sql = _segment_select_sql("""
-        WHERE s.locator_path <@ %s::ltree
-          AND (latin.content IS NOT NULL OR s.element_type = 'article_title')
-        ORDER BY
-            CASE s.element_type
-                WHEN 'article_title' THEN 0
-                WHEN 'arg'           THEN 1
-                WHEN 'sed_contra'    THEN 2
-                WHEN 'respondeo'     THEN 3
-                WHEN 'reply'         THEN 4
-                ELSE                      5
-            END,
-            (regexp_match(s.locator_path::text, '\\d+$'))[1]::int NULLS LAST
-    """)
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, (article_path,))
-        return [Segment.from_row(row) for row in cur.fetchall()]
+    return SegmentRepository(conn).get_article_segments(article_path)
 
 
 def get_prev_next_article(
@@ -289,13 +195,7 @@ def get_question_title_segment(
     question_path: str,
 ) -> Segment | None:
     """Return the question_title segment for a question, or None if absent."""
-    sql = _segment_select_sql(
-        "WHERE s.locator_path = %s::ltree AND s.element_type = 'question_title'"
-    )
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, (question_path,))
-        row = cur.fetchone()
-    return Segment.from_row(row) if row else None
+    return SegmentRepository(conn).get_question_title_segment(question_path)
 
 
 def get_segment_constraints(
@@ -312,42 +212,7 @@ def get_segment_constraints(
     A 'rejected' term_usage row (D10 tombstone) is excluded even if the sense
     itself is still approved.
     """
-    if not segment_ids:
-        return {}
-
-    placeholders = ", ".join(["%s"] * len(segment_ids))
-    sql = f"""
-        SELECT DISTINCT ON (tu.segment_id, gs.sense_id)
-            tu.segment_id,
-            gs.sense_id,
-            gt.latin_lemma,
-            sr.content        AS slovak,
-            gs.context_label
-        FROM term_usage tu
-        JOIN glossary_sense  gs ON gs.sense_id  = tu.sense_id
-        JOIN glossary_term   gt ON gt.term_id   = gs.term_id
-        JOIN sense_rendering sr ON sr.sense_id  = gs.sense_id
-        JOIN source           s ON s.source_id  = sr.source_id
-        WHERE tu.segment_id IN ({placeholders})
-          AND tu.status <> 'rejected'
-          AND gs.status = 'approved'
-          AND sr.lang   = 'sk'
-        ORDER BY tu.segment_id, gs.sense_id, s.authority_rank
-    """
-    result: dict[int, list[Constraint]] = {}
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, segment_ids)
-        for row in cur.fetchall():
-            sid = row["segment_id"]
-            result.setdefault(sid, []).append(
-                Constraint(
-                    latin_lemma=row["latin_lemma"],
-                    required_slovak=row["slovak"],
-                    context_label=row["context_label"],
-                    sense_id=row["sense_id"],
-                )
-            )
-    return result
+    return GlossaryRepository(conn).locked_terms_for(segment_ids)
 
 
 def get_term_senses(conn: psycopg2.extensions.connection, sense_id: int) -> dict | None:
@@ -362,44 +227,13 @@ def get_term_senses(conn: psycopg2.extensions.connection, sense_id: int) -> dict
     ``{"term_id", "latin_lemma", "senses": list[Sense]}``, or None if
     ``sense_id`` doesn't exist.
     """
-    sql = """
-        SELECT gt.term_id, gt.latin_lemma
-        FROM glossary_sense gs
-        JOIN glossary_term  gt ON gt.term_id = gs.term_id
-        WHERE gs.sense_id = %s
-    """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, (sense_id,))
-        term = cur.fetchone()
-        if term is None:
-            return None
-
-        cur.execute(
-            """
-            SELECT DISTINCT ON (gs.sense_id)
-                gs.sense_id,
-                gs.context_label,
-                gs.status,
-                sr.content AS slovak
-            FROM glossary_sense gs
-            LEFT JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
-            LEFT JOIN source           s ON s.source_id = sr.source_id
-            WHERE gs.term_id = %s
-            ORDER BY gs.sense_id, s.authority_rank
-            """,
-            (term["term_id"],),
-        )
-        senses = [
-            Sense(
-                sense_id=row["sense_id"],
-                context_label=row["context_label"],
-                status=row["status"],
-                sk_content=row["slovak"],
-            )
-            for row in cur.fetchall()
-        ]
-
-    return {"term_id": term["term_id"], "latin_lemma": term["latin_lemma"], "senses": senses}
+    glossary = GlossaryRepository(conn)
+    found = glossary.term_lemma_for_sense(sense_id)
+    if found is None:
+        return None
+    term_id, latin_lemma = found
+    senses = glossary.senses_for_term(term_id)
+    return {"term_id": term_id, "latin_lemma": latin_lemma, "senses": senses}
 
 
 def get_pending_proposal_counts(
@@ -430,68 +264,12 @@ PER_SEGMENT_KINDS = (PROPOSAL_KIND_WRONG_SENSE_HERE, PROPOSAL_KIND_REMOVE_HERE)
 def _sense_blast_radius(conn: psycopg2.extensions.connection, sense_id: int) -> dict:
     """Segments locked by ``sense_id``, split by translation_status, plus the
     marginal restage count — segments that are not already stale.
-
-    ``reviewed`` piggybacks on the same guard-protected ``segment_review`` join
-    as the rest of the server (free — no extra scan of a big table).
     """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT s.translation_status, count(DISTINCT tu.segment_id) AS n
-            FROM term_usage tu
-            JOIN segment s ON s.segment_id = tu.segment_id
-            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
-            GROUP BY s.translation_status
-            """,
-            (sense_id,),
-        )
-        by_status = {row["translation_status"]: row["n"] for row in cur.fetchall()}
-
-        cur.execute(
-            """
-            SELECT count(DISTINCT tu.segment_id)
-            FROM term_usage tu
-            JOIN segment_review sr ON sr.segment_id = tu.segment_id
-            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
-            """,
-            (sense_id,),
-        )
-        reviewed = cur.fetchone()["count"]
-
-        cur.execute(
-            """
-            SELECT count(DISTINCT tu.segment_id)
-            FROM term_usage tu
-            WHERE tu.sense_id = %s AND tu.status <> 'rejected'
-              AND NOT EXISTS (
-                  SELECT 1 FROM term_usage tu2
-                  JOIN glossary_sense gs2 ON gs2.sense_id = tu2.sense_id
-                  WHERE tu2.segment_id = tu.segment_id
-                    AND tu2.sense_version_used < gs2.version
-              )
-            """,
-            (sense_id,),
-        )
-        not_already_stale = cur.fetchone()["count"]
-
-    total = sum(by_status.values())
-    return {
-        "translated": by_status.get("translated", 0),
-        "needs_human": by_status.get("needs_human", 0),
-        "pending": by_status.get("pending", 0),
-        "reviewed": reviewed,
-        "total": total,
-        "marginal": not_already_stale,
-    }
+    return GlossaryRepository(conn).sense_blast_radius(sense_id)
 
 
 def _origin_locator(conn: psycopg2.extensions.connection, segment_id: int) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT locator_path::text FROM segment WHERE segment_id = %s", (segment_id,)
-        )
-        row = cur.fetchone()
-    return row[0] if row else None
+    return SegmentRepository(conn).get_locators([segment_id]).get(segment_id)
 
 
 def get_cost_per_segment(conn: psycopg2.extensions.connection) -> float:
@@ -514,57 +292,74 @@ def get_cost_per_segment(conn: psycopg2.extensions.connection) -> float:
     return (_AVG_SEGMENT_TOKENS / 1000) * _COST_PER_1K_INPUT
 
 
-def _enrich_proposal_display(conn: psycopg2.extensions.connection, row: dict) -> dict:
-    """Attach term/sense display fields shared by the pending queue and the
-    decided-proposal audit trail.
+def _enrich_proposal_display(
+    conn: psycopg2.extensions.connection,
+    proposal: Proposal,
+    term_cache: dict[int, dict | None] | None = None,
+) -> Proposal:
+    """Return a copy of ``proposal`` with term/sense display fields filled in —
+    shared by the pending queue and the decided-proposal audit trail.
 
-    Adds ``context_label`` — the acted-on sense's context_label (None for
+    Sets ``context_label`` — the acted-on sense's context_label (None for
     add_term); ``proposed_context_label`` / ``proposed_slovak`` — for
     sense_here with a chosen ``proposed_sense_id`` (None for the free-text
     record-only path); ``origin_locator`` — the origin segment's locator
     path, only for per-segment kinds (``sense_here``, ``remove_here``).
+
+    ``term_cache`` lets callers iterating many proposals memoize
+    ``get_term_senses`` by ``sense_id`` across the whole list, since several
+    proposals commonly share a sense (e.g. a sense-wide plus a per-segment
+    proposal on the same term).
     """
-    kind = row["kind"]
-    sense_id = row["sense_id"]
+    context_label = None
+    proposed_context_label = None
+    proposed_slovak = None
+    origin_locator = None
 
-    row["context_label"] = None
-    row["proposed_context_label"] = None
-    row["proposed_slovak"] = None
-    row["origin_locator"] = None
-
-    if sense_id is not None:
-        term = get_term_senses(conn, sense_id)
+    if proposal.sense_id is not None:
+        if term_cache is not None:
+            if proposal.sense_id not in term_cache:
+                term_cache[proposal.sense_id] = get_term_senses(conn, proposal.sense_id)
+            term = term_cache[proposal.sense_id]
+        else:
+            term = get_term_senses(conn, proposal.sense_id)
         if term is not None:
             sense_row = next(
-                (s for s in term["senses"] if s.sense_id == sense_id), None
+                (s for s in term["senses"] if s.sense_id == proposal.sense_id), None
             )
             if sense_row is not None:
-                row["context_label"] = sense_row.context_label
+                context_label = sense_row.context_label
 
-            if row["proposed_sense_id"] is not None:
+            if proposal.proposed_sense_id is not None:
                 proposed_row = next(
                     (
                         s
                         for s in term["senses"]
-                        if s.sense_id == row["proposed_sense_id"]
+                        if s.sense_id == proposal.proposed_sense_id
                     ),
                     None,
                 )
                 if proposed_row is not None:
-                    row["proposed_context_label"] = proposed_row.context_label
-                    row["proposed_slovak"] = proposed_row.sk_content
+                    proposed_context_label = proposed_row.context_label
+                    proposed_slovak = proposed_row.sk_content
 
-    if kind in PER_SEGMENT_KINDS and row["origin_segment_id"] is not None:
-        row["origin_locator"] = _origin_locator(conn, row["origin_segment_id"])
+    if proposal.kind in PER_SEGMENT_KINDS and proposal.origin_segment_id is not None:
+        origin_locator = _origin_locator(conn, proposal.origin_segment_id)
 
-    return row
+    return dataclasses.replace(
+        proposal,
+        context_label=context_label,
+        proposed_context_label=proposed_context_label,
+        proposed_slovak=proposed_slovak,
+        origin_locator=origin_locator,
+    )
 
 
-def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dict]:
+def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[Proposal]:
     """Return every pending proposal enriched for the admin queue (Stage 4).
 
-    Each dict is the raw ``glossary_proposal`` row plus the shared display
-    fields from ``_enrich_proposal_display``, plus:
+    Each ``Proposal`` carries the shared display fields from
+    ``_enrich_proposal_display``, plus:
       - ``live_current_sk`` / ``drift`` — the sense's *current* winning rendering
         vs. the snapshot taken at propose time; drift=True means the glossary
         moved since the editor proposed (admin should re-check before approving).
@@ -574,31 +369,54 @@ def get_pending_proposals_view(conn: psycopg2.extensions.connection) -> list[dic
     glossary = GlossaryRepository(conn)
     rows = ProposalRepository(conn).list_pending()
 
+    # Memoized per sense_id: several pending proposals commonly share a sense
+    # (e.g. a sense-wide plus a per-segment proposal on the same term), so
+    # cache each of these lookups across the whole list rather than repeating
+    # them per proposal.
+    term_cache: dict[int, dict | None] = {}
+    current_sense_cache: dict[int, object] = {}
+    sk_rendering_cache: dict[int, str | None] = {}
+    blast_radius_cache: dict[int, dict] = {}
+
+    result = []
     for row in rows:
-        _enrich_proposal_display(conn, row)
-        kind = row["kind"]
-        sense_id = row["sense_id"]
+        row = _enrich_proposal_display(conn, row, term_cache=term_cache)
+        live_current_sk = None
+        drift = False
+        blast_radius = None
 
-        row["live_current_sk"] = None
-        row["drift"] = False
-        row["blast_radius"] = None
-
-        if sense_id is not None:
-            current = glossary.get_current_sense(sense_id)
+        if row.sense_id is not None:
+            if row.sense_id not in current_sense_cache:
+                current_sense_cache[row.sense_id] = glossary.get_current_sense(row.sense_id)
+            current = current_sense_cache[row.sense_id]
             if current is not None:
-                live_sk = glossary.get_sk_rendering_content(sense_id)
-                row["live_current_sk"] = live_sk
-                row["drift"] = live_sk != row["current_sk"]
+                if row.sense_id not in sk_rendering_cache:
+                    sk_rendering_cache[row.sense_id] = glossary.get_sk_rendering_content(
+                        row.sense_id
+                    )
+                live_current_sk = sk_rendering_cache[row.sense_id]
+                drift = live_current_sk != row.current_sk
 
-        if kind in SENSE_WIDE_KINDS and sense_id is not None:
-            row["blast_radius"] = _sense_blast_radius(conn, sense_id)
+        if row.kind in SENSE_WIDE_KINDS and row.sense_id is not None:
+            if row.sense_id not in blast_radius_cache:
+                blast_radius_cache[row.sense_id] = _sense_blast_radius(conn, row.sense_id)
+            blast_radius = blast_radius_cache[row.sense_id]
 
-    return rows
+        result.append(
+            dataclasses.replace(
+                row,
+                live_current_sk=live_current_sk,
+                drift=drift,
+                blast_radius=blast_radius,
+            )
+        )
+
+    return result
 
 
 def get_decided_proposals_view(
     conn: psycopg2.extensions.connection, limit: int = 200
-) -> list[dict]:
+) -> list[Proposal]:
     """Return the most recent decided proposals for the admin audit trail.
 
     Same shared display fields as ``get_pending_proposals_view`` (minus
@@ -606,9 +424,8 @@ def get_decided_proposals_view(
     history table can reuse the same rendering as the live queue.
     """
     rows = ProposalRepository(conn).list_decided(limit=limit)
-    for row in rows:
-        _enrich_proposal_display(conn, row)
-    return rows
+    term_cache: dict[int, dict | None] = {}
+    return [_enrich_proposal_display(conn, row, term_cache=term_cache) for row in rows]
 
 
 class ProposalRaceError(Exception):
@@ -666,14 +483,14 @@ def approve_proposal(
     proposal = repo.get(proposal_id)
     if proposal is None:
         return ActionResult("not_found", {"error": "not found"})
-    if proposal["status"] != "pending":
+    if proposal.status != "pending":
         return ActionResult("not_pending", {"error": "not pending"})
 
-    kind = proposal["kind"]
-    sense_id = proposal["sense_id"]
+    kind = proposal.kind
+    sense_id = proposal.sense_id
 
     accepts_edit = kind in _EDIT_BEFORE_APPROVE_KINDS or (
-        kind == PROPOSAL_KIND_WRONG_SENSE_HERE and proposal["proposed_sense_id"] is None
+        kind == PROPOSAL_KIND_WRONG_SENSE_HERE and proposal.proposed_sense_id is None
     )
     if edited_sk is not None:
         if not accepts_edit:
@@ -682,26 +499,26 @@ def approve_proposal(
         if not edited_sk:
             raise ValueError("edited proposed_sk cannot be empty")
 
-    proposed_sk = edited_sk if edited_sk is not None else proposal.get("proposed_sk")
+    proposed_sk = edited_sk if edited_sk is not None else proposal.proposed_sk
 
     if kind == PROPOSAL_KIND_CHANGE_EVERYWHERE:
         result = apply_rendering_change(conn, sense_id, proposed_sk)
     elif kind == PROPOSAL_KIND_WRONG_SENSE_HERE:
-        if proposal["proposed_sense_id"] is not None:
+        if proposal.proposed_sense_id is not None:
             result = apply_sense_here(
                 conn,
-                proposal["origin_segment_id"],
+                proposal.origin_segment_id,
                 sense_id,
-                proposal["proposed_sense_id"],
+                proposal.proposed_sense_id,
             )
         else:
             result = {"acknowledged": True}
     elif kind == PROPOSAL_KIND_REMOVE_HERE:
-        result = apply_remove_here(conn, proposal["origin_segment_id"], sense_id)
+        result = apply_remove_here(conn, proposal.origin_segment_id, sense_id)
     elif kind == PROPOSAL_KIND_RETIRE_EVERYWHERE:
         result = apply_retire_sense(conn, sense_id)
     else:  # add_term
-        result = apply_add_term(conn, proposal["latin_lemma"], proposed_sk, proposal["note"])
+        result = apply_add_term(conn, proposal.latin_lemma, proposed_sk, proposal.note)
 
     if not repo.decide(
         proposal_id, "approved", admin_email, decision_note, proposed_sk=edited_sk
@@ -725,7 +542,7 @@ def reject_proposal(
     proposal = repo.get(proposal_id)
     if proposal is None:
         return ActionResult("not_found", {"error": "not found"})
-    if proposal["status"] != "pending":
+    if proposal.status != "pending":
         return ActionResult("not_pending", {"error": "not pending"})
     if not repo.decide(proposal_id, "rejected", admin_email, decision_note):
         return ActionResult("not_pending", {"error": "not pending"})
@@ -759,13 +576,13 @@ def reopen_proposal(
     proposal = repo.get(proposal_id)
     if proposal is None:
         return ActionResult("not_found", {"error": "not found"})
-    if proposal["status"] != "rejected":
+    if proposal.status != "rejected":
         return ActionResult("not_rejected", {"error": "not rejected"})
 
-    sense_id = proposal["sense_id"]
+    sense_id = proposal.sense_id
     if sense_id is not None and GlossaryRepository(conn).get_current_sense(sense_id) is None:
         raise ValueError(f"sense {sense_id} no longer exists")
-    origin_segment_id = proposal["origin_segment_id"]
+    origin_segment_id = proposal.origin_segment_id
     if origin_segment_id is not None and not segment_exists(conn, origin_segment_id):
         raise ValueError(f"segment {origin_segment_id} no longer exists")
 
@@ -784,17 +601,7 @@ def segment_has_locked_sense(
     client submitting sense_here/remove_here for a (segment, sense) pair that
     was never actually rendered as a locked term in that segment's panel.
     """
-    sql = """
-        SELECT 1
-        FROM term_usage tu
-        JOIN glossary_sense gs  ON gs.sense_id = tu.sense_id AND gs.status = 'approved'
-        JOIN sense_rendering sr ON sr.sense_id = gs.sense_id AND sr.lang = 'sk'
-        WHERE tu.segment_id = %s AND tu.sense_id = %s AND tu.status <> 'rejected'
-        LIMIT 1
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql, (segment_id, sense_id))
-        return cur.fetchone() is not None
+    return GlossaryRepository(conn).is_locked_in_segment(segment_id, sense_id)
 
 
 def propose_sense_change(
@@ -929,13 +736,7 @@ def get_question_preamble_segment(
 
     Preambles sit at ``<question_path>.preamble`` (e.g. 'I.q1.preamble').
     """
-    sql = _segment_select_sql(
-        "WHERE s.locator_path = (%(qpath)s || '.preamble')::ltree AND s.element_type = 'preamble'"
-    )
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, {"qpath": question_path})
-        row = cur.fetchone()
-    return Segment.from_row(row) if row else None
+    return SegmentRepository(conn).get_question_preamble_segment(question_path)
 
 
 def get_questions_by_status(
@@ -1063,10 +864,6 @@ def review_segment(
 # Comment threads (editor-internal, per segment)
 # ---------------------------------------------------------------------------
 
-_COMMENT_COLUMNS = (
-    "comment_id, segment_id, author, body, created_at, resolved, resolved_by, resolved_at"
-)
-
 
 def segment_exists(conn: psycopg2.extensions.connection, segment_id: int) -> bool:
     """True if segment_id is a real segment.
@@ -1076,70 +873,27 @@ def segment_exists(conn: psycopg2.extensions.connection, segment_id: int) -> boo
     unhandled IntegrityError (500) instead of a clean 404, unlike review_segment's
     explicit notfound check.
     """
-    with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
-        return cur.fetchone() is not None
+    return CommentRepository(conn).segment_exists(segment_id)
 
 
 def list_comments(conn: psycopg2.extensions.connection, segment_id: int) -> CommentThread:
     """Return the full comment thread for a segment, oldest first."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            f"""
-            SELECT {_COMMENT_COLUMNS}
-            FROM segment_comment
-            WHERE segment_id = %s
-            ORDER BY created_at ASC
-            """,
-            (segment_id,),
-        )
-        comments = [Comment(**dict(row)) for row in cur.fetchall()]
-    open_count = sum(1 for c in comments if not c.resolved)
-    resolved = bool(comments) and open_count == 0
-    return CommentThread(comments=comments, resolved=resolved, open_count=open_count)
+    return CommentRepository(conn).list_comments(segment_id)
 
 
 def add_comment(conn: psycopg2.extensions.connection, segment_id: int, author: str, body: str) -> Comment:
     """Insert a new comment. A new comment on a resolved thread implicitly reopens it."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            f"""
-            INSERT INTO segment_comment (segment_id, author, body)
-            VALUES (%s, %s, %s)
-            RETURNING {_COMMENT_COLUMNS}
-            """,
-            (segment_id, author, body),
-        )
-        row = cur.fetchone()
-    return Comment(**dict(row))
+    return CommentRepository(conn).add_comment(segment_id, author, body)
 
 
 def resolve_thread(conn: psycopg2.extensions.connection, segment_id: int, resolver_email: str) -> int:
     """Mark every open comment in the thread as resolved. Returns the number of rows flipped."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE segment_comment
-               SET resolved = true, resolved_by = %s, resolved_at = now()
-             WHERE segment_id = %s AND resolved = false
-            """,
-            (resolver_email, segment_id),
-        )
-        return cur.rowcount
+    return CommentRepository(conn).resolve_thread(segment_id, resolver_email)
 
 
 def reopen_thread(conn: psycopg2.extensions.connection, segment_id: int) -> int:
     """Clear resolved state on every comment in the thread. Returns rows flipped."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE segment_comment
-               SET resolved = false, resolved_by = NULL, resolved_at = NULL
-             WHERE segment_id = %s AND resolved = true
-            """,
-            (segment_id,),
-        )
-        return cur.rowcount
+    return CommentRepository(conn).reopen_thread(segment_id)
 
 
 def delete_comment(conn: psycopg2.extensions.connection, comment_id: int, requester_email: str) -> str:
@@ -1147,28 +901,12 @@ def delete_comment(conn: psycopg2.extensions.connection, comment_id: int, reques
 
     Returns ``"ok"``, ``"notfound"``, or ``"forbidden"``.
     """
-    with conn.cursor() as cur:
-        cur.execute("SELECT author FROM segment_comment WHERE comment_id = %s", (comment_id,))
-        row = cur.fetchone()
-        if row is None:
-            return "notfound"
-        if row[0] != requester_email:
-            return "forbidden"
-        cur.execute("DELETE FROM segment_comment WHERE comment_id = %s", (comment_id,))
-    return "ok"
+    return CommentRepository(conn).delete_comment(comment_id, requester_email)
 
 
 def mark_thread_read(conn: psycopg2.extensions.connection, segment_id: int, user_email: str) -> None:
     """Bump the viewer's read watermark for a segment's thread (clears the unread dot)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO comment_thread_state (segment_id, user_email, last_read_at)
-            VALUES (%s, %s, now())
-            ON CONFLICT (segment_id, user_email) DO UPDATE SET last_read_at = now()
-            """,
-            (segment_id, user_email),
-        )
+    CommentRepository(conn).mark_thread_read(segment_id, user_email)
 
 
 def get_comment_counts(
@@ -1180,34 +918,7 @@ def get_comment_counts(
     ``last_read_at`` watermark (NULL watermark means everything is unread).
     Segments with no comments are omitted from the result.
     """
-    if not segment_ids:
-        return {}
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT
-                c.segment_id,
-                count(*)                                                      AS total,
-                count(*) FILTER (WHERE NOT c.resolved)                        AS open_count,
-                count(*) FILTER (
-                    WHERE c.author <> %s
-                      AND c.created_at > COALESCE(st.last_read_at, '-infinity'::timestamptz)
-                )                                                             AS unread
-            FROM segment_comment c
-            LEFT JOIN comment_thread_state st
-                   ON st.segment_id = c.segment_id AND st.user_email = %s
-            WHERE c.segment_id = ANY(%s)
-            GROUP BY c.segment_id
-            """,
-            (viewer_email, viewer_email, segment_ids),
-        )
-        rows = cur.fetchall()
-    return {
-        row["segment_id"]: CommentCount(
-            total=int(row["total"]), open_count=int(row["open_count"]), unread=int(row["unread"])
-        )
-        for row in rows
-    }
+    return CommentRepository(conn).get_comment_counts(segment_ids, viewer_email)
 
 
 def get_activity_feed(
@@ -1219,53 +930,7 @@ def get_activity_feed(
     to entries strictly older than it. Uses only existing timestamps — no new
     per-row timestamp column.
     """
-    sql = """
-        SELECT ts, kind, author, segment_id, locator, summary,
-               translated, needs_human, cost
-        FROM (
-            SELECT sr.human_reviewed_at AS ts, 'review' AS kind,
-                   sr.human_reviewed_by AS author, sr.segment_id,
-                   s.locator_path::text AS locator,
-                   (CASE WHEN sr.human_note IS NOT NULL THEN 'noted' ELSE 'reviewed' END) AS summary,
-                   NULL::int AS translated, NULL::int AS needs_human, NULL::numeric AS cost
-            FROM segment_review sr
-            JOIN segment s ON s.segment_id = sr.segment_id
-
-            UNION ALL
-
-            SELECT c.created_at, 'comment', c.author, c.segment_id,
-                   s.locator_path::text, left(c.body, 140),
-                   NULL, NULL, NULL
-            FROM segment_comment c
-            JOIN segment s ON s.segment_id = c.segment_id
-
-            UNION ALL
-
-            SELECT COALESCE(r.finished_at, r.started_at), 'run', NULL, NULL, NULL,
-                   r.flow_name, r.total_translated, r.total_needs_human, r.total_cost_usd
-            FROM translation_run r
-        ) feed
-        WHERE (%(before)s::timestamptz IS NULL OR ts < %(before)s::timestamptz)
-        ORDER BY ts DESC
-        LIMIT %(limit)s
-    """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, {"before": before, "limit": limit})
-        rows = cur.fetchall()
-    return [
-        ActivityEntry(
-            ts=row["ts"],
-            kind=row["kind"],
-            author=row["author"],
-            segment_id=row["segment_id"],
-            locator=row["locator"],
-            summary=row["summary"],
-            translated=row["translated"],
-            needs_human=row["needs_human"],
-            cost=float(row["cost"]) if row["cost"] is not None else None,
-        )
-        for row in rows
-    ]
+    return ActivityRepository(conn).get_activity_feed(before=before, limit=limit)
 
 
 def collect_digests(conn: psycopg2.extensions.connection) -> list[UserDigest]:
@@ -1276,114 +941,27 @@ def collect_digests(conn: psycopg2.extensions.connection) -> list[UserDigest]:
     recipient when it postdates both their read and their last-notified watermark (NULL
     watermark means everything qualifies).
     """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            WITH participants AS (
-                SELECT DISTINCT segment_id, author AS user_email FROM segment_comment
-                UNION
-                SELECT sr.segment_id, sr.human_reviewed_by
-                FROM segment_review sr
-                WHERE sr.human_reviewed_by IS NOT NULL
-                  AND sr.segment_id IN (SELECT DISTINCT segment_id FROM segment_comment)
-            )
-            SELECT p.user_email, c.segment_id, s.locator_path::text AS locator,
-                   c.author, c.created_at, c.body
-            FROM participants p
-            JOIN segment_comment c ON c.segment_id = p.segment_id
-            JOIN segment s        ON s.segment_id = c.segment_id
-            LEFT JOIN comment_thread_state st
-                   ON st.segment_id = p.segment_id AND st.user_email = p.user_email
-            WHERE c.author <> p.user_email
-              AND c.created_at > COALESCE(GREATEST(st.last_read_at, st.last_notified_at),
-                                          '-infinity'::timestamptz)
-            ORDER BY p.user_email, c.created_at
-            """
-        )
-        rows = cur.fetchall()
-
-    digests: dict[str, list[DigestItem]] = {}
-    for row in rows:
-        digests.setdefault(row["user_email"], []).append(
-            DigestItem(
-                segment_id=row["segment_id"],
-                locator=row["locator"],
-                author=row["author"],
-                created_at=row["created_at"],
-                body=row["body"],
-            )
-        )
-    return [UserDigest(user_email=email, items=items) for email, items in digests.items()]
+    return ActivityRepository(conn).collect_digests()
 
 
 def mark_thread_notified(conn: psycopg2.extensions.connection, segment_id: int, user_email: str) -> None:
     """Bump the recipient's notified watermark for a segment's thread (digest de-dupe)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO comment_thread_state (segment_id, user_email, last_notified_at)
-            VALUES (%s, %s, now())
-            ON CONFLICT (segment_id, user_email) DO UPDATE SET last_notified_at = now()
-            """,
-            (segment_id, user_email),
-        )
+    ActivityRepository(conn).mark_thread_notified(segment_id, user_email)
 
 
 def get_structural_formulas(conn: psycopg2.extensions.connection) -> dict[str, str]:
     """Load approved Slovak forms for sed_contra, respondeo, praeterea.
 
-    Queries glossary_term + glossary_sense + sense_rendering(lang='sk', status='approved').
-    Returns e.g. {"sed_contra": "Na druhej strane:", "respondeo": "Odpoveď:"}
-    Missing formulas are silently omitted (never raises).
+    Missing formulas are silently omitted (never raises) — non-critical; the
+    template falls back to hardcoded defaults. See GlossaryRepository.get_structural_formulas
+    for the query and the (deliberate) broad exception swallow.
     """
-    latin_terms = ("sed_contra", "respondeo", "praeterea")
-    placeholders = ", ".join(["%s"] * len(latin_terms))
-    sql = f"""
-        SELECT
-            gt.latin_lemma,
-            sr.content
-        FROM glossary_term gt
-        JOIN glossary_sense gs  ON gs.term_id  = gt.term_id
-        JOIN sense_rendering sr ON sr.sense_id = gs.sense_id
-        WHERE gt.latin_lemma IN ({placeholders})
-          AND sr.lang         = 'sk'
-          AND gs.status       = 'approved'
-        ORDER BY gt.latin_lemma
-    """
-    result: dict[str, str] = {}
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, latin_terms)
-            for row in cur.fetchall():
-                # Keep the first approved rendering per term (in case of duplicates).
-                lemma, content = row[0], row[1]
-                if lemma not in result:
-                    result[lemma] = content
-    except Exception:
-        # Structural formulas are non-critical; fall back to hardcoded defaults in the
-        # template.  Log loudly so the operator knows something is wrong.
-        import traceback
-
-        traceback.print_exc()
-    return result
+    return GlossaryRepository(conn).get_structural_formulas()
 
 
 def get_distinct_pars(conn: psycopg2.extensions.connection, work_id: int) -> list[str]:
-    """Return sorted list of pars labels that have translated/needs_human segments.
-
-    Queries v_segment (same surface as the export query) so only pars that
-    would actually produce output are returned.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT subpath(locator_path, 0, 1)::text"
-            " FROM v_segment"
-            " WHERE work_id = %s"
-            "   AND translation_status IN ('translated', 'needs_human')"
-            " ORDER BY 1",
-            (work_id,),
-        )
-        return [r[0] for r in cur.fetchall()]
+    """Return sorted list of pars labels that have translated/needs_human segments."""
+    return SegmentRepository(conn).get_distinct_pars(work_id)
 
 
 def is_editor(conn: psycopg2.extensions.connection, email: str) -> bool:
@@ -1413,19 +991,7 @@ def approve_segment(conn: psycopg2.extensions.connection, segment_id: int) -> st
         "notfound"     — segment_id does not exist.
         "wrong_status" — segment is not needs_human.
     """
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE segment SET translation_status = 'translated'"
-            " WHERE segment_id = %s AND translation_status = 'needs_human'"
-            " RETURNING segment_id",
-            (segment_id,),
-        )
-        if cur.fetchone() is not None:
-            return "ok"
-        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
-        if cur.fetchone() is None:
-            return "notfound"
-        return "wrong_status"
+    return SegmentRepository(conn).approve_segment(segment_id)
 
 
 def unapprove_segment(conn: psycopg2.extensions.connection, segment_id: int) -> str:
@@ -1437,29 +1003,4 @@ def unapprove_segment(conn: psycopg2.extensions.connection, segment_id: int) -> 
         "wrong_status"    — segment is not translated.
         "already_polished"— a (sk, polish) row exists; cannot un-approve.
     """
-    with conn.cursor() as cur:
-        # Atomic: only flip if translated AND no (sk, polish) row exists.
-        cur.execute(
-            "UPDATE segment SET translation_status = 'needs_human'"
-            " WHERE segment_id = %s AND translation_status = 'translated'"
-            "   AND NOT EXISTS ("
-            "     SELECT 1 FROM segment_text st"
-            "     JOIN source s ON s.source_id = st.source_id"
-            "     WHERE st.segment_id = %s AND st.lang = 'sk' AND s.code = 'polish'"
-            "   )"
-            " RETURNING segment_id",
-            (segment_id, segment_id),
-        )
-        if cur.fetchone() is not None:
-            return "ok"
-        # UPDATE matched nothing — disambiguate the reason.
-        cur.execute("SELECT 1 FROM segment WHERE segment_id = %s", (segment_id,))
-        if cur.fetchone() is None:
-            return "notfound"
-        cur.execute(
-            "SELECT translation_status FROM segment WHERE segment_id = %s", (segment_id,)
-        )
-        row = cur.fetchone()
-        if row[0] != "translated":
-            return "wrong_status"
-        return "already_polished"
+    return SegmentRepository(conn).unapprove_segment(segment_id)

@@ -27,6 +27,7 @@ def _gloss_row(**overrides) -> dict:
 
 def _locked_row(**overrides) -> dict:
     base = {
+        "segment_id": 1,
         "latin_lemma": "ratio",
         "category": None,
         "latin_surface": None,
@@ -129,7 +130,7 @@ def test_locked_terms_passes_segment_id(fake_conn):
     conn = fake_conn(fetchall_rows=[])
     GlossaryRepository(conn).locked_terms(5)
     _, params = conn.executed[-1]
-    assert params == (5,)
+    assert params == ([5],)
 
 
 def test_locked_terms_excludes_rejected_usage(fake_conn):

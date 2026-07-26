@@ -31,6 +31,7 @@ __all__ = [
     "UserDigest",
     "ReviewerNotes",
     "ActionResult",
+    "Proposal",
 ]
 
 
@@ -244,6 +245,62 @@ class Constraint:
             "context_label": self.context_label,
             "category": self.category or "term",
         }
+
+
+@dataclass(frozen=True)
+class Proposal:
+    """An editor's glossary_proposal row — a change awaiting admin review (D1).
+
+    ``from_row`` builds the raw ``glossary_proposal`` shape (a ``SELECT *``);
+    the enrichment fields below are populated afterward by ``server.db`` via
+    ``dataclasses.replace`` (this dataclass is frozen, so they cannot be
+    filled in by mutating an existing instance).
+    """
+
+    proposal_id: int
+    kind: str
+    sense_id: int | None
+    proposed_sense_id: int | None
+    latin_lemma: str
+    current_sk: str | None
+    proposed_sk: str | None
+    note: str | None
+    origin_segment_id: int | None
+    proposed_by: str
+    created_at: datetime
+    status: str
+    decided_by: str | None = None
+    decided_at: datetime | None = None
+    decision_note: str | None = None
+    # display enrichment, populated by server.db after the fact:
+    context_label: str | None = None
+    proposed_context_label: str | None = None
+    proposed_slovak: str | None = None
+    origin_locator: str | None = None
+    live_current_sk: str | None = None
+    drift: bool = False
+    blast_radius: dict | None = None
+
+    @classmethod
+    def from_row(cls, row) -> Proposal:
+        """Build from a ``glossary_proposal`` row (``SELECT *``)."""
+        return cls(
+            proposal_id=row["proposal_id"],
+            kind=row["kind"],
+            sense_id=row["sense_id"],
+            proposed_sense_id=row["proposed_sense_id"],
+            latin_lemma=row["latin_lemma"],
+            current_sk=row["current_sk"],
+            proposed_sk=row["proposed_sk"],
+            note=row["note"],
+            origin_segment_id=row["origin_segment_id"],
+            proposed_by=row["proposed_by"],
+            created_at=row["created_at"],
+            status=row["status"],
+            decided_by=_get(row, "decided_by"),
+            decided_at=_get(row, "decided_at"),
+            decision_note=_get(row, "decision_note"),
+        )
 
 
 @dataclass(frozen=True)

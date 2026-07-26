@@ -83,7 +83,7 @@ def test_get_segment_constraints_emits_sense_id(fake_conn):
                 "sense_id": 100,
                 "latin_lemma": "ratio",
                 "context_label": None,
-                "slovak": "rozum",
+                "required_slovak": "rozum",
             }
         ]
     )
