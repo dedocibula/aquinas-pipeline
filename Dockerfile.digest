@@ -15,6 +15,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir psycopg2-binary python-dotenv google-auth requests
 
 COPY src/notify src/notify
+COPY src/common src/common
 COPY src/server/__init__.py src/server/__init__.py
 COPY src/server/db.py src/server/db.py
 COPY src/review/__init__.py src/review/__init__.py
