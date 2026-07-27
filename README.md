@@ -40,6 +40,9 @@ uv sync --extra dev
 ```bash
 cp .env.example .env
 # Edit .env — fill in DATABASE_URL, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY
+# (GSHEETS_SPREADSHEET_ID, GOOGLE_CLIENT_ID/SECRET, and the GMAIL_* vars are
+# only needed for glossary Sheets sync and the review server / comment
+# digest, respectively — see their sections below)
 ```
 
 The `DATABASE_URL` for the local Docker database is:
@@ -101,7 +104,8 @@ The server is deployed to Railway via GitHub Actions.
 
 - **CI** (`.github/workflows/ci.yml`): runs `pytest` on every push and pull request.
 - **Deploy** (`.github/workflows/deploy.yml`): triggers automatically when CI passes on `main`,
-  deploying to the `aquinas-pipeline` Railway service via `railway up --ci --service aquinas-pipeline`.
+  deploying to the `aquinas-pipeline` Railway service via
+  `railway up --ci --service aquinas-pipeline --environment production`.
 
 The `RAILWAY_TOKEN` secret must be set in the GitHub repository settings.
 
@@ -166,6 +170,25 @@ pg_restore --clean --if-exists -d postgresql://postgres:<password>@localhost:543
 
 Do a restore drill periodically (e.g. quarterly) into a scratch database to confirm
 backups are actually restorable, not just produced.
+
+### Automated comment digest
+
+A second dedicated Railway cron service (build: `Dockerfile.digest`, cron schedule set in
+Railway Settings → Cron Schedule) runs `python -m notify.digest` on a daily cadence. It
+collects unread comment-thread replies per reviewer, sends one consolidated email per
+recipient via the Gmail API (Railway blocks outbound SMTP ports, so this goes through
+`google-auth` + `requests` rather than SMTP), and marks threads notified only after a
+successful send. A clean re-run with nothing new is a no-op.
+
+Required service variables on the digest service:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | Separate OAuth client from `GOOGLE_CLIENT_ID`/`SECRET` above (Google Cloud Console → Credentials → OAuth client ID → Desktop app), scope `gmail.send` |
+| `GMAIL_REFRESH_TOKEN` | Obtained once locally via `uv run python scripts/gmail_oauth_setup.py` |
+| `MAIL_FROM` | The Gmail address that granted consent, e.g. `Aquinas Pipeline <you@gmail.com>` |
+| `PUBLIC_BASE_URL` | Base URL used to build links back to segments in the digest email |
 
 ### Pushing a DB delta to Railway
 
