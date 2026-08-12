@@ -27,10 +27,6 @@
     });
     if (mp) mp.style.display = tab === 'machine' ? '' : 'none';
     if (hp) hp.style.display = tab === 'human'   ? '' : 'none';
-    if (tab === 'human' && hp) {
-      var ta = hp.querySelector('.human-textarea');
-      if (ta) _autoResize(ta);
-    }
   }
 
   function _showSlovakDisplay(segId, show) {
@@ -38,16 +34,11 @@
     if (d) d.style.display = show ? '' : 'none';
   }
 
-  function _autoResize(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-  }
-
   function _updateDisplayText(segId, text) {
     var span = document.getElementById('text-'     + segId);
     var em   = document.getElementById('awaiting-' + segId);
     if (text) {
-      if (span) { span.textContent = text; span.style.display = ''; }
+      if (span) { span.innerHTML = AQ.renderMarkup(text); span.style.display = ''; }
       if (em)   em.style.display = 'none';
     } else {
       if (span) span.style.display = 'none';
@@ -85,6 +76,54 @@
     var panel = document.getElementById('review-' + segId);
     if (panel) panel.style.display = 'none';
     _showSlovakDisplay(segId, true);
+  }
+
+  // Wraps (or unwraps, toggling off) the current selection within editorDiv in <tagName>.
+  function _wrapSelection(editorDiv, tagName) {
+    var sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    var range = sel.getRangeAt(0);
+    if (!editorDiv.contains(range.commonAncestorContainer)) return;
+    if (range.collapsed) return; // nothing selected to wrap or unwrap
+
+    // Toggle off: if an ancestor of the selection is already <tagName>, unwrap it.
+    var node = range.commonAncestorContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+    var existing = node.closest ? node.closest(tagName) : null;
+    if (existing && editorDiv.contains(existing)) {
+      var parent     = existing.parentNode;
+      var firstChild = existing.firstChild;
+      var lastChild  = existing.lastChild;
+      while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+      parent.removeChild(existing);
+      if (firstChild && lastChild) {
+        var unwrapRange = document.createRange();
+        unwrapRange.setStartBefore(firstChild);
+        unwrapRange.setEndAfter(lastChild);
+        sel.removeAllRanges();
+        sel.addRange(unwrapRange);
+      }
+      editorDiv.focus();
+      return;
+    }
+
+    var wrapper = document.createElement(tagName);
+    try {
+      range.surroundContents(wrapper);
+    } catch (e) {
+      // Selection spans multiple sibling nodes or partially overlaps existing
+      // formatting — flatten to plain text before re-wrapping. Nesting isn't
+      // supported (see plan), so this avoids producing <b><i>..</i></b>-style
+      // markup that AQ.renderMarkup can't parse back on the next load.
+      wrapper.textContent = range.extractContents().textContent;
+      range.insertNode(wrapper);
+    }
+
+    var newRange = document.createRange();
+    newRange.selectNodeContents(wrapper);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    editorDiv.focus();
   }
 
   function _doAction(segId, action, extra) {
@@ -125,8 +164,6 @@
         var defaultTab = (panel.dataset.needsHuman === '1') ? 'machine' : 'human';
         _showTab(segId, defaultTab);
         _showSlovakDisplay(segId, false);
-        var ta = document.getElementById('htextarea-' + segId);
-        if (ta) _autoResize(ta);
       }
     });
   });
@@ -138,10 +175,26 @@
     });
   });
 
-  // Auto-resize human textareas on input
-  document.querySelectorAll('.human-textarea').forEach(function (ta) {
-    ta.addEventListener('input', function () { _autoResize(ta); });
+  // Render already-translated segments' Slovak text and human editor content as markup on load
+  document.querySelectorAll('.slovak-text').forEach(function (span) {
+    if (span.textContent) span.innerHTML = AQ.renderMarkup(span.textContent);
   });
+  document.querySelectorAll('.human-editor').forEach(function (div) {
+    div.innerHTML = AQ.renderMarkup(div.textContent);
+  });
+
+  // Formatting toolbar — bold / italic / underline
+  function _bindFormatButton(selector, tagName) {
+    document.querySelectorAll(selector).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var editor = document.getElementById('heditor-' + btn.dataset.segmentId);
+        if (editor) _wrapSelection(editor, tagName);
+      });
+    });
+  }
+  _bindFormatButton('.btn-fmt-bold', 'b');
+  _bindFormatButton('.btn-fmt-italic', 'i');
+  _bindFormatButton('.btn-fmt-underline', 'u');
 
   // Cancel — close panel and restore displayed text
   document.querySelectorAll('.btn-rev-cancel').forEach(function (btn) {
@@ -162,8 +215,8 @@
   document.querySelectorAll('.btn-rev-accept').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var segId  = btn.dataset.segmentId;
-      var ta     = document.getElementById('htextarea-' + segId);
-      var text   = ta ? ta.value.trim() : '';
+      var editor = document.getElementById('heditor-' + segId);
+      var text   = editor ? AQ.markupToMarkdown(editor).trim() : '';
       var action = text ? 'save' : 'accept';
       var extra  = text ? { text: text } : {};
       btn.disabled = true; btn.textContent = 'Saving…';
@@ -197,8 +250,8 @@
             var mt    = mtEl ? mtEl.textContent.trim() : '';
             var machineText = (mt && mt !== '— no machine translation —') ? mt : '';
             _updateDisplayText(segId, machineText);
-            var ta = document.getElementById('htextarea-' + segId);
-            if (ta) { ta.value = machineText; _autoResize(ta); }
+            var editor = document.getElementById('heditor-' + segId);
+            if (editor) editor.innerHTML = AQ.renderMarkup(machineText);
             _updateNoteDisplay(segId, '');
             _updateHumanBadge(segId, false);
             var nta = document.getElementById('ntextarea-' + segId);

@@ -50,8 +50,13 @@
     </div>
 
     <div class="tab-pane" id="rpane-human-{{ seg.segment_id }}">
-      <textarea class="human-textarea" id="htextarea-{{ seg.segment_id }}"
-                >{{ slovak_display or '' }}</textarea>
+      <div class="format-toolbar">
+        <button type="button" class="btn-fmt-bold"      data-segment-id="{{ seg.segment_id }}" title="Bold"><b>B</b></button>
+        <button type="button" class="btn-fmt-italic"    data-segment-id="{{ seg.segment_id }}" title="Italic"><i>I</i></button>
+        <button type="button" class="btn-fmt-underline" data-segment-id="{{ seg.segment_id }}" title="Underline"><u>U</u></button>
+      </div>
+      <div class="human-editor" contenteditable="true"
+           id="heditor-{{ seg.segment_id }}">{{ slovak_display or '' }}</div>
       <div class="review-actions">
         <button class="btn-rev-accept"  data-segment-id="{{ seg.segment_id }}">Accept</button>
         <button class="btn-rev-cancel"  data-segment-id="{{ seg.segment_id }}">Cancel</button>

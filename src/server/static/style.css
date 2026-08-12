@@ -794,19 +794,42 @@ a.badge:hover {
   align-self: center;
 }
 
-.human-textarea {
+.human-editor {
   display: block;
   width: 100%;
   box-sizing: border-box;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 0.95rem;
   padding: 0.4rem 0.5rem;
+  background: #fff;
   border: 1px solid #8a6040;
   border-radius: 3px;
   resize: vertical;
   overflow-y: auto;
   line-height: 1.6;
   min-height: 3em;
+  white-space: pre-wrap;
+}
+
+.format-toolbar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 0.3rem;
+}
+
+.format-toolbar button {
+  padding: 2px 9px;
+  font-size: 0.8rem;
+  font-family: sans-serif;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #f5f5f5;
+  color: #333;
+  cursor: pointer;
+}
+
+.format-toolbar button:hover {
+  background: #e8e8e8;
 }
 
 .review-actions {
